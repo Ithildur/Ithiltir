@@ -8,6 +8,10 @@ Docs: [Online documentation](https://www.ithiltir.dev/) · [Architecture](docs/a
 
 Node repository: [Ithildur/Ithiltir-node](https://github.com/Ithildur/Ithiltir-node)
 
+## Screenshot
+
+![Ithiltir Control dashboard](screenshot/en.jpg)
+
 ## Scope
 
 - Live node dashboard, online-rate data, and metrics history

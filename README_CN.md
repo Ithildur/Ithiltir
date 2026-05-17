@@ -6,6 +6,10 @@ English: [README.md](README.md)
 
 文档：[架构](docs/architecture_CN.md) · [API](docs/api_CN.md)
 
+## 界面预览
+
+![Ithiltir Control 看板](screenshot/zh.jpg)
+
 ## 功能范围
 
 - 实时节点看板、在线率和历史指标
