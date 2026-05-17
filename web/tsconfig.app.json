@@ -1,0 +1,30 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "useDefineForClassFields": true,
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "skipLibCheck": true,
+    "moduleResolution": "Bundler",
+    "allowImportingTsExtensions": false,
+    "isolatedModules": true,
+    "esModuleInterop": true,
+    "jsx": "react-jsx",
+    "strict": true,
+    "types": ["vite/client"],
+    "paths": {
+      "@components/*": ["./src/components/*"],
+      "@pages/*": ["./src/pages/*"],
+      "@lib/*": ["./src/lib/*"],
+      "@hooks/*": ["./src/hooks/*"],
+      "@context/*": ["./src/context/*"],
+      "@app-types/*": ["./src/types/*"],
+      "@utils/*": ["./src/utils/*"],
+      "@theme/*": ["./src/theme/*"],
+      "@config/*": ["./src/config/*"],
+      "@i18n": ["./src/i18n"],
+      "@i18n/*": ["./src/i18n/*"]
+    }
+  },
+  "include": ["src"]
+}

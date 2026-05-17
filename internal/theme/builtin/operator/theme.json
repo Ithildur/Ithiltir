@@ -1,0 +1,17 @@
+{
+  "id": "operator",
+  "name": "Operator",
+  "version": "1.0.0",
+  "author": "Ithiltir",
+  "description": "Compact operator skin with a flat top rail and status-strip dashboard.",
+  "skin": {
+    "admin": {
+      "shell": "topbar",
+      "frame": "flat"
+    },
+    "dashboard": {
+      "summary": "strip",
+      "density": "compact"
+    }
+  }
+}

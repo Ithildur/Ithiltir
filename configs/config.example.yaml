@@ -1,0 +1,40 @@
+app:
+  name: "server-monitor"
+  env: "dev"
+  dash_ip: "__APP_DASH_IP__"
+  listen: "__APP_LISTEN__"
+  grpc_port: ":9090"
+  public_url: "__APP_PUBLIC_URL__" # Root URL only. Path prefixes such as /dash are not supported.
+  timezone: "Asia/Shanghai"
+  language: "__APP_LANGUAGE__"
+  log_level: "info" # Log level: debug/info/warn/error. HTTP access logs are emitted only in debug mode or with --debug.
+  log_format: "text" # Log format: text (human-readable) or json (structured). This only changes output formatting.
+  node_offline_threshold: "__APP_NODE_OFFLINE_THRESHOLD__"
+http:
+  trusted_proxies: __HTTP_TRUSTED_PROXIES__ # Use an empty array to trust only RemoteAddr. For a local reverse proxy, common values are ["127.0.0.1/32", "::1/128"].
+database:
+  driver: "postgres"
+  host: "127.0.0.1"
+  port: 5432
+  user: "__DB_USER__"
+  password: "__DB_PASS__"
+  name: "__DB_NAME__"
+  sslmode: "disable"
+  max_open_conns: 50
+  max_idle_conns: 10
+  conn_max_lifetime: "1h"
+  # retention_days omitted means default 45 days.
+  # traffic_retention_days is independent; omitted means max(retention_days, 45).
+  __DB_RETENTION_DAYS_LINE__
+redis:
+  addr: "__REDIS_ADDR__"
+  username: ""
+  password: ""
+  db: 0
+  pool_size: 50
+  min_idle_conns: 10
+  dial_timeout: "5s"
+  read_timeout: "1s"
+  write_timeout: "1s"
+auth:
+  jwt_signing_key: "__JWT_SIGNING_KEY__"

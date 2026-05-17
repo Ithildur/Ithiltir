@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/brandlogo.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#f8fafc" />
+    <link id="active-theme-css" rel="stylesheet" href="/theme/active.css" />
+    <title>Ithiltir Monitor Dashboard</title>
+    <script>
+      (function () {
+        try {
+          // Prevent theme flicker by applying theme before React loads.
+          // Single source of truth: ThemeToggle reads/uses window.__theme too.
+          if (window.__themeInitialized) return;
+          window.__themeInitialized = true;
+
+          var THEME_COOKIE_KEY = 'theme';
+          var VALID = { light: true, dark: true, system: true };
+          var root = document.documentElement;
+          var LIGHT_THEME_COLOR = '#f8fafc';
+          var DARK_THEME_COLOR = '#0d1117';
+          var media = window.matchMedia('(prefers-color-scheme: dark)');
+
+          function setThemeColor(isDark) {
+            var meta = document.querySelector('meta[name="theme-color"]');
+            if (!meta) {
+              meta = document.createElement('meta');
+              meta.setAttribute('name', 'theme-color');
+              document.head.appendChild(meta);
+            }
+            meta.setAttribute('content', isDark ? DARK_THEME_COLOR : LIGHT_THEME_COLOR);
+          }
+
+          function getCookieTheme() {
+            var match = document.cookie.match(/(?:^|; )theme=([^;]+)/);
+            var value = match ? decodeURIComponent(match[1]) : 'system';
+            return VALID[value] ? value : 'system';
+          }
+
+          function setCookieTheme(theme) {
+            var oneYear = 60 * 60 * 24 * 365;
+            document.cookie =
+              THEME_COOKIE_KEY +
+              '=' +
+              encodeURIComponent(theme) +
+              '; Max-Age=' +
+              oneYear +
+              '; Path=/; SameSite=Lax';
+          }
+
+          function applyThemeToDom(mode) {
+            var isDark = mode === 'dark' || (mode === 'system' && media.matches);
+            if (isDark) root.classList.add('dark');
+            else root.classList.remove('dark');
+            root.style.colorScheme = isDark ? 'dark' : 'light';
+            setThemeColor(isDark);
+          }
+
+          function onSystemThemeChange(handler) {
+            if (!media || !media.addEventListener) return function () {};
+            media.addEventListener('change', handler);
+            return function () {
+              media.removeEventListener('change', handler);
+            };
+          }
+
+          function loadActiveThemeManifest() {
+            if (!window.fetch) return Promise.resolve(null);
+            return window
+              .fetch('/theme/active.json', {
+                cache: 'no-store',
+                credentials: 'same-origin',
+              })
+              .then(function (response) {
+                if (!response.ok) return null;
+                return response.json();
+              })
+              .catch(function () {
+                return null;
+              });
+          }
+
+          window.__theme = {
+            get: getCookieTheme,
+            set: setCookieTheme,
+            apply: applyThemeToDom,
+            onSystemChange: onSystemThemeChange,
+          };
+
+          var themePackage = {
+            manifest: null,
+            manifestPromise: loadActiveThemeManifest().then(function (manifest) {
+              themePackage.manifest = manifest;
+              return manifest;
+            }),
+            refresh: function () {
+              var link = document.getElementById('active-theme-css');
+              if (!link) return;
+              var next = '/theme/active.css?v=' + Date.now();
+              link.setAttribute('href', next);
+            },
+          };
+          window.__themePackage = themePackage;
+
+          applyThemeToDom(getCookieTheme());
+        } catch (e) {
+          // Silent fail
+        }
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

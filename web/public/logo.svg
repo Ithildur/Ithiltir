@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Ithiltir favicon (brand gradient, moon prominent)">
+  <defs>
+    <mask id="cresMask">
+      <rect width="64" height="64" fill="black"/>
+      <circle cx="46.5" cy="18.5" r="9.4" fill="white"/>
+      <circle cx="50.8" cy="15.0" r="9.4" fill="black"/>
+    </mask>
+  </defs>
+
+  <rect x="3" y="3" width="58" height="58" rx="14" fill="#15365A"/>
+  <rect x="3" y="3" width="58" height="58" rx="14" fill="none" stroke="#7F9DBA" stroke-opacity="0.22" stroke-width="2"/>
+
+  <ellipse cx="32" cy="32" rx="22" ry="14" fill="none" stroke="#D4E9F6" stroke-opacity="0.90" stroke-width="5"/>
+  <ellipse cx="32" cy="32" rx="18" ry="11.5" fill="none" stroke="#89AFC8" stroke-opacity="0.62" stroke-width="4"/>
+
+  <circle cx="28" cy="38" r="7" fill="none" stroke="#4B91C2" stroke-opacity="0.76" stroke-width="5"/>
+  <circle cx="28" cy="38" r="2.2" fill="#DDEFFF"/>
+
+  <g mask="url(#cresMask)">
+    <circle cx="46.5" cy="18.5" r="9.4" fill="#DCEBFA"/>
+  </g>
+
+  <circle cx="16.5" cy="20" r="2.0" fill="#91A8C6" fill-opacity="0.42"/>
+</svg>

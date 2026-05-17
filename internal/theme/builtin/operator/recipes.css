@@ -1,0 +1,68 @@
+:root[data-theme='operator'] {
+  --primitive-btn-ring-offset: var(--theme-bg-default);
+  --primitive-btn-focus-ring: var(--theme-fg-accent);
+  --primitive-btn-icon-size: 2.125rem;
+  --primitive-btn-icon-radius: 0.75rem;
+  --primitive-btn-icon-border: var(--theme-border-default);
+  --primitive-btn-icon-bg: rgb(244 247 239 / 0.92);
+  --primitive-btn-icon-shadow: none;
+  --primitive-btn-icon-fg: var(--theme-fg-default);
+  --primitive-btn-icon-hover-border: color-mix(in srgb, var(--theme-fg-accent) 38%, white);
+  --primitive-btn-icon-hover-bg: #ffffff;
+  --primitive-btn-icon-hover-fg: var(--theme-fg-accent);
+  --primitive-btn-icon-danger-fg: #b04f31;
+  --primitive-btn-icon-danger-hover-border: #d08a70;
+  --primitive-btn-icon-danger-hover-bg: #fff1ea;
+
+  --primitive-icon-ghost-size: 1.875rem;
+  --primitive-icon-ghost-radius: 0.5rem;
+  --primitive-icon-ghost-border: transparent;
+  --primitive-icon-ghost-bg: transparent;
+  --primitive-icon-ghost-fg: var(--theme-fg-muted);
+  --primitive-icon-ghost-hover-border: var(--theme-border-default);
+  --primitive-icon-ghost-hover-bg: #e7eee1;
+  --primitive-icon-ghost-hover-fg: var(--theme-fg-default);
+
+  --primitive-menu-pop-width: 19rem;
+  --primitive-menu-pop-radius: 0.5rem;
+  --primitive-menu-pop-border: var(--theme-border-default);
+  --primitive-menu-pop-bg: var(--theme-bg-default);
+  --primitive-menu-pop-shadow: 0 14px 32px -18px rgb(17 32 24 / 0.28);
+
+  --primitive-menu-head-min-height: 2.75rem;
+  --primitive-menu-head-padding-y: 0.5rem;
+  --primitive-menu-head-padding-x: 0.875rem;
+  --primitive-menu-item-min-height: 1.875rem;
+  --primitive-menu-item-radius: 0.375rem;
+  --primitive-menu-item-padding-y: 0.3125rem;
+  --primitive-menu-item-padding-x: 0.5rem;
+  --primitive-menu-item-fg: var(--theme-fg-default);
+  --primitive-menu-item-hover-bg: #e7eee1;
+}
+
+:root.dark[data-theme='operator'] {
+  --primitive-btn-ring-offset: var(--theme-bg-default);
+  --primitive-btn-focus-ring: var(--theme-fg-accent);
+  --primitive-btn-icon-border: var(--theme-border-default);
+  --primitive-btn-icon-bg: rgb(9 12 10 / 0.9);
+  --primitive-btn-icon-shadow: none;
+  --primitive-btn-icon-fg: var(--theme-fg-default);
+  --primitive-btn-icon-hover-border: rgb(129 208 111 / 0.45);
+  --primitive-btn-icon-hover-bg: rgb(17 22 19 / 0.98);
+  --primitive-btn-icon-hover-fg: var(--theme-fg-accent);
+  --primitive-btn-icon-danger-fg: #e3a08d;
+  --primitive-btn-icon-danger-hover-border: rgb(227 160 141 / 0.42);
+  --primitive-btn-icon-danger-hover-bg: rgb(176 79 49 / 0.14);
+
+  --primitive-icon-ghost-fg: var(--theme-fg-muted);
+  --primitive-icon-ghost-hover-border: var(--theme-border-default);
+  --primitive-icon-ghost-hover-bg: var(--theme-canvas-subtle);
+  --primitive-icon-ghost-hover-fg: var(--theme-fg-default);
+
+  --primitive-menu-pop-border: var(--theme-border-default);
+  --primitive-menu-pop-bg: var(--theme-bg-default);
+  --primitive-menu-pop-shadow: 0 18px 36px -18px rgb(0 0 0 / 0.58);
+
+  --primitive-menu-item-fg: var(--theme-fg-default);
+  --primitive-menu-item-hover-bg: var(--theme-canvas-subtle);
+}

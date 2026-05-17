@@ -1,0 +1,126 @@
+@import 'tailwindcss';
+@import './theme/index.css' layer(theme-fallback);
+@import './styles/primitives.css';
+
+/* Tailwind v4: 定义 dark 模式的自定义变体 */
+@custom-variant dark (&:where(.dark, .dark *));
+
+:root {
+  font-family: var(
+    --skin-font-sans,
+    'Space Grotesk',
+    system-ui,
+    -apple-system,
+    BlinkMacSystemFont,
+    'Segoe UI',
+    sans-serif
+  );
+
+  /* color-scheme 由 JavaScript 动态设置，不在这里固定 */
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  color: var(--theme-fg-default);
+}
+
+a {
+  text-decoration: none;
+}
+
+.custom-scrollbar::-webkit-scrollbar {
+  height: 6px;
+  width: 6px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: var(--theme-scrollbar-track);
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: var(--theme-border-default);
+  border-radius: 3px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: var(--theme-border-default);
+}
+
+@keyframes fade-in-up {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes slide-in-left {
+  from {
+    opacity: 0;
+    transform: translateX(-20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes slide-in-top {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-in {
+  animation-duration: 0.35s;
+  animation-fill-mode: both;
+  animation-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.animate-in.fade-in {
+  animation-name: fade-in-up;
+}
+
+.animate-in.slide-in-from-left-5 {
+  animation-name: slide-in-left;
+}
+
+.animate-in.slide-in-from-top-2 {
+  animation-name: slide-in-top;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-in {
+    animation: none !important;
+  }
+
+  .menu-pop-anim {
+    animation: none !important;
+  }
+}
+
+.perspective-1000 {
+  perspective: 1000px;
+}
+
+.transform-style-3d {
+  transform-style: preserve-3d;
+}
+
+.backface-hidden {
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+}
+
+.rotate-y-180 {
+  transform: rotateY(180deg);
+}

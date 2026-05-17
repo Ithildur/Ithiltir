@@ -1,0 +1,62 @@
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - master
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: |
+            go.sum
+            tools/go.sum
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: web/.bun-version
+
+      - name: Install Frontend Dependencies
+        run: cd web && bun install --frozen-lockfile
+
+      - name: Go Test
+        run: go test ./...
+
+      - name: Frontend Lint
+        run: cd web && bun run lint
+
+      - name: Frontend Typecheck
+        run: cd web && bun run typecheck
+
+      - name: Package
+        env:
+          ITHILTIR_NODE_VERSION: ${{ vars.ITHILTIR_NODE_VERSION }}
+        shell: bash
+        run: |
+          node_args=()
+          if [[ -n "${ITHILTIR_NODE_VERSION:-}" ]]; then
+            node_args=(--node-version "$ITHILTIR_NODE_VERSION")
+          fi
+          bash scripts/package.sh --version 0.0.0-ci.1 "${node_args[@]}" -o release -t linux/amd64 --tar-gz
+
+      - name: Upload Package Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Ithiltir-package-ci
+          path: release/*.tar.gz
+          if-no-files-found: error

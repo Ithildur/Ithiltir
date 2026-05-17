@@ -1,0 +1,44 @@
+# Go
+bin/
+coverage/
+*.out
+
+# Release / build artifacts
+build/
+release/
+dist/
+web/dist/
+deploy/node/**/node_*
+deploy/node/**/*.exe
+deploy/node/**/Ithiltir-node-*
+deploy/node/Ithiltir-node-*
+!deploy/node/README.md
+
+# Frontend dependencies and caches
+web/node_modules/
+web/.eslintcache
+web/.vite/
+web/.vite-temp/
+web/.cache/
+web/coverage/
+web/*.tsbuildinfo
+
+# Local config / env
+config.local.yaml
+.env
+.env.*
+web/.env
+web/.env.*
+!web/.env.example
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+.codex
+.github/prompts/
+AGENTS.*
+TODO.md
+TODO/
+.agents/
