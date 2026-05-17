@@ -1,12 +1,8 @@
-# Ithiltir Dash
+# Ithiltir Dash [![release](https://img.shields.io/github/v/release/Ithildur/Ithiltir?label=release)](https://github.com/Ithildur/Ithiltir/releases) [![downloads](https://img.shields.io/github/downloads/Ithildur/Ithiltir/total?label=downloads)](https://github.com/Ithildur/Ithiltir/releases) [![license](https://img.shields.io/github/license/Ithildur/Ithiltir)](LICENSE)
 
 Ithiltir Dash is a single-instance, self-hosted server monitoring dashboard. One Dash process serves the web UI, HTTP API, theme assets, install scripts, and node binary download paths.
 
-Chinese: [README_CN.md](README_CN.md)
-
-Docs: [Online documentation](https://www.ithiltir.dev/) · [Architecture](docs/architecture.md) · [API](docs/api.md)
-
-Node repository: [Ithildur/Ithiltir-node](https://github.com/Ithildur/Ithiltir-node)
+**Resources:** [中文](README_CN.md) · [Documentation](https://www.ithiltir.dev/) · [Architecture](docs/architecture.md) · [API](docs/api.md) · [Node agent](https://github.com/Ithildur/Ithiltir-node)
 
 ## Screenshot
 

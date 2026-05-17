@@ -1,10 +1,8 @@
-# Ithiltir Dash
+# Ithiltir Dash [![release](https://img.shields.io/github/v/release/Ithildur/Ithiltir?label=release)](https://github.com/Ithildur/Ithiltir/releases) [![downloads](https://img.shields.io/github/downloads/Ithildur/Ithiltir/total?label=downloads)](https://github.com/Ithildur/Ithiltir/releases) [![license](https://img.shields.io/github/license/Ithildur/Ithiltir)](LICENSE)
 
 Ithiltir Dash 是单实例、自托管的服务器监控面板。一个 Dash 进程同时提供 Web UI、HTTP API、主题资源、安装脚本和节点二进制分发入口。
 
-English: [README.md](README.md)
-
-文档：[架构](docs/architecture_CN.md) · [API](docs/api_CN.md)
+**资源：** [English](README.md) · [在线文档](https://www.ithiltir.dev/) · [架构](docs/architecture_CN.md) · [API](docs/api_CN.md) · [节点端](https://github.com/Ithildur/Ithiltir-node)
 
 ## 界面预览
 
