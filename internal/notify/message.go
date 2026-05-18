@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"dash/internal/lang"
 )
 
 type Message struct {
@@ -25,8 +27,14 @@ func (m Message) Text() string {
 	}
 }
 
-func DefaultTestMessage() Message {
+func DefaultTestMessage(language string) Message {
 	now := time.Now().UTC().Format(time.RFC3339)
+	if lang.Normalize(language) == lang.English {
+		return Message{
+			Title: "Notification test",
+			Body:  "This is a test alert from Ithiltir. Sent at: " + now,
+		}
+	}
 	return Message{
 		Title: "通知测试",
 		Body:  "这是一条测试消息，发送时间: " + now,

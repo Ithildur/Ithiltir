@@ -1,13 +1,14 @@
 package alert
 
 import (
-	"strings"
 	"time"
+
+	"dash/internal/lang"
 )
 
 const (
-	messageLanguageZH = "zh"
-	messageLanguageEN = "en"
+	messageLanguageZH = lang.Chinese
+	messageLanguageEN = lang.English
 )
 
 type MessageConfig struct {
@@ -54,26 +55,15 @@ func messageConfig(configs []MessageConfig) MessageConfig {
 	if len(configs) > 0 {
 		cfg = configs[0]
 	}
-	cfg.Language = normalizeMessageLanguage(cfg.Language)
+	cfg.Language = lang.Normalize(cfg.Language)
 	if cfg.Location == nil {
 		cfg.Location = time.Local
 	}
 	return cfg
 }
 
-func normalizeMessageLanguage(raw string) string {
-	switch strings.ToLower(strings.TrimSpace(raw)) {
-	case messageLanguageEN, "english":
-		return messageLanguageEN
-	case messageLanguageZH, "cn", "chinese", "zh-cn", "zh_hans":
-		return messageLanguageZH
-	default:
-		return messageLanguageZH
-	}
-}
-
-func textsFor(language string) messageText {
-	if text, ok := messageTexts[normalizeMessageLanguage(language)]; ok {
+func textsFor(raw string) messageText {
+	if text, ok := messageTexts[lang.Normalize(raw)]; ok {
 		return text
 	}
 	return messageTexts[messageLanguageZH]

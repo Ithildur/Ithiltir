@@ -57,13 +57,13 @@ Bearer 可选端点会把缺失、格式错误、过期、已撤销或其他无�
 ## 管理节点
 
 - `GET /api/admin/nodes/` 包含 `traffic_p95_enabled`、`traffic_cycle_mode`、`traffic_billing_start_day`、`traffic_billing_anchor_date`、`traffic_billing_timezone`、`tags` 和 `version`。`tags` 始终是字符串数组。
-- `version.version` 是 Agent 最后上报版本；缺失、非法或低于打包节点版本时，`version.is_outdated` 为 true。
+- `version.version` 是 Agent 最后上报版本；缺失、非法或低于受支持节点版本下限时，`version.is_outdated` 为 true。上报的 Agent 版本支持自动更新协议时，`version.supports_auto_update` 为 true；平台支持和打包更新资产是否可用会在请求升级时继续校验。
 - `PATCH /api/admin/nodes/{id}` 接受 `traffic_p95_enabled`、`tags` 和节点账期覆盖字段。未提交字段保持不变。`tags` 接受字符串数组；值会 trim，空值和重复值会被删除，`[]` 表示清空标签。`traffic_cycle_mode` 允许 `default`、`calendar_month`、`whmcs_compatible`、`clamp_to_month_end`。
 - `PATCH /api/admin/nodes/traffic-p95` 接受 `ids` 和 `enabled`。`enabled` 必填。`ids` 必须是非空正整数数组，不能重复，最多 10000 项。该命令先校验所有节点 ID，再在一个事务中更新全部选中节点。成功返回 `204`；任一节点不存在或已删除时返回 `404 not_found`，且不会更新任何节点。
 - 非法 `tags` 返回 `400 invalid_tags`。
 - 节点账期规范化语义稳定：`default` 继承全局账期并清空节点账期字段；`calendar_month` 保存 `traffic_billing_start_day=1`；非 `whmcs_compatible` 模式保存空 `traffic_billing_anchor_date`；非默认模式下空 `traffic_billing_timezone` 在读取时使用应用时区。
 - 非法节点账期字段返回 `400 invalid_traffic_cycle_mode`、`invalid_traffic_billing_start_day`、`invalid_traffic_billing_anchor_date` 或 `invalid_traffic_billing_timezone`。
-- `POST /api/admin/nodes/{id}/upgrade` 成功返回 `204`；打包版本、平台或资产不可用时返回 `409`。
+- `POST /api/admin/nodes/{id}/upgrade` 成功返回 `204`；节点无法接收自动下发更新时返回 `409 node_upgrade_unsupported`；打包版本、平台或资产不可用时返回 `409`。
 
 ## Agent 更新
 

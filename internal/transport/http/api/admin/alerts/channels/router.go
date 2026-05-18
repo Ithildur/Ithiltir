@@ -8,12 +8,13 @@ import (
 )
 
 type handler struct {
-	store *alertstore.Store
+	store    *alertstore.Store
+	language string
 }
 
 // Router returns admin/alerts/channels routes.
-func Router(st *alertstore.Store, login *mtlogin.Store) *routes.Blueprint {
-	h := &handler{store: st}
+func Router(st *alertstore.Store, login *mtlogin.Store, language string) *routes.Blueprint {
+	h := &handler{store: st, language: language}
 
 	r := routes.NewBlueprint(
 		routes.DefaultTags("admin", "alerts"),

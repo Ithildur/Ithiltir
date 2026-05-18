@@ -10,8 +10,9 @@ import (
 
 const (
 	// Allowed node version range (inclusive lower bound, exclusive upper bound).
-	nodeMin = "0.0.0-0"
-	nodeMax = ""
+	nodeMin           = "0.0.0-0"
+	nodeMax           = ""
+	NodeSelfUpdateMin = "0.2.1"
 )
 
 const FormatNote = "version format: MAJOR.MINOR.PATCH[-PRERELEASE][+BUILD] (strict SemVer without a v prefix; numeric identifiers must not contain leading zeroes)"
@@ -68,6 +69,17 @@ func IsNodeOutdated(version string) (bool, error) {
 		return false, err
 	}
 	return cmp < 0, nil
+}
+
+func SupportsNodeSelfUpdate(version string) (bool, error) {
+	if err := ValidateNodeVersion(version); err != nil {
+		return false, err
+	}
+	cmp, err := Compare(version, NodeSelfUpdateMin)
+	if err != nil {
+		return false, err
+	}
+	return cmp >= 0, nil
 }
 
 func ChannelFor(version string) (Channel, error) {

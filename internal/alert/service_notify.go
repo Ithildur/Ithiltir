@@ -47,6 +47,10 @@ func (s *Service) notificationParams(ctx context.Context, transition string, mes
 	out := make([]alertstore.AlertNotificationParams, 0, len(targets.Channels))
 	for i := range targets.Channels {
 		channel := targets.Channels[i]
+		payloadMetadata := metadata
+		if channel.Type == model.NotifyTypeEmail {
+			payloadMetadata = emailNotificationMetadata(metadata, s.message.Language)
+		}
 		out = append(out, alertstore.AlertNotificationParams{
 			Transition:  transition,
 			ChannelID:   channel.ID,
@@ -54,11 +58,22 @@ func (s *Service) notificationParams(ctx context.Context, transition string, mes
 			Payload: alertstore.AlertNotificationPayload{
 				Title:    message.Title,
 				Body:     message.Body,
-				Metadata: metadata,
+				Metadata: payloadMetadata,
 			},
 		})
 	}
 	return out, err
+}
+
+func emailNotificationMetadata(metadata map[string]string, language string) map[string]string {
+	out := make(map[string]string, len(metadata)+1)
+	for k, v := range metadata {
+		out[k] = v
+	}
+	if language != "" {
+		out["language"] = language
+	}
+	return out
 }
 
 func (s *Service) runNotificationLoop(ctx context.Context) error {

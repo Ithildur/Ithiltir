@@ -9,8 +9,9 @@ import (
 )
 
 type AgentPlatform struct {
-	OS   string
-	Arch string
+	OS      string
+	Arch    string
+	Version string
 }
 
 type AgentUpdateTarget struct {
@@ -22,12 +23,13 @@ type AgentUpdateTarget struct {
 
 func (s *Store) AgentPlatform(ctx context.Context, id int64) (AgentPlatform, error) {
 	var row struct {
-		OS   *string
-		Arch *string
+		OS      *string
+		Arch    *string
+		Version *string `gorm:"column:agent_version"`
 	}
 	err := s.db.WithContext(ctx).
 		Model(&model.Server{}).
-		Select("os", "arch").
+		Select("os", "arch", "agent_version").
 		Where("id = ? AND is_deleted = ?", id, false).
 		Take(&row).
 		Error
@@ -35,8 +37,9 @@ func (s *Store) AgentPlatform(ctx context.Context, id int64) (AgentPlatform, err
 		return AgentPlatform{}, err
 	}
 	return AgentPlatform{
-		OS:   strings.TrimSpace(deref(row.OS)),
-		Arch: strings.TrimSpace(deref(row.Arch)),
+		OS:      strings.TrimSpace(deref(row.OS)),
+		Arch:    strings.TrimSpace(deref(row.Arch)),
+		Version: strings.TrimSpace(deref(row.Version)),
 	}, nil
 }
 

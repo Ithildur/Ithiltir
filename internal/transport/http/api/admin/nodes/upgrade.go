@@ -17,6 +17,8 @@ import (
 	"gorm.io/gorm"
 )
 
+const nodeUpgradeUnsupportedMessage = "node version must be >= 0.2.1 to use automatic update delivery; update manually"
+
 func upgradeRoute(r *routes.Blueprint, h *handler) {
 	r.Post(
 		"/{id}/upgrade",
@@ -51,6 +53,10 @@ func (h *handler) upgradeHandler(w http.ResponseWriter, r *http.Request) {
 		httperr.Write(w, http.StatusServiceUnavailable, "db_error", "failed to fetch node")
 		return
 	}
+	if !canRequestAgentUpdate(platform.Version) {
+		httperr.Write(w, http.StatusConflict, "node_upgrade_unsupported", nodeUpgradeUnsupportedMessage)
+		return
+	}
 	asset, err := nodeupdate.BundledAsset(h.config, platform.OS, platform.Arch)
 	if err != nil {
 		writeAssetError(w, err)
@@ -72,6 +78,11 @@ func (h *handler) loadAgentPlatform(ctx context.Context, id int64) (nodestore.Ag
 	return infra.WithPGReadTimeout(ctx, func(c context.Context) (nodestore.AgentPlatform, error) {
 		return h.store.AgentPlatform(c, id)
 	})
+}
+
+func canRequestAgentUpdate(current string) bool {
+	ok, err := appversion.SupportsNodeSelfUpdate(current)
+	return err == nil && ok
 }
 
 func writeAssetError(w http.ResponseWriter, err error) {

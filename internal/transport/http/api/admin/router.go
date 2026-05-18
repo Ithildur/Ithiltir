@@ -16,7 +16,7 @@ func Router(st *store.Stores, cfg *config.Config, themes *themefs.Store) *routes
 	r := routes.NewBlueprint()
 	r.Include("/groups", admingroups.Router(st.Node))
 	r.Include("/nodes", adminnodes.Router(st.Node, cfg))
-	r.Include("/alerts", adminalerts.Router(st))
+	r.Include("/alerts", adminalerts.Router(st, cfg.App.EffectiveLanguage()))
 	r.Include("/system", adminsystem.Router(st, themes))
 	return r
 }

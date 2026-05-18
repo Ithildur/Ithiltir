@@ -43,7 +43,11 @@ const nodeRowFromManaged = (node: ManagedNode, groupLookup: Record<number, strin
     groupNames,
     secret: node.secret,
     tags: node.tags,
-    version: node.version || { version: '', is_outdated: false },
+    version: {
+      version: node.version?.version ?? '',
+      is_outdated: node.version?.is_outdated ?? false,
+      supports_auto_update: node.version?.supports_auto_update ?? false,
+    },
     guestVisible: node.is_guest_visible,
     trafficP95Enabled: node.traffic_p95_enabled,
     trafficCycleMode: node.traffic_cycle_mode || 'default',

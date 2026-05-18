@@ -3,22 +3,17 @@ package config
 import (
 	"strings"
 	"time"
+
+	"dash/internal/lang"
 )
 
 const (
-	LanguageEnglish = "en"
-	LanguageChinese = "zh"
+	LanguageEnglish = lang.English
+	LanguageChinese = lang.Chinese
 )
 
 func (c AppConfig) EffectiveLanguage() string {
-	switch strings.ToLower(strings.TrimSpace(c.Language)) {
-	case LanguageEnglish, "english":
-		return LanguageEnglish
-	case LanguageChinese, "cn", "chinese", "zh-cn", "zh_hans":
-		return LanguageChinese
-	default:
-		return LanguageChinese
-	}
+	return lang.Normalize(c.Language)
 }
 
 func (c AppConfig) EffectiveLocation() *time.Location {

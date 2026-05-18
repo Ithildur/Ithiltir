@@ -10,11 +10,11 @@ import (
 )
 
 // Router returns admin/alerts routes.
-func Router(st *store.Stores) *routes.Blueprint {
+func Router(st *store.Stores, language string) *routes.Blueprint {
 	r := routes.NewBlueprint()
 	r.Include("/rules", rules.Router(st.Alert))
 	r.Include("/mounts", mounts.Router(st.Alert, st.Node))
 	r.Include("/settings", settings.Router(st.Alert))
-	r.Include("/channels", channels.Router(st.Alert, st.MTLogin))
+	r.Include("/channels", channels.Router(st.Alert, st.MTLogin, language))
 	return r
 }

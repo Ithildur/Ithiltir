@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 
 	"dash/internal/model"
 )
@@ -29,7 +30,7 @@ func Send(ctx context.Context, channel *model.NotifyChannel, msg Message) error 
 		err = sendMTProto(ctx, typed, msg)
 	case EmailConfig:
 		action = "email"
-		err = sendSMTP(ctx, typed, msg)
+		err = sendSMTP(ctx, typed, messageWithChannelID(channel.ID, msg))
 	case WebhookConfig:
 		action = "webhook"
 		err = sendWebhook(ctx, typed, msg)
@@ -40,4 +41,17 @@ func Send(ctx context.Context, channel *model.NotifyChannel, msg Message) error 
 		return fmt.Errorf("notify send channel=%d type=%s action=%s: %w", channel.ID, channel.Type, action, err)
 	}
 	return nil
+}
+
+func messageWithChannelID(channelID int64, msg Message) Message {
+	if channelID <= 0 {
+		return msg
+	}
+	metadata := make(map[string]string, len(msg.Metadata)+1)
+	for k, v := range msg.Metadata {
+		metadata[k] = v
+	}
+	metadata["channel_id"] = strconv.FormatInt(channelID, 10)
+	msg.Metadata = metadata
+	return msg
 }

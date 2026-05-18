@@ -37,6 +37,7 @@ export interface ManagedNode {
 export interface NodeVersion {
   version: string;
   is_outdated: boolean;
+  supports_auto_update: boolean;
 }
 
 export interface AppVersion {

@@ -127,10 +127,7 @@ export const useTelegramMtprotoLogin = ({
           pushBanner(t('admin_alerts_channels_test_failed'), { tone: 'error' });
         }
       } else {
-        await adminApi.testAlertChannel(id, {
-          title: t('admin_alerts_channels_test_title'),
-          message: t('admin_alerts_channels_test_message'),
-        });
+        await adminApi.testAlertChannel(id);
         pushBanner(t('admin_alerts_channels_test_success'), { tone: 'info' });
       }
     } catch (error) {

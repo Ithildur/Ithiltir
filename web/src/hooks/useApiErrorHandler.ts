@@ -15,6 +15,7 @@ export type ApiErrorFallback =
 const errorKeyByCode: Partial<Record<string, TranslationKey>> = {
   auth_cache_error: 'error_sync_failed_retry',
   guest_visible_cache_error: 'error_sync_failed_retry',
+  node_upgrade_unsupported: 'admin_nodes_auto_update_requires_manual',
   redis_cache_error: 'error_sync_failed_retry',
   redis_error: 'error_state_unavailable_retry',
 };

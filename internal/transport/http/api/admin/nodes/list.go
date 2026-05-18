@@ -15,8 +15,9 @@ import (
 )
 
 type versionView struct {
-	Version    string `json:"version"`
-	IsOutdated bool   `json:"is_outdated"`
+	Version            string `json:"version"`
+	IsOutdated         bool   `json:"is_outdated"`
+	SupportsAutoUpdate bool   `json:"supports_auto_update"`
 }
 
 type nodeView struct {
@@ -127,8 +128,9 @@ func nodeViews(nodes []nodestore.NodeItem) ([]nodeView, error) {
 			DisplayOrder:             n.DisplayOrder,
 			GroupIDs:                 n.GroupIDs,
 			Version: versionView{
-				Version:    version,
-				IsOutdated: isVersionOutdated(version),
+				Version:            version,
+				IsOutdated:         isVersionOutdated(version),
+				SupportsAutoUpdate: supportsAutoUpdate(version),
 			},
 		})
 	}
@@ -145,4 +147,16 @@ func isVersionOutdated(version string) bool {
 		return true
 	}
 	return outdated
+}
+
+func supportsAutoUpdate(version string) bool {
+	v := strings.TrimSpace(version)
+	if v == "" {
+		return false
+	}
+	ok, err := appversion.SupportsNodeSelfUpdate(v)
+	if err != nil {
+		return false
+	}
+	return ok
 }

@@ -57,13 +57,13 @@ Optional bearer endpoints treat a missing, malformed, expired, revoked, or other
 ## Admin Nodes
 
 - `GET /api/admin/nodes/` includes `traffic_p95_enabled`, `traffic_cycle_mode`, `traffic_billing_start_day`, `traffic_billing_anchor_date`, `traffic_billing_timezone`, `tags`, and `version`. `tags` is always a string array.
-- `version.version` is the last reported agent version. `version.is_outdated` is true when it is missing, invalid, or older than the bundled node version.
+- `version.version` is the last reported agent version. `version.is_outdated` is true when it is missing, invalid, or below the supported node version floor. `version.supports_auto_update` is true when the reported agent version supports the automatic update protocol; platform support and bundled update asset availability are still checked when an upgrade is requested.
 - `PATCH /api/admin/nodes/{id}` accepts `traffic_p95_enabled`, `tags`, and node billing cycle override fields. Omitted fields are unchanged. `tags` accepts a string array; values are trimmed, empty values and duplicates are removed, and `[]` clears tags. `traffic_cycle_mode` allows `default`, `calendar_month`, `whmcs_compatible`, and `clamp_to_month_end`.
 - `PATCH /api/admin/nodes/traffic-p95` accepts `ids` and `enabled`. `enabled` is required. `ids` must be a non-empty positive integer array, cannot contain duplicates, and is capped at 10000 entries. The command validates every node ID first, then updates all selected nodes in one transaction. Success returns `204`; missing or deleted nodes return `404 not_found` and no node is updated.
 - Invalid `tags` returns `400 invalid_tags`.
 - Node cycle normalization is stable: `default` inherits the global billing cycle and clears stored node cycle fields; `calendar_month` stores `traffic_billing_start_day=1`; non-`whmcs_compatible` modes store an empty `traffic_billing_anchor_date`; non-default modes with an empty `traffic_billing_timezone` use the application timezone at read time.
 - Invalid node cycle fields return `400 invalid_traffic_cycle_mode`, `invalid_traffic_billing_start_day`, `invalid_traffic_billing_anchor_date`, or `invalid_traffic_billing_timezone`.
-- `POST /api/admin/nodes/{id}/upgrade` returns `204` or `409` when the bundled version, platform, or asset is unavailable.
+- `POST /api/admin/nodes/{id}/upgrade` returns `204`. It returns `409 node_upgrade_unsupported` when the node cannot receive automatic update delivery, or `409` when the bundled version, platform, or asset is unavailable.
 
 ## Agent Updates
 

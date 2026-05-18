@@ -15,6 +15,7 @@ export interface Props {
   node: NodeRow;
   bundledNodeVersion: string;
   canRequestUpgrade: boolean;
+  needsManualUpdate: boolean;
   onOpenSettings: (node: NodeRow) => void;
   onToggleGuestVisible: (node: NodeRow) => void;
   onCopySecret: (secret: string) => void;
@@ -29,6 +30,7 @@ const MobileNodeCard: React.FC<Props> = ({
   node,
   bundledNodeVersion,
   canRequestUpgrade,
+  needsManualUpdate,
   onOpenSettings,
   onToggleGuestVisible,
   onCopySecret,
@@ -135,6 +137,13 @@ const MobileNodeCard: React.FC<Props> = ({
                 >
                   <ArrowUpFromLine size={12} aria-hidden="true" />
                 </button>
+              ) : needsManualUpdate ? (
+                <span
+                  className="text-xs/snug text-(--theme-fg-warning-strong)"
+                  title={t('admin_nodes_auto_update_requires_manual')}
+                >
+                  {t('admin_nodes_auto_update_requires_manual')}
+                </span>
               ) : null}
             </>
           )}

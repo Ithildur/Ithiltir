@@ -78,7 +78,7 @@ func (h *handler) testMessageHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	msg := notify.DefaultTestMessage()
+	msg := notify.DefaultTestMessage(h.language)
 	if title := strings.TrimSpace(in.Title); title != "" {
 		msg.Title = title
 	}

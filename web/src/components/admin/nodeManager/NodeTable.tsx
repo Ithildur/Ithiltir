@@ -15,6 +15,7 @@ import { useI18n } from '@i18n';
 export interface Props {
   nodes: NodeRow[];
   updatableNodeIds: Set<number>;
+  manualUpdateNodeIds: Set<number>;
   bundledNodeVersion: string;
   draggingId: number | null;
   dragOverId: number | null;
@@ -34,6 +35,7 @@ export interface Props {
 const NodeTable: React.FC<Props> = ({
   nodes,
   updatableNodeIds,
+  manualUpdateNodeIds,
   bundledNodeVersion,
   draggingId,
   dragOverId,
@@ -89,7 +91,7 @@ const NodeTable: React.FC<Props> = ({
           <th className="px-3 py-2.5 w-14">{t('admin_nodes_column_secret')}</th>
           <th className="px-3 py-2.5 w-56">{t('admin_nodes_column_tags')}</th>
           <th className="px-3 py-2.5 w-36">{t('admin_nodes_column_deploy')}</th>
-          <th className="px-3 py-2.5 w-24">{t('admin_nodes_column_version')}</th>
+          <th className="px-3 py-2.5 w-52">{t('admin_nodes_column_version')}</th>
           <th className="px-3 py-2.5 text-right w-16"></th>
         </tr>
       </thead>
@@ -267,6 +269,18 @@ const NodeTable: React.FC<Props> = ({
                   >
                     <ArrowUpFromLine size={10} aria-hidden="true" />
                   </button>
+                </div>
+              ) : manualUpdateNodeIds.has(node.id) ? (
+                <div className="flex max-w-52 flex-col gap-0.5">
+                  <span className="font-mono text-xs">
+                    {node.version.version || t('common_unknown')}
+                  </span>
+                  <span
+                    className="text-[11px] leading-snug text-(--theme-fg-warning-strong)"
+                    title={t('admin_nodes_auto_update_requires_manual')}
+                  >
+                    {t('admin_nodes_auto_update_requires_manual')}
+                  </span>
                 </div>
               ) : (
                 <span className="font-mono text-xs">

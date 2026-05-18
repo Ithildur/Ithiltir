@@ -73,13 +73,31 @@ const NodeManager: React.FC = () => {
   const [savingCycleNodeIds, setSavingCycleNodeIds] = React.useState<Set<number>>(() => new Set());
   const [selectedP95NodeIds, setSelectedP95NodeIds] = React.useState<Set<number>>(() => new Set());
 
-  const nodeNeedsUpdate = React.useCallback(
+  const nodeHasNewerBundledVersion = React.useCallback(
     (node: NodeRow): boolean => {
-      if (node.version.is_outdated) return true;
       if (!bundledNodeVersion) return false;
       return isVersionOlder(node.version.version, bundledNodeVersion);
     },
     [bundledNodeVersion],
+  );
+  const nodeCanRequestUpgrade = React.useCallback(
+    (node: NodeRow): boolean =>
+      !node.version.is_outdated &&
+      node.version.supports_auto_update &&
+      nodeHasNewerBundledVersion(node),
+    [nodeHasNewerBundledVersion],
+  );
+  const nodeNeedsManualUpdate = React.useCallback(
+    (node: NodeRow): boolean =>
+      !node.version.is_outdated &&
+      !node.version.supports_auto_update &&
+      nodeHasNewerBundledVersion(node),
+    [nodeHasNewerBundledVersion],
+  );
+  const nodeNeedsUpdate = React.useCallback(
+    (node: NodeRow): boolean =>
+      node.version.is_outdated || nodeCanRequestUpgrade(node) || nodeNeedsManualUpdate(node),
+    [nodeCanRequestUpgrade, nodeNeedsManualUpdate],
   );
 
   const selectedGroupSet = React.useMemo(() => new Set(selectedGroupIds), [selectedGroupIds]);
@@ -135,8 +153,11 @@ const NodeManager: React.FC = () => {
   );
 
   const updatableNodeIds = React.useMemo(() => {
-    return new Set(nodes.filter((node) => nodeNeedsUpdate(node)).map((node) => node.id));
-  }, [nodeNeedsUpdate, nodes]);
+    return new Set(nodes.filter((node) => nodeCanRequestUpgrade(node)).map((node) => node.id));
+  }, [nodeCanRequestUpgrade, nodes]);
+  const manualUpdateNodeIds = React.useMemo(() => {
+    return new Set(nodes.filter((node) => nodeNeedsManualUpdate(node)).map((node) => node.id));
+  }, [nodeNeedsManualUpdate, nodes]);
 
   const refreshNodesInBackground = React.useCallback(() => {
     void refreshNodes();
@@ -529,6 +550,7 @@ const NodeManager: React.FC = () => {
           <NodeTable
             nodes={filteredNodes}
             updatableNodeIds={updatableNodeIds}
+            manualUpdateNodeIds={manualUpdateNodeIds}
             bundledNodeVersion={bundledNodeVersion}
             draggingId={draggingId}
             dragOverId={dragOverId}
@@ -600,6 +622,7 @@ const NodeManager: React.FC = () => {
               node={node}
               bundledNodeVersion={bundledNodeVersion}
               canRequestUpgrade={updatableNodeIds.has(node.id)}
+              needsManualUpdate={manualUpdateNodeIds.has(node.id)}
               onOpenSettings={setSettingsNode}
               onToggleGuestVisible={(target) => void toggleGuestVisible(target)}
               onCopySecret={(secret) => void copyToClipboard(secret)}

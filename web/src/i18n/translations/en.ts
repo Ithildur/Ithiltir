@@ -477,6 +477,7 @@ export const en = {
   admin_nodes_column_version: 'Version',
   admin_nodes_version_outdated: 'Unsupported version',
   admin_nodes_version_update_target: 'Update to {{target}}',
+  admin_nodes_auto_update_requires_manual: 'Node version must be >= 0.2.1 to use automatic update delivery. Update manually.',
   admin_nodes_confirm_upgrade: 'Confirm upgrade',
   admin_nodes_filter_groups: 'Groups',
   admin_nodes_filter_version: 'Version',
