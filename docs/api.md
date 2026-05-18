@@ -47,7 +47,7 @@ Optional bearer endpoints treat a missing, malformed, expired, revoked, or other
 ## Anonymous Reads
 
 - `/api/front/brand` is public.
-- `/api/front/metrics` and `/api/front/groups` allow anonymous reads, but anonymous results include only guest-visible nodes.
+- `/api/front/metrics` and `/api/front/groups` allow anonymous reads, but anonymous results include only guest-visible nodes. Anonymous `/api/front/groups` omits groups that have no guest-visible nodes.
 - `/api/metrics/online` allows anonymous reads for guest-visible nodes.
 - `/api/metrics/history` requires bearer by default. If `history_guest_access_mode` is `by_node`, anonymous reads are limited to guest-visible nodes.
 - `/api/statistics/access` is public.

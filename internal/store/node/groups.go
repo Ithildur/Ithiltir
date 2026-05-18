@@ -89,6 +89,9 @@ func (s *Store) GroupNodes(ctx context.Context, guestVisibleOnly bool) ([]GroupN
 	out := make([]GroupNodes, 0, len(groups))
 	for _, g := range groups {
 		nodes := byGroup[g.ID]
+		if guestVisibleOnly && len(nodes) == 0 {
+			continue
+		}
 		if nodes == nil {
 			nodes = make([]int64, 0)
 		}

@@ -47,7 +47,7 @@ Bearer 可选端点会把缺失、格式错误、过期、已撤销或其他无�
 ## 匿名读取
 
 - `/api/front/brand` 可匿名读取。
-- `/api/front/metrics` 和 `/api/front/groups` 允许匿名读取，但匿名结果只包含游客可见节点。
+- `/api/front/metrics` 和 `/api/front/groups` 允许匿名读取，但匿名结果只包含游客可见节点。匿名 `/api/front/groups` 会省略没有游客可见节点的分组。
 - `/api/metrics/online` 允许匿名读取游客可见节点。
 - `/api/metrics/history` 默认需要 Bearer。只有 `history_guest_access_mode` 为 `by_node` 时，匿名读取才按游客可见节点放开。
 - `/api/statistics/access` 可匿名读取。
