@@ -3,7 +3,7 @@ module dash
 go 1.26
 
 require (
-	github.com/Ithildur/EiluneKit v0.1.8
+	github.com/Ithildur/EiluneKit v0.2.0
 	github.com/alicebob/miniredis/v2 v2.35.0
 	github.com/go-chi/chi/v5 v5.2.5
 	github.com/google/uuid v1.6.0

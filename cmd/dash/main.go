@@ -23,6 +23,7 @@ import (
 	authhttp "github.com/Ithildur/EiluneKit/auth/http"
 	authjwt "github.com/Ithildur/EiluneKit/auth/jwt"
 	authstore "github.com/Ithildur/EiluneKit/auth/store"
+	"github.com/Ithildur/EiluneKit/auth/store/redissession"
 	"github.com/redis/go-redis/v9"
 	"golang.org/x/sync/errgroup"
 
@@ -153,7 +154,7 @@ func main() {
 	}
 	var tokenStore authstore.SessionStore
 	if redisClient != nil {
-		tokenStore = authstore.NewRedisStore(redisClient, authstore.RedisOptions{
+		tokenStore = redissession.New(redisClient, redissession.Options{
 			Prefix:       "auth:jwt:",
 			ReadTimeout:  cfg.Redis.ReadTimeoutDur,
 			WriteTimeout: cfg.Redis.WriteTimeoutDur,

@@ -27,7 +27,7 @@ Optional bearer endpoints treat a missing, malformed, expired, revoked, or other
 
 | Prefix                                        | Auth                                                                                                      | Resources                                                                                                                         |
 | --------------------------------------------- | --------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
-| `/api/auth`                                   | admin password for login; refresh cookie + `X-CSRF-Token` for refresh and logout; bearer for `/sessions*` | `POST /login`, `POST /refresh`, `POST /logout`, session revoke                                                                    |
+| `/api/auth`                                   | admin password for login; refresh cookie + `X-CSRF-Token` for refresh and logout; bearer for `/sessions*` | `POST /login`, `POST /refresh`, `POST /logout`, session list and revoke                                                           |
 | `/api/version`                                | none                                                                                                      | `GET /`                                                                                                                           |
 | `/api/front`                                  | optional bearer                                                                                           | `GET /brand`, `GET /metrics`, `GET /groups`                                                                                       |
 | `/api/metrics`                                | optional bearer; metrics history is authenticated by default                                              | `GET /online`, `GET /history`                                                                                                     |
@@ -53,6 +53,11 @@ Optional bearer endpoints treat a missing, malformed, expired, revoked, or other
 - `/api/statistics/access` is public.
 - Anonymous reads under `/api/statistics/traffic/*` are controlled by traffic settings and still respect node guest visibility.
 - `GET /api/front/metrics` node metadata includes `node.tags` as a string array when tags are configured for the node.
+
+## Auth Sessions
+
+- `GET /api/auth/sessions/` returns `{ "sessions": [...] }` for the bearer token user. Each item includes `id`, `expires_at`, `session_only`, and `current`.
+- `DELETE /api/auth/sessions/current`, `DELETE /api/auth/sessions/`, and `DELETE /api/auth/sessions/{sid}` return `204` on success.
 
 ## Admin Nodes
 

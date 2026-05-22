@@ -27,7 +27,7 @@ Bearer 可选端点会把缺失、格式错误、过期、已撤销或其他无�
 
 | 前缀                                          | 鉴权                                                                                   | 资源                                                                                                                              |
 | --------------------------------------------- | -------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
-| `/api/auth`                                   | 登录用管理员密码；刷新和登出用 refresh cookie + `X-CSRF-Token`；`/sessions*` 用 Bearer | `POST /login`、`POST /refresh`、`POST /logout`、会话撤销                                                                          |
+| `/api/auth`                                   | 登录用管理员密码；刷新和登出用 refresh cookie + `X-CSRF-Token`；`/sessions*` 用 Bearer | `POST /login`、`POST /refresh`、`POST /logout`、会话列表和撤销                                                                    |
 | `/api/version`                                | 无                                                                                     | `GET /`                                                                                                                           |
 | `/api/front`                                  | Bearer 可选                                                                            | `GET /brand`、`GET /metrics`、`GET /groups`                                                                                       |
 | `/api/metrics`                                | Bearer 可选；历史指标默认只对已授权用户开放                                            | `GET /online`、`GET /history`                                                                                                     |
@@ -53,6 +53,11 @@ Bearer 可选端点会把缺失、格式错误、过期、已撤销或其他无�
 - `/api/statistics/access` 可匿名读取。
 - `/api/statistics/traffic/*` 的匿名读取由流量设置控制，并仍受节点游客可见性限制。
 - `GET /api/front/metrics` 在节点配置了标签时，会在节点元数据中包含字符串数组 `node.tags`。
+
+## 认证会话
+
+- `GET /api/auth/sessions/` 返回当前 Bearer token 用户的 `{ "sessions": [...] }`。每项包含 `id`、`expires_at`、`session_only` 和 `current`。
+- `DELETE /api/auth/sessions/current`、`DELETE /api/auth/sessions/` 和 `DELETE /api/auth/sessions/{sid}` 成功时返回 `204`。
 
 ## 管理节点
 
