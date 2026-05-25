@@ -456,6 +456,7 @@ export const zh = {
   admin_nodes_column_group: '分组',
   admin_nodes_column_guest_visible: '访客可见',
   admin_nodes_column_traffic_p95: '95 带宽统计',
+  admin_nodes_column_traffic_rebuild: '流量重建',
   admin_nodes_column_cycle_mode: '账期模式',
   admin_nodes_select_visible: '选择当前可见节点',
   admin_nodes_select_node: '选择节点 {{name}}',
@@ -517,6 +518,14 @@ export const zh = {
   admin_node_cycle_settings_inherited_hint: '当前节点使用系统设置里的全局默认账期配置。',
   admin_node_cycle_settings_override_hint:
     '当前节点使用自己的账期配置，流量统计会按这组参数切分账期。',
+  admin_node_traffic_rebuild: '重建',
+  admin_node_traffic_rebuilding: '重建中',
+  admin_node_traffic_rebuild_button: '重建 {{name}} 的流量统计',
+  admin_confirm_rebuild_node_traffic: '重建 {{name}} 的 5 分钟流量样本？',
+  admin_node_traffic_rebuild_started: '流量数据重建已开始。',
+  admin_node_traffic_rebuild_completed: '流量数据重建完成。',
+  admin_node_traffic_rebuild_failed: '重建流量数据失败。',
+  admin_node_traffic_rebuild_status_failed: '无法同步流量重建状态。',
 
   // Admin - group management
   admin_groups_search_placeholder: '搜索分组...',
@@ -719,6 +728,8 @@ export const zh = {
   traffic_p95_not_saved_note: '95 带宽不可用时显示为 -。',
   traffic_current_cycle_stats: '本账期统计',
   traffic_monthly_history: '月度历史',
+  traffic_rebuild_overlay_title: '流量统计正在重建',
+  traffic_rebuild_overlay_detail: '当前数据暂时隐藏。',
   traffic_no_data: '暂无流量统计数据',
   traffic_error: '获取流量统计失败',
   traffic_settings_load_failed: '获取流量设置失败。',

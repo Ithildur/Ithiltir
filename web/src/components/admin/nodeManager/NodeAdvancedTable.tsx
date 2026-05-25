@@ -1,4 +1,6 @@
 import React from 'react';
+import RefreshCw from 'lucide-react/dist/esm/icons/refresh-cw';
+import Button from '@components/ui/Button';
 import Checkbox from '@components/ui/Checkbox';
 import IOSSwitch from '@components/ui/IOSSwitch';
 import type { NodeRow } from '@app-types/admin';
@@ -12,10 +14,13 @@ export interface Props {
   someVisibleSelected: boolean;
   savingNodeIds: Set<number>;
   savingCycleNodeIds: Set<number>;
+  rebuildingTrafficNodeId: number | null;
+  trafficRebuildActive: boolean;
   onToggleVisibleNodes: () => void;
   onToggleNode: (id: number) => void;
   onToggleTrafficP95: (node: NodeRow) => void;
   onOpenCycleSettings: (node: NodeRow) => void;
+  onRebuildTraffic: (node: NodeRow) => void;
 }
 
 const NodeAdvancedTable: React.FC<Props> = ({
@@ -25,10 +30,13 @@ const NodeAdvancedTable: React.FC<Props> = ({
   someVisibleSelected,
   savingNodeIds,
   savingCycleNodeIds,
+  rebuildingTrafficNodeId,
+  trafficRebuildActive,
   onToggleVisibleNodes,
   onToggleNode,
   onToggleTrafficP95,
   onOpenCycleSettings,
+  onRebuildTraffic,
 }) => {
   const { t } = useI18n();
   const cycleLabel = (node: NodeRow) => {
@@ -54,13 +62,14 @@ const NodeAdvancedTable: React.FC<Props> = ({
           <th className="px-3 py-2.5 w-32">{t('admin_nodes_column_ip')}</th>
           <th className="px-3 py-2.5 w-36">{t('admin_nodes_column_cycle_mode')}</th>
           <th className="px-3 py-2.5 w-20">{t('admin_nodes_column_traffic_p95')}</th>
+          <th className="px-3 py-2.5 w-32">{t('admin_nodes_column_traffic_rebuild')}</th>
         </tr>
       </thead>
       <tbody className="divide-y divide-(--theme-border-muted) dark:divide-(--theme-canvas-muted)">
         {nodes.length === 0 ? (
           <tr>
             <td
-              colSpan={5}
+              colSpan={6}
               className="px-4 py-12 text-center text-(--theme-fg-muted) dark:text-(--theme-fg-action-muted)"
             >
               {t('no_data')}
@@ -109,6 +118,19 @@ const NodeAdvancedTable: React.FC<Props> = ({
                     ariaLabel={t('admin_node_traffic_p95_toggle', { name: node.name })}
                     onChange={() => onToggleTrafficP95(node)}
                   />
+                </td>
+                <td className="px-3 py-2 text-xs w-32">
+                  <Button
+                    variant="secondary"
+                    icon={RefreshCw}
+                    disabled={trafficRebuildActive}
+                    onClick={() => onRebuildTraffic(node)}
+                    aria-label={t('admin_node_traffic_rebuild_button', { name: node.name })}
+                  >
+                    {rebuildingTrafficNodeId === node.id
+                      ? t('admin_node_traffic_rebuilding')
+                      : t('admin_node_traffic_rebuild')}
+                  </Button>
                 </td>
               </tr>
             );

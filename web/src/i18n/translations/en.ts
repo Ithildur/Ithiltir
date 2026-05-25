@@ -465,6 +465,7 @@ export const en = {
   admin_nodes_column_group: 'Group',
   admin_nodes_column_guest_visible: 'Guest access',
   admin_nodes_column_traffic_p95: '95th bandwidth',
+  admin_nodes_column_traffic_rebuild: 'Traffic rebuild',
   admin_nodes_column_cycle_mode: 'Billing cycle',
   admin_nodes_select_visible: 'Select visible nodes',
   admin_nodes_select_node: 'Select node {{name}}',
@@ -477,7 +478,8 @@ export const en = {
   admin_nodes_column_version: 'Version',
   admin_nodes_version_outdated: 'Unsupported version',
   admin_nodes_version_update_target: 'Update to {{target}}',
-  admin_nodes_auto_update_requires_manual: 'Node version must be >= 0.2.1 to use automatic update delivery. Update manually.',
+  admin_nodes_auto_update_requires_manual:
+    'Node version must be >= 0.2.1 to use automatic update delivery. Update manually.',
   admin_nodes_confirm_upgrade: 'Confirm upgrade',
   admin_nodes_filter_groups: 'Groups',
   admin_nodes_filter_version: 'Version',
@@ -527,6 +529,14 @@ export const en = {
     'This node uses the global default billing cycle settings from System Settings.',
   admin_node_cycle_settings_override_hint:
     'This node uses its own billing cycle settings for traffic period boundaries.',
+  admin_node_traffic_rebuild: 'Rebuild',
+  admin_node_traffic_rebuilding: 'Rebuilding',
+  admin_node_traffic_rebuild_button: 'Rebuild traffic statistics for {{name}}',
+  admin_confirm_rebuild_node_traffic: 'Rebuild 5-minute traffic samples for {{name}}?',
+  admin_node_traffic_rebuild_started: 'Traffic data rebuild started.',
+  admin_node_traffic_rebuild_completed: 'Traffic data rebuilt.',
+  admin_node_traffic_rebuild_failed: 'Failed to rebuild traffic data.',
+  admin_node_traffic_rebuild_status_failed: 'Failed to sync traffic rebuild status.',
 
   // Admin - group management
   admin_groups_search_placeholder: 'Search groups...',
@@ -730,6 +740,8 @@ export const en = {
   traffic_p95_not_saved_note: '95th bandwidth is shown as - when it is unavailable.',
   traffic_current_cycle_stats: 'Current Cycle Stats',
   traffic_monthly_history: 'Monthly History',
+  traffic_rebuild_overlay_title: 'Traffic statistics are rebuilding',
+  traffic_rebuild_overlay_detail: 'Current data is temporarily hidden.',
   traffic_no_data: 'No traffic statistics yet',
   traffic_error: 'Failed to load traffic statistics',
   traffic_settings_load_failed: 'Failed to load traffic settings.',

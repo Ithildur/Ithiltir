@@ -1,5 +1,6 @@
 import React from 'react';
 import Plus from 'lucide-react/dist/esm/icons/plus';
+import RefreshCw from 'lucide-react/dist/esm/icons/refresh-cw';
 import Search from 'lucide-react/dist/esm/icons/search';
 import Settings2 from 'lucide-react/dist/esm/icons/settings-2';
 import SlidersHorizontal from 'lucide-react/dist/esm/icons/sliders-horizontal';
@@ -33,6 +34,7 @@ import NodeFilterMenu from '@components/admin/nodeManager/NodeFilterMenu';
 import NodeTable from '@components/admin/nodeManager/NodeTable';
 import { useNodes } from '@components/admin/nodeManager/useNodes';
 import { useReorder } from '@components/admin/nodeManager/useReorder';
+import { useTrafficRebuild } from '@components/admin/nodeManager/useTrafficRebuild';
 
 type SubTab = 'basic' | 'advanced';
 
@@ -72,6 +74,14 @@ const NodeManager: React.FC = () => {
   const [savingP95NodeIds, setSavingP95NodeIds] = React.useState<Set<number>>(() => new Set());
   const [savingCycleNodeIds, setSavingCycleNodeIds] = React.useState<Set<number>>(() => new Set());
   const [selectedP95NodeIds, setSelectedP95NodeIds] = React.useState<Set<number>>(() => new Set());
+  const {
+    rebuildingNodeId: rebuildingTrafficNodeId,
+    rebuildActive: trafficRebuildActive,
+    start: startTrafficRebuild,
+  } = useTrafficRebuild({
+    token,
+    sync: activeTab === 'advanced',
+  });
 
   const nodeHasNewerBundledVersion = React.useCallback(
     (node: NodeRow): boolean => {
@@ -428,6 +438,23 @@ const NodeManager: React.FC = () => {
     [apiError, bundledNodeVersion, pushBanner, refreshNodes, requestConfirm, t, token],
   );
 
+  const rebuildTraffic = React.useCallback(
+    async (node: NodeRow) => {
+      if (!token || trafficRebuildActive) return;
+      const ok = await requestConfirm({
+        title: t('common_confirm'),
+        message: t('admin_confirm_rebuild_node_traffic', { name: node.name }),
+        confirmLabel: t('admin_node_traffic_rebuild'),
+        cancelLabel: t('common_cancel'),
+        tone: 'default',
+      });
+      if (ok) {
+        await startTrafficRebuild(node.id);
+      }
+    },
+    [requestConfirm, startTrafficRebuild, t, token, trafficRebuildActive],
+  );
+
   const saveSettings = React.useCallback(
     async (
       nodeId: number,
@@ -576,10 +603,13 @@ const NodeManager: React.FC = () => {
             someVisibleSelected={someVisibleP95Selected}
             savingNodeIds={savingP95NodeIds}
             savingCycleNodeIds={savingCycleNodeIds}
+            rebuildingTrafficNodeId={rebuildingTrafficNodeId}
+            trafficRebuildActive={trafficRebuildActive}
             onToggleVisibleNodes={toggleVisibleP95Nodes}
             onToggleNode={toggleP95NodeSelection}
             onToggleTrafficP95={(node) => void toggleTrafficP95(node)}
             onOpenCycleSettings={setCycleSettingsNode}
+            onRebuildTraffic={(node) => void rebuildTraffic(node)}
           />
           {selectedP95Ids.length > 0 && (
             <div className="flex flex-col gap-2 border-t border-(--theme-border-subtle) bg-(--theme-bg-muted) px-4 py-3 text-xs text-(--theme-fg-muted) sm:flex-row sm:items-center sm:justify-between dark:border-(--theme-border-default) dark:bg-(--theme-canvas-subtle) dark:text-(--theme-fg-muted)">
@@ -672,6 +702,19 @@ const NodeManager: React.FC = () => {
                 >
                   <span className="truncate">{cycleModeLabel(node)}</span>
                 </button>
+              </div>
+              <div className="mt-3 flex justify-end">
+                <Button
+                  variant="secondary"
+                  icon={RefreshCw}
+                  disabled={trafficRebuildActive}
+                  onClick={() => void rebuildTraffic(node)}
+                  aria-label={t('admin_node_traffic_rebuild_button', { name: node.name })}
+                >
+                  {rebuildingTrafficNodeId === node.id
+                    ? t('admin_node_traffic_rebuilding')
+                    : t('admin_node_traffic_rebuild')}
+                </Button>
               </div>
             </Card>
           ))}

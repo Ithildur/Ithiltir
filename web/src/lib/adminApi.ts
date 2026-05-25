@@ -69,6 +69,28 @@ export const requestNodeUpgrade = (id: number) =>
     method: 'POST',
   });
 
+export interface NodeTrafficRebuildStatus {
+  server_id: number;
+  status: 'idle' | 'running' | 'completed' | 'failed';
+  running: boolean;
+  code?: string;
+  started_at?: string;
+  finished_at?: string;
+  error?: string;
+}
+
+export const fetchTrafficRebuild = (signal?: AbortSignal) =>
+  apiFetch<NodeTrafficRebuildStatus>('/admin/nodes/traffic/rebuild', {
+    method: 'GET',
+    signal,
+  });
+
+export const rebuildNodeTraffic = (id: number, signal?: AbortSignal) =>
+  apiFetch<NodeTrafficRebuildStatus>(`/admin/nodes/${id}/traffic/rebuild`, {
+    method: 'POST',
+    signal,
+  });
+
 export const deleteNode = (id: number) =>
   apiFetch<void>(`/admin/nodes/${id}`, {
     method: 'DELETE',

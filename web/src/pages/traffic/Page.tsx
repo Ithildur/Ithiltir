@@ -17,8 +17,10 @@ import Button from '@components/ui/Button';
 import Select from '@components/ui/Select';
 import ThemeToggle from '@components/ui/ThemeToggle';
 import { Tooltip } from '@components/ui/Tooltip';
+import { useAuth } from '@context/AuthContext';
 import { useI18n, type TranslationKey } from '@i18n';
 import { useBootstrapAuth } from '@hooks/useBootstrapAuth';
+import { fetchTrafficRebuild } from '@lib/adminApi';
 import {
   fetchTrafficDaily,
   fetchTrafficIfaces,
@@ -42,6 +44,8 @@ const chartAxisLabelGap = 10;
 const chartAxisLabelCharWidth = 7;
 const trafficCoverageWarningThreshold = 0.995;
 const monthlyHistoryMonths = 12;
+const rebuildActivePollMs = 3000;
+const rebuildIdlePollMs = 5000;
 
 type ChartMode = 'previous_daily' | 'current_daily' | 'monthly';
 
@@ -196,6 +200,103 @@ const HealthChip = ({ label, value }: { label: string; value: string }) => (
     <span className="font-mono text-(--theme-fg-default)">{value}</span>
   </span>
 );
+
+type RebuildWatch = {
+  active: boolean;
+  finishedKey: string | null;
+};
+
+const useNodeTrafficRebuild = (serverID: number, enabled: boolean): RebuildWatch => {
+  const [watch, setWatch] = React.useState<RebuildWatch>({
+    active: false,
+    finishedKey: null,
+  });
+  const activeRef = React.useRef(false);
+  const observedRunningRef = React.useRef(false);
+
+  React.useEffect(() => {
+    if (!enabled || !Number.isFinite(serverID) || serverID <= 0) {
+      activeRef.current = false;
+      observedRunningRef.current = false;
+      setWatch({ active: false, finishedKey: null });
+      return;
+    }
+
+    const controller = new AbortController();
+    let timer: number | undefined;
+
+    const applyWatch = (next: RebuildWatch) => {
+      setWatch((current) =>
+        current.active === next.active && current.finishedKey === next.finishedKey ? current : next,
+      );
+    };
+
+    const refresh = async () => {
+      let delay = activeRef.current ? rebuildActivePollMs : rebuildIdlePollMs;
+      try {
+        const status = await fetchTrafficRebuild(controller.signal);
+        if (controller.signal.aborted) return;
+
+        const wasObserved = observedRunningRef.current;
+        const runningThisNode = status.running && status.server_id === serverID;
+        let finishedKey: string | null = null;
+
+        if (runningThisNode) {
+          observedRunningRef.current = true;
+        } else if (wasObserved) {
+          observedRunningRef.current = false;
+          finishedKey =
+            status.server_id === serverID
+              ? `${status.status}:${status.finished_at ?? ''}`
+              : `replaced:${status.server_id}:${status.started_at ?? ''}`;
+        }
+
+        activeRef.current = runningThisNode;
+        applyWatch({ active: runningThisNode, finishedKey });
+        delay = runningThisNode ? rebuildActivePollMs : rebuildIdlePollMs;
+      } catch (error) {
+        if (isAbortError(error)) return;
+        delay = activeRef.current ? rebuildActivePollMs : rebuildIdlePollMs;
+      } finally {
+        if (!controller.signal.aborted) {
+          timer = window.setTimeout(() => void refresh(), delay);
+        }
+      }
+    };
+
+    void refresh();
+    return () => {
+      controller.abort();
+      if (timer !== undefined) {
+        window.clearTimeout(timer);
+      }
+    };
+  }, [enabled, serverID]);
+
+  return watch;
+};
+
+const TrafficRebuildOverlay = () => {
+  const { t } = useI18n();
+  return (
+    <div
+      className="absolute inset-0 z-20 flex items-start justify-center bg-(--theme-page-bg)/85 px-4 py-12 backdrop-blur-[2px] sm:items-center dark:bg-(--theme-bg-default)/85"
+      aria-live="polite"
+    >
+      <div className="inline-flex max-w-sm items-center gap-3 rounded-md border border-(--theme-border-subtle) bg-(--theme-bg-default) px-4 py-3 shadow-lg dark:border-(--theme-border-default) dark:bg-(--theme-bg-inset)">
+        <RefreshCw className="size-5 animate-spin text-(--theme-fg-accent)" aria-hidden="true" />
+        <div className="min-w-0">
+          <div className="text-sm font-semibold text-(--theme-fg-default)">
+            {t('traffic_rebuild_overlay_title')}
+          </div>
+          <div className="mt-1 text-xs text-(--theme-fg-muted)">
+            {t('traffic_rebuild_overlay_detail')}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
 
 const TrafficTrendChart = ({
   points,
@@ -463,6 +564,7 @@ const TrafficTrendChart = ({
 const Page = () => {
   useBootstrapAuth();
   const { t, lang } = useI18n();
+  const { token } = useAuth();
   const { serverId } = useParams();
   const numericServerId = serverId ? Number(serverId) : Number.NaN;
   const isValidServerId = Number.isFinite(numericServerId) && numericServerId > 0;
@@ -482,6 +584,7 @@ const Page = () => {
   const [loading, setLoading] = React.useState(false);
   const [errorKey, setErrorKey] = React.useState<TranslationKey | null>(null);
   const trafficRequestRef = React.useRef(0);
+  const trafficRebuild = useNodeTrafficRebuild(numericServerId, Boolean(token) && isValidServerId);
 
   React.useEffect(() => {
     if (!isValidServerId) return;
@@ -571,6 +674,13 @@ const Page = () => {
     void loadTraffic(controller.signal);
     return () => controller.abort();
   }, [loadTraffic]);
+
+  React.useEffect(() => {
+    if (!trafficRebuild.finishedKey) return;
+    const controller = new AbortController();
+    void loadTraffic(controller.signal);
+    return () => controller.abort();
+  }, [loadTraffic, trafficRebuild.finishedKey]);
 
   const serverLabel =
     summary?.server_name?.trim() || (isValidServerId ? `#${numericServerId}` : '');
@@ -816,7 +926,7 @@ const Page = () => {
                 variant="secondary"
                 icon={RefreshCw}
                 onClick={() => void loadTraffic()}
-                disabled={loading}
+                disabled={loading || trafficRebuild.active}
               >
                 {t('stats_refresh')}
               </Button>
@@ -828,12 +938,18 @@ const Page = () => {
         {loading && !summary && (
           <div className="text-sm text-(--theme-fg-muted)">{t('stats_loading')}</div>
         )}
-        {!loading && !errorKey && !summary && (
+        {!loading && !errorKey && !summary && !trafficRebuild.active && (
           <div className="text-sm text-(--theme-fg-muted)">{t('traffic_no_data')}</div>
+        )}
+        {!summary && trafficRebuild.active && (
+          <div className="relative min-h-40 overflow-hidden rounded-md border border-(--theme-border-subtle) dark:border-(--theme-border-default)">
+            <TrafficRebuildOverlay />
+          </div>
         )}
 
         {summary && (
-          <>
+          <div className="relative" aria-busy={trafficRebuild.active}>
+            {trafficRebuild.active && <TrafficRebuildOverlay />}
             <section className="divide-y divide-(--theme-border-subtle) border-b border-(--theme-border-subtle) dark:divide-(--theme-border-default) dark:border-(--theme-border-default)">
               <div className="grid gap-x-8 gap-y-3 py-4 sm:grid-cols-2 lg:grid-cols-4">
                 {statItems.map((item, index) => (
@@ -1002,7 +1118,7 @@ const Page = () => {
                 </table>
               </div>
             </section>
-          </>
+          </div>
         )}
       </main>
     </div>
