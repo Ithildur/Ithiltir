@@ -71,6 +71,30 @@ func (s *Store) Nodes(ctx context.Context) ([]NodeItem, error) {
 	return nodes, err
 }
 
+func (s *Store) NodeExists(ctx context.Context, id int64) (bool, error) {
+	if s == nil || s.db == nil {
+		return false, fmt.Errorf("store: db is nil")
+	}
+	if id <= 0 {
+		return false, fmt.Errorf("invalid server id")
+	}
+	var row struct {
+		ID int64 `gorm:"column:id"`
+	}
+	err := s.db.WithContext(ctx).
+		Model(&model.Server{}).
+		Select("id").
+		Where("id = ? AND is_deleted = ?", id, false).
+		Take(&row).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return false, nil
+		}
+		return false, err
+	}
+	return true, nil
+}
+
 func (s *Store) GroupRelations(ctx context.Context, serverIDs []int64) ([]model.ServerGroup, error) {
 	if len(serverIDs) == 0 {
 		return nil, nil

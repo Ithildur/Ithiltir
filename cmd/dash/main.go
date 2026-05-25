@@ -171,7 +171,18 @@ func main() {
 			err,
 			slog.Bool("signing_key_set", cfg.Auth.JWTSigningKey != ""))
 	}
-	deps := httpapi.Dependencies{Stores: st, Auth: jwtAuth, Theme: themeStore}
+	trafficRuntime := trafficservice.NewRuntime(
+		ctx,
+		st.Traffic,
+		cfg.App.EffectiveLocation(),
+		cfg.Database.EffectiveTrafficRetentionDays(),
+	)
+	deps := httpapi.Dependencies{
+		Stores:         st,
+		Auth:           jwtAuth,
+		Theme:          themeStore,
+		TrafficRebuild: trafficRuntime.RebuildRunner(),
+	}
 
 	srv, err := transporthttp.NewHTTPServer(cfg, deps)
 	if err != nil {
@@ -181,14 +192,15 @@ func main() {
 		Language: cfg.App.EffectiveLanguage(),
 		Location: cfg.App.EffectiveLocation(),
 	}))
-	trafficService := trafficservice.NewService(st.Traffic, cfg.App.EffectiveLocation(), cfg.Database.EffectiveTrafficRetentionDays())
 
 	group, groupCtx := errgroup.WithContext(ctx)
 	group.Go(func() error { return srv.Run(groupCtx) })
 	group.Go(func() error { return alertService.Run(groupCtx) })
-	group.Go(func() error { return trafficService.Run(groupCtx) })
+	group.Go(func() error { return trafficRuntime.Run(groupCtx) })
 
-	if err := group.Wait(); err != nil && !errors.Is(err, context.Canceled) {
-		infra.Fatal("runtime failed", err)
+	runErr := group.Wait()
+	trafficRuntime.Stop()
+	if runErr != nil && !errors.Is(runErr, context.Canceled) {
+		infra.Fatal("runtime failed", runErr)
 	}
 }

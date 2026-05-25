@@ -10,6 +10,7 @@ import (
 	"dash/internal/serverid"
 	"dash/internal/store"
 	themefs "dash/internal/theme"
+	trafficjob "dash/internal/traffic"
 	adminapi "dash/internal/transport/http/api/admin"
 	authapi "dash/internal/transport/http/api/auth"
 	frontapi "dash/internal/transport/http/api/front"
@@ -27,9 +28,10 @@ import (
 
 // Dependencies holds shared dependencies for HTTP handlers.
 type Dependencies struct {
-	Stores *store.Stores
-	Auth   *authjwt.Manager
-	Theme  *themefs.Store
+	Stores         *store.Stores
+	Auth           *authjwt.Manager
+	Theme          *themefs.Store
+	TrafficRebuild *trafficjob.RebuildRunner
 }
 
 const (
@@ -63,6 +65,9 @@ func prepareRoutes(cfg *config.Config, deps Dependencies) (routeSetup, error) {
 	if deps.Theme == nil {
 		return routeSetup{}, fmt.Errorf("api: theme store is nil")
 	}
+	if deps.TrafficRebuild == nil {
+		return routeSetup{}, fmt.Errorf("api: traffic rebuild runner is nil")
+	}
 
 	offlineThreshold, staleAfterSec := nodeThresholds(cfg)
 	trustedProxies := append([]netip.Prefix(nil), cfg.HTTP.TrustedProxyPrefixes...)
@@ -93,7 +98,7 @@ func buildRoutes(cfg *config.Config, deps Dependencies, setup routeSetup) *route
 	r := routes.NewBlueprint()
 	r.Add(setup.authHandler.Routes()...)
 	r.Include("/version", versionapi.Router())
-	r.Include("/admin", adminapi.Router(deps.Stores, cfg, deps.Theme), routes.IncludeAuth(routes.AuthRequired), routes.IncludeMiddleware(setup.bearer))
+	r.Include("/admin", adminapi.Router(deps.Stores, cfg, deps.Theme, deps.TrafficRebuild), routes.IncludeAuth(routes.AuthRequired), routes.IncludeMiddleware(setup.bearer))
 	r.Include("/node", nodeapi.Router(deps.Stores, setup.serverID, setup.staleAfterSec, setup.trustedProxies), routes.IncludeAuth(nodeSecretAuth))
 	r.Include("/front", frontapi.Router(deps.Stores, setup.offlineThreshold, deps.Auth))
 	r.Include("/metrics", metricsapi.Router(deps.Stores, deps.Auth))

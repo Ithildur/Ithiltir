@@ -1,4 +1,4 @@
-package nodes
+package nodeid
 
 import (
 	"context"
@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"dash/internal/infra"
+	"dash/internal/nodetags"
 	nodestore "dash/internal/store/node"
 	trafficstore "dash/internal/store/traffic"
 	"dash/internal/transport/http/httperr"
@@ -36,7 +37,7 @@ type updateInput struct {
 
 func updateRoute(r *routes.Blueprint, h *handler) {
 	r.Patch(
-		"/{id}",
+		"/",
 		"Update node",
 		routes.Func(h.updateHandler),
 		routes.Use(middleware.RequireJSONBody),
@@ -68,7 +69,7 @@ func (h *handler) updateHandler(w http.ResponseWriter, r *http.Request) {
 			httperr.Write(w, http.StatusBadRequest, "invalid_traffic_billing_anchor_date", err.Error())
 		case errors.Is(err, errInvalidTrafficBillingTimezone):
 			httperr.Write(w, http.StatusBadRequest, "invalid_traffic_billing_timezone", err.Error())
-		case errors.Is(err, errInvalidNodeTags):
+		case errors.Is(err, nodetags.ErrInvalid):
 			httperr.Write(w, http.StatusBadRequest, "invalid_tags", err.Error())
 		default:
 			httperr.Write(w, http.StatusBadRequest, "invalid_request", err.Error())
@@ -135,7 +136,6 @@ var (
 	errInvalidTrafficBillingStartDay = errors.New("traffic_billing_start_day must be between 1 and 31")
 	errInvalidTrafficBillingAnchor   = errors.New("traffic_billing_anchor_date is invalid")
 	errInvalidTrafficBillingTimezone = errors.New("traffic_billing_timezone is invalid")
-	errInvalidNodeTags               = errors.New("tags must be a string array")
 )
 
 func normalizeUpdate(in *updateInput) error {

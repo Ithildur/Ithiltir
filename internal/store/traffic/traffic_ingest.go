@@ -10,6 +10,7 @@ import (
 	"dash/internal/model"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 type trafficNICRow struct {
@@ -41,168 +42,136 @@ func (s *Store) BackfillTraffic5m(ctx context.Context, start, end time.Time) err
 	}
 
 	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		rows, err := loadTrafficNICRows(tx, start, end)
+		rows, err := loadTrafficSampleRows(tx, start, end)
 		if err != nil {
-			return err
+			return fmt.Errorf("load traffic nic rows: %w", err)
 		}
 		if len(rows) == 0 {
 			return nil
 		}
 		items := buildTraffic5mRows(rows, start, end)
-
-		if err := tx.
-			Where("bucket >= ? AND bucket < ?", start, end).
-			Delete(&model.Traffic5m{}).Error; err != nil {
-			return err
-		}
 		if len(items) == 0 {
 			return nil
 		}
-		return tx.CreateInBatches(items, 500).Error
+		if err := upsertTraffic5mRows(tx, items); err != nil {
+			return fmt.Errorf("upsert traffic 5m rows: %w", err)
+		}
+		return nil
 	})
 }
 
-func (s *Store) BackfillTraffic5mMissing(ctx context.Context, lookback time.Duration, end time.Time) error {
-	if s == nil || s.db == nil {
-		return fmt.Errorf("store: db is nil")
-	}
-	if lookback <= 0 {
-		return nil
-	}
-	if end.IsZero() {
-		end = time.Now().UTC()
-	}
-	end = trafficBucketStart(end)
-	start := trafficBucketStart(end.Add(-lookback))
-	if !end.After(start) {
-		return nil
-	}
-
-	gap, ok, err := s.nextTraffic5mGap(ctx, start, end)
-	if err != nil || !ok {
-		return err
-	}
-	gapEnd := minTime(gap.Add(trafficCatchupWindow), end)
-	if !gapEnd.After(gap) {
-		gapEnd = minTime(gap.Add(trafficBucketSize), end)
-	}
-	if !gapEnd.After(gap) {
-		return nil
-	}
-	return s.BackfillTraffic5m(ctx, gap, gapEnd)
-}
-
-func (s *Store) nextTraffic5mGap(ctx context.Context, start, end time.Time) (time.Time, bool, error) {
-	var rows []struct {
-		Bucket time.Time `gorm:"column:bucket"`
-	}
-	err := s.db.WithContext(ctx).Raw(`
-WITH raw_rows AS (
-	SELECT
-		server_id,
-		iface,
-		collected_at,
-		lag(collected_at) OVER (
-			PARTITION BY server_id, iface
-			ORDER BY collected_at
-		) AS prev_at
-	FROM nic_metrics
-	WHERE collected_at >= ? AND collected_at <= ?
-),
-raw_buckets AS (
-	SELECT DISTINCT
-		server_id,
-		iface,
-		gs.bucket
-	FROM raw_rows
-	CROSS JOIN LATERAL generate_series(
-		time_bucket('5 minutes', prev_at),
-		time_bucket('5 minutes', collected_at - INTERVAL '1 microsecond'),
-		INTERVAL '5 minutes'
-	) AS gs(bucket)
-	WHERE collected_at >= ? AND prev_at IS NOT NULL AND collected_at > prev_at
-)
-SELECT rb.bucket
-FROM raw_buckets rb
-WHERE NOT EXISTS (
-	SELECT 1
-	FROM traffic_5m t
-	WHERE t.server_id = rb.server_id
-		AND t.iface = rb.iface
-		AND t.bucket = rb.bucket
-)
-	AND rb.bucket >= ?
-ORDER BY rb.bucket ASC
-LIMIT 1
-`, start.Add(-trafficBucketSize), end, start, start).Scan(&rows).Error
-	if err != nil {
-		return time.Time{}, false, err
-	}
-	if len(rows) == 0 {
-		return time.Time{}, false, nil
-	}
-	return rows[0].Bucket, true, nil
-}
-
-func loadTrafficNICRows(tx *gorm.DB, start, end time.Time) ([]trafficNICRow, error) {
+func loadTrafficSampleRows(tx *gorm.DB, start, end time.Time) ([]trafficNICRow, error) {
 	var rows []trafficNICRow
 	err := tx.Raw(`
-WITH scoped AS (
+WITH current_rows AS (
 	SELECT
 		n.server_id,
 		n.iface,
 		COALESCE(NULLIF(s.traffic_cycle_mode, ''), 'default') AS traffic_cycle_mode,
 		COALESCE(s.traffic_billing_start_day, 1) AS traffic_billing_start_day,
 		COALESCE(s.traffic_billing_anchor_date, '') AS traffic_billing_anchor_date,
-		COALESCE(s.traffic_billing_timezone, '') AS traffic_billing_timezone
-	FROM nic_metrics n
-	LEFT JOIN servers s ON s.id = n.server_id
-	WHERE n.collected_at >= ? AND n.collected_at <= ?
-	GROUP BY
-		n.server_id,
-		n.iface,
-		COALESCE(NULLIF(s.traffic_cycle_mode, ''), 'default'),
-		COALESCE(s.traffic_billing_start_day, 1),
-		COALESCE(s.traffic_billing_anchor_date, ''),
-		COALESCE(s.traffic_billing_timezone, '')
-),
-window_rows AS (
-	SELECT
-		n.server_id,
-		n.iface,
-		s.traffic_cycle_mode,
-		s.traffic_billing_start_day,
-		s.traffic_billing_anchor_date,
-		s.traffic_billing_timezone,
+		COALESCE(s.traffic_billing_timezone, '') AS traffic_billing_timezone,
 		n.collected_at,
 		n.bytes_recv,
 		n.bytes_sent
 	FROM nic_metrics n
-	JOIN scoped s ON s.server_id = n.server_id AND s.iface = n.iface
+	JOIN servers s ON s.id = n.server_id AND s.is_deleted = FALSE
 	WHERE n.collected_at >= ? AND n.collected_at <= ?
+),
+scoped_pairs AS (
+	SELECT DISTINCT
+		server_id,
+		iface,
+		traffic_cycle_mode,
+		traffic_billing_start_day,
+		traffic_billing_anchor_date,
+		traffic_billing_timezone
+	FROM current_rows
 ),
 prev_rows AS (
-	SELECT DISTINCT ON (n.server_id, n.iface)
-		n.server_id,
-		n.iface,
+	SELECT
+		s.server_id,
+		s.iface,
 		s.traffic_cycle_mode,
 		s.traffic_billing_start_day,
 		s.traffic_billing_anchor_date,
 		s.traffic_billing_timezone,
-		n.collected_at,
-		n.bytes_recv,
-		n.bytes_sent
-	FROM nic_metrics n
-	JOIN scoped s ON s.server_id = n.server_id AND s.iface = n.iface
-	WHERE n.collected_at < ?
-	ORDER BY n.server_id, n.iface, n.collected_at DESC
+		p.collected_at,
+		p.bytes_recv,
+		p.bytes_sent
+	FROM scoped_pairs s
+	JOIN LATERAL (
+		SELECT
+			n.collected_at,
+			n.bytes_recv,
+			n.bytes_sent
+		FROM nic_metrics n
+		WHERE n.server_id = s.server_id
+			AND n.iface = s.iface
+			AND n.collected_at < ?
+		ORDER BY n.collected_at DESC
+		LIMIT 1
+	) p ON true
+),
+next_rows AS (
+	SELECT
+		s.server_id,
+		s.iface,
+		s.traffic_cycle_mode,
+		s.traffic_billing_start_day,
+		s.traffic_billing_anchor_date,
+		s.traffic_billing_timezone,
+		p.collected_at,
+		p.bytes_recv,
+		p.bytes_sent
+	FROM scoped_pairs s
+	JOIN LATERAL (
+		SELECT
+			n.collected_at,
+			n.bytes_recv,
+			n.bytes_sent
+		FROM nic_metrics n
+		WHERE n.server_id = s.server_id
+			AND n.iface = s.iface
+			AND n.collected_at > ?
+		ORDER BY n.collected_at ASC
+		LIMIT 1
+	) p ON true
 )
 SELECT server_id, iface, traffic_cycle_mode, traffic_billing_start_day, traffic_billing_anchor_date, traffic_billing_timezone, collected_at, bytes_recv, bytes_sent FROM prev_rows
 UNION ALL
-SELECT server_id, iface, traffic_cycle_mode, traffic_billing_start_day, traffic_billing_anchor_date, traffic_billing_timezone, collected_at, bytes_recv, bytes_sent FROM window_rows
+SELECT server_id, iface, traffic_cycle_mode, traffic_billing_start_day, traffic_billing_anchor_date, traffic_billing_timezone, collected_at, bytes_recv, bytes_sent FROM current_rows
+UNION ALL
+SELECT server_id, iface, traffic_cycle_mode, traffic_billing_start_day, traffic_billing_anchor_date, traffic_billing_timezone, collected_at, bytes_recv, bytes_sent FROM next_rows
 ORDER BY server_id, iface, collected_at
-`, start, end, start, end, start).Scan(&rows).Error
+`, start, end, start, end).Scan(&rows).Error
 	return rows, err
+}
+
+func upsertTraffic5mRows(tx *gorm.DB, items []model.Traffic5m) error {
+	if len(items) == 0 {
+		return nil
+	}
+	return tx.Clauses(clause.OnConflict{
+		Columns: []clause.Column{
+			{Name: "server_id"},
+			{Name: "iface"},
+			{Name: "bucket"},
+		},
+		DoUpdates: clause.AssignmentColumns([]string{
+			"in_bytes",
+			"out_bytes",
+			"covered_seconds",
+			"in_rate_bytes_per_sec",
+			"out_rate_bytes_per_sec",
+			"in_peak_bytes_per_sec",
+			"out_peak_bytes_per_sec",
+			"sample_count",
+			"gap_count",
+			"reset_count",
+			"updated_at",
+		}),
+	}).CreateInBatches(items, 500).Error
 }
 
 type traffic5mAccumulator struct {
@@ -279,10 +248,7 @@ func mergeTrafficPair(buckets map[traffic5mKey]*traffic5mAccumulator, prev, curr
 		return
 	}
 
-	for _, sample := range splitTrafficSamples(current.ServerID, current.Iface, prev.CollectedAt.UTC(), current.CollectedAt.UTC(), inDelta, outDelta) {
-		if sample.Bucket.Before(start) || !sample.Bucket.Before(end) {
-			continue
-		}
+	for _, sample := range splitTrafficSamplesWindow(current.ServerID, current.Iface, prev.CollectedAt.UTC(), current.CollectedAt.UTC(), start, end, inDelta, outDelta) {
 		mergeTrafficSample(traffic5mAccumulatorFor(buckets, sample.ServerID, sample.Iface, sample.Bucket), sample)
 	}
 }
@@ -336,21 +302,34 @@ type trafficSample struct {
 }
 
 func splitTrafficSamples(serverID int64, iface string, start, end time.Time, inDelta, outDelta int64) []trafficSample {
-	if !end.After(start) {
+	return splitTrafficSamplesWindow(serverID, iface, start, end, start, end, inDelta, outDelta)
+}
+
+func splitTrafficSamplesWindow(serverID int64, iface string, pairStart, pairEnd, windowStart, windowEnd time.Time, inDelta, outDelta int64) []trafficSample {
+	if !pairEnd.After(pairStart) || !pairEnd.After(windowStart) || !pairStart.Before(windowEnd) {
 		return nil
 	}
-	seconds := end.Sub(start).Seconds()
+	seconds := pairEnd.Sub(pairStart).Seconds()
 	if seconds <= 0 {
 		return nil
 	}
 
 	inRate := float64(inDelta) / seconds
 	outRate := float64(outDelta) / seconds
+	start := maxTime(pairStart, windowStart)
+	end := minTime(pairEnd, windowEnd)
+	if !end.After(start) {
+		return nil
+	}
+	windowSec := end.Sub(start).Seconds()
+
 	type segment struct {
 		bucket  time.Time
+		start   time.Time
+		end     time.Time
 		seconds float64
 	}
-	segments := make([]segment, 0, int(math.Ceil(seconds/trafficBucketSize.Seconds()))+1)
+	segments := make([]segment, 0, int(math.Ceil(windowSec/trafficBucketSize.Seconds()))+1)
 	for cursor := start; cursor.Before(end); {
 		bucket := trafficBucketStart(cursor)
 		segEnd := minTime(bucket.Add(trafficBucketSize), end)
@@ -358,6 +337,8 @@ func splitTrafficSamples(serverID int64, iface string, start, end time.Time, inD
 		if covered > 0 {
 			segments = append(segments, segment{
 				bucket:  bucket,
+				start:   cursor,
+				end:     segEnd,
 				seconds: covered,
 			})
 		}
@@ -370,22 +351,14 @@ func splitTrafficSamples(serverID int64, iface string, start, end time.Time, inD
 	gap := seconds > trafficMaxBillingGap.Seconds()
 
 	out := make([]trafficSample, 0, len(segments))
-	var elapsed float64
-	var assignedIn int64
-	var assignedOut int64
-	for i, seg := range segments {
-		elapsed += seg.seconds
-		inBytes := int64(math.Round(float64(inDelta)*elapsed/seconds)) - assignedIn
-		outBytes := int64(math.Round(float64(outDelta)*elapsed/seconds)) - assignedOut
-		if i == len(segments)-1 {
-			inBytes = inDelta - assignedIn
-			outBytes = outDelta - assignedOut
-		}
-		assignedIn += inBytes
-		assignedOut += outBytes
+	for _, seg := range segments {
+		segStart := seg.start.Sub(pairStart).Seconds()
+		segEnd := seg.end.Sub(pairStart).Seconds()
+		inBytes := int64(math.Round(float64(inDelta)*segEnd/seconds)) - int64(math.Round(float64(inDelta)*segStart/seconds))
+		outBytes := int64(math.Round(float64(outDelta)*segEnd/seconds)) - int64(math.Round(float64(outDelta)*segStart/seconds))
 
 		segGap := 0
-		if i == 0 && gap {
+		if gap && seg.start.Equal(pairStart) {
 			segGap = 1
 		}
 		sampleInRate := inRate

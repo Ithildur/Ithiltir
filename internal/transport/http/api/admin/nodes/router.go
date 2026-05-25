@@ -3,6 +3,9 @@ package nodes
 import (
 	"dash/internal/config"
 	nodestore "dash/internal/store/node"
+	trafficjob "dash/internal/traffic"
+	"dash/internal/transport/http/api/admin/nodes/id"
+	nodestraffic "dash/internal/transport/http/api/admin/nodes/traffic"
 	"github.com/Ithildur/EiluneKit/http/routes"
 )
 
@@ -12,7 +15,7 @@ type handler struct {
 }
 
 // Router returns admin/nodes routes.
-func Router(st *nodestore.Store, cfg *config.Config) *routes.Blueprint {
+func Router(st *nodestore.Store, runner *trafficjob.RebuildRunner, cfg *config.Config) *routes.Blueprint {
 	h := &handler{store: st, config: cfg}
 
 	r := routes.NewBlueprint(
@@ -23,8 +26,7 @@ func Router(st *nodestore.Store, cfg *config.Config) *routes.Blueprint {
 	createRoute(r, h)
 	displayOrderRoute(r, h)
 	trafficP95Route(r, h)
-	upgradeRoute(r, h)
-	updateRoute(r, h)
-	deleteRoute(r, h)
+	r.Include("/traffic", nodestraffic.Router(runner))
+	r.Include("/{id}", nodeid.Router(st, runner, cfg))
 	return r
 }

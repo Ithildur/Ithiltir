@@ -63,14 +63,14 @@ func (s *Store) BackfillTrafficMonthUsage(ctx context.Context, settings Settings
 	}
 
 	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		rows, err := loadTrafficNICRows(tx, start, end)
+		rows, err := loadTrafficSampleRows(tx, start, end)
 		if err != nil {
 			return err
 		}
 		if len(rows) == 0 {
 			return nil
 		}
-		progress, err := loadTrafficUsageProgress(tx, start, end)
+		progress, err := loadTrafficUsageProgress(tx, start, end, rows)
 		if err != nil {
 			return err
 		}
@@ -82,10 +82,15 @@ func (s *Store) BackfillTrafficMonthUsage(ctx context.Context, settings Settings
 	})
 }
 
-func loadTrafficUsageProgress(tx *gorm.DB, start, end time.Time) (map[trafficUsageKey]time.Time, error) {
+func loadTrafficUsageProgress(tx *gorm.DB, start, end time.Time, samples []trafficNICRow) (map[trafficUsageKey]time.Time, error) {
+	serverIDs := trafficUsageServerIDs(samples)
+	if len(serverIDs) == 0 {
+		return map[trafficUsageKey]time.Time{}, nil
+	}
+
 	var rows []model.TrafficMonthUsage
 	err := tx.
-		Where("cycle_end > ? AND cycle_start < ?", start, end).
+		Where("server_id IN ? AND cycle_end > ? AND cycle_start < ?", serverIDs, start, end).
 		Find(&rows).Error
 	if err != nil {
 		return nil, err
@@ -96,6 +101,22 @@ func loadTrafficUsageProgress(tx *gorm.DB, start, end time.Time) (map[trafficUsa
 		out[trafficUsageKeyFromUsage(row)] = row.LastCollectedAt
 	}
 	return out, nil
+}
+
+func trafficUsageServerIDs(rows []trafficNICRow) []int64 {
+	seen := make(map[int64]struct{})
+	out := make([]int64, 0)
+	for _, row := range rows {
+		if row.ServerID <= 0 {
+			continue
+		}
+		if _, ok := seen[row.ServerID]; ok {
+			continue
+		}
+		seen[row.ServerID] = struct{}{}
+		out = append(out, row.ServerID)
+	}
+	return out
 }
 
 func buildTrafficMonthUsageRows(rows []trafficNICRow, settings Settings, loc *time.Location, start, end time.Time, progress map[trafficUsageKey]time.Time) []model.TrafficMonthUsage {
@@ -149,9 +170,9 @@ func mergeTrafficUsagePair(usage map[trafficUsageKey]*trafficUsageAccumulator, p
 	outRate := float64(outDelta) / totalSec
 	gap := totalSec > trafficMaxBillingGap.Seconds()
 
-	for cursor := pairStart; cursor.Before(pairEnd); {
+	for cursor := maxTime(pairStart, start); cursor.Before(pairEnd) && cursor.Before(end); {
 		cycle := currentTrafficCycleAnchored(cycleSettings.CycleMode, cycleSettings.BillingStartDay, cycleSettings.BillingAnchorDate, cycleLoc, cursor)
-		segEnd := minTime(pairEnd, cycle.End)
+		segEnd := minTime(minTime(pairEnd, cycle.End), end)
 		if !segEnd.After(cursor) {
 			break
 		}
@@ -165,9 +186,10 @@ func mergeTrafficUsagePair(usage map[trafficUsageKey]*trafficUsageAccumulator, p
 			from = start
 		}
 		if segEnd.After(from) && segEnd.After(cycle.Start) && from.Before(cycle.End) {
-			seconds := segEnd.Sub(from).Seconds()
-			inBytes := int64(math.Round(float64(inDelta) * seconds / totalSec))
-			outBytes := int64(math.Round(float64(outDelta) * seconds / totalSec))
+			fromSec := from.Sub(pairStart).Seconds()
+			toSec := segEnd.Sub(pairStart).Seconds()
+			inBytes := int64(math.Round(float64(inDelta)*toSec/totalSec)) - int64(math.Round(float64(inDelta)*fromSec/totalSec))
+			outBytes := int64(math.Round(float64(outDelta)*toSec/totalSec)) - int64(math.Round(float64(outDelta)*fromSec/totalSec))
 			mergeTrafficUsageSample(trafficUsageAccumulatorFor(usage, key, cycle), inBytes, outBytes, inRate, outRate, gap, segEnd)
 			progress[key] = maxTime(progress[key], segEnd)
 		}

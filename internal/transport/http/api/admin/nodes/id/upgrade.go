@@ -1,4 +1,4 @@
-package nodes
+package nodeid
 
 import (
 	"context"
@@ -21,7 +21,7 @@ const nodeUpgradeUnsupportedMessage = "node version must be >= 0.2.1 to use auto
 
 func upgradeRoute(r *routes.Blueprint, h *handler) {
 	r.Post(
-		"/{id}/upgrade",
+		"/upgrade",
 		"Upgrade node agent",
 		routes.Func(h.upgradeHandler),
 	)

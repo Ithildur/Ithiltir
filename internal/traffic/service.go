@@ -2,6 +2,7 @@ package traffic
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -14,28 +15,70 @@ import (
 const (
 	materializeInterval = 5 * time.Minute
 	snapshotInterval    = time.Hour
-	catchupChunk        = time.Hour
 )
 
 type Service struct {
-	store          *trafficstore.Store
-	location       *time.Location
-	retention      time.Duration
-	usageCatchupAt time.Time
-	logger         *kitlog.Helper
+	store     *trafficstore.Store
+	location  *time.Location
+	retention time.Duration
+	gate      *writeGate
+	logger    *kitlog.Helper
 }
 
-func NewService(st *trafficstore.Store, loc *time.Location, retentionDays int) *Service {
+type Runtime struct {
+	service *Service
+	rebuild *RebuildRunner
+}
+
+func NewRuntime(ctx context.Context, st *trafficstore.Store, loc *time.Location, retentionDays int) *Runtime {
+	gate := newWriteGate()
+	retention := trafficRetention(retentionDays)
+	return &Runtime{
+		service: newService(st, loc, retention, gate),
+		rebuild: newRebuildRunner(ctx, st, gate, retention),
+	}
+}
+
+func (r *Runtime) RebuildRunner() *RebuildRunner {
+	if r == nil {
+		return nil
+	}
+	return r.rebuild
+}
+
+func (r *Runtime) Run(ctx context.Context) error {
+	if r == nil || r.service == nil {
+		return fmt.Errorf("traffic runtime is not initialized")
+	}
+	return r.service.Run(ctx)
+}
+
+func (r *Runtime) Stop() {
+	if r == nil || r.rebuild == nil {
+		return
+	}
+	r.rebuild.Stop()
+}
+
+func trafficRetention(days int) time.Duration {
+	if days <= 0 {
+		days = config.DefaultTrafficRetentionDays
+	}
+	return time.Duration(days) * 24 * time.Hour
+}
+
+func newService(st *trafficstore.Store, loc *time.Location, retention time.Duration, gate *writeGate) *Service {
 	if loc == nil {
 		loc = time.Local
 	}
-	if retentionDays <= 0 {
-		retentionDays = config.DefaultRetentionDays
+	if retention <= 0 {
+		retention = trafficRetention(config.DefaultTrafficRetentionDays)
 	}
 	return &Service{
 		store:     st,
 		location:  loc,
-		retention: time.Duration(retentionDays) * 24 * time.Hour,
+		retention: retention,
+		gate:      writeGateOrNew(gate),
 		logger:    infra.WithModule("traffic"),
 	}
 }
@@ -65,8 +108,8 @@ func (s *Service) Run(ctx context.Context) error {
 }
 
 func (s *Service) materialize(ctx context.Context) {
-	if err := s.materializeOnce(ctx); err != nil {
-		s.logger.Warn("materialize traffic buckets failed", err)
+	if err := s.gate.with(ctx, s.materializeOnce); err != nil {
+		s.logger.Warn("materialize traffic failed", err)
 	}
 }
 
@@ -88,45 +131,25 @@ func (s *Service) materializeOnce(ctx context.Context) error {
 		}
 	}
 
-	var first error
-	if start, end, ok := s.nextUsageCatchup(now); ok {
-		if err := s.withWriteTimeout(ctx, func(c context.Context) error {
-			return s.store.BackfillTrafficMonthUsage(c, settings, s.location, start, end)
-		}); err != nil && first == nil {
-			first = err
-		} else if err == nil {
-			s.usageCatchupAt = end
-		}
-	}
+	var errs error
 	if settings.UsageMode == trafficstore.UsageBilling {
 		if err := s.withWriteTimeout(ctx, func(c context.Context) error {
 			return s.store.BackfillTraffic5m(c, time.Time{}, now)
-		}); err != nil && first == nil {
-			first = err
-		}
-		if err := s.withWriteTimeout(ctx, func(c context.Context) error {
-			return s.store.BackfillTraffic5mMissing(c, s.retention, now)
-		}); err != nil && first == nil {
-			first = err
+		}); err != nil {
+			errs = errors.Join(errs, fmt.Errorf("backfill traffic 5m: %w", err))
 		}
 	}
-	return first
-}
 
-func (s *Service) nextUsageCatchup(now time.Time) (time.Time, time.Time, bool) {
-	start := now.Add(-s.retention)
-	if s.usageCatchupAt.IsZero() || s.usageCatchupAt.Before(start) || s.usageCatchupAt.After(now) {
-		s.usageCatchupAt = start
+	if err := s.withWriteTimeout(ctx, func(c context.Context) error {
+		return s.store.BackfillTrafficMonthUsage(c, settings, s.location, time.Time{}, now)
+	}); err != nil {
+		errs = errors.Join(errs, fmt.Errorf("backfill traffic month usage: %w", err))
 	}
-	end := s.usageCatchupAt.Add(catchupChunk)
-	if end.After(now) {
-		end = now
-	}
-	return s.usageCatchupAt, end, end.After(s.usageCatchupAt)
+	return errs
 }
 
 func (s *Service) snapshot(ctx context.Context) {
-	if err := s.snapshotOnce(ctx); err != nil {
+	if err := s.gate.with(ctx, s.snapshotOnce); err != nil {
 		s.logger.Warn("refresh traffic monthly snapshots failed", err)
 	}
 }

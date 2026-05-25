@@ -18,8 +18,7 @@ import (
 
 const (
 	trafficBucketSize       = 5 * time.Minute
-	trafficBackfillWindow   = 15 * time.Minute
-	trafficCatchupWindow    = time.Hour
+	trafficBackfillWindow   = 30 * time.Minute
 	trafficSnapshotGrace    = 48 * time.Hour
 	trafficMaxMonthlyMonths = 24
 	trafficMinCoveredSec    = 270.0

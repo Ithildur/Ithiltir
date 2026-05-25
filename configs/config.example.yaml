@@ -25,6 +25,7 @@ database:
   conn_max_lifetime: "1h"
   # retention_days omitted means default 45 days.
   # traffic_retention_days is independent; omitted means max(retention_days, 45).
+  # traffic_5m uses rolling retention and stays writable for rebuilds.
   __DB_RETENTION_DAYS_LINE__
 redis:
   addr: "__REDIS_ADDR__"

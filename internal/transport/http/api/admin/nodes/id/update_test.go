@@ -1,9 +1,10 @@
-package nodes
+package nodeid
 
 import (
 	"encoding/json"
 	"testing"
 
+	"dash/internal/nodetags"
 	trafficstore "dash/internal/store/traffic"
 )
 
@@ -94,16 +95,16 @@ func TestNormalizeUpdateClearsTags(t *testing.T) {
 func TestNormalizeUpdateRejectsNullTags(t *testing.T) {
 	in := updateInput{Tags: json.RawMessage(`null`)}
 
-	if err := normalizeUpdate(&in); err != errInvalidNodeTags {
-		t.Fatalf("normalizeUpdate() error = %v, want %v", err, errInvalidNodeTags)
+	if err := normalizeUpdate(&in); err != nodetags.ErrInvalid {
+		t.Fatalf("normalizeUpdate() error = %v, want %v", err, nodetags.ErrInvalid)
 	}
 }
 
 func TestNormalizeUpdateRejectsNonStringArrayTags(t *testing.T) {
 	for _, raw := range []string{`{"role":"db"}`, `[1]`} {
 		in := updateInput{Tags: json.RawMessage(raw)}
-		if err := normalizeUpdate(&in); err != errInvalidNodeTags {
-			t.Fatalf("normalizeUpdate(%s) error = %v, want %v", raw, err, errInvalidNodeTags)
+		if err := normalizeUpdate(&in); err != nodetags.ErrInvalid {
+			t.Fatalf("normalizeUpdate(%s) error = %v, want %v", raw, err, nodetags.ErrInvalid)
 		}
 	}
 }

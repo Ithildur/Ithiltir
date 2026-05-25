@@ -1,4 +1,4 @@
-package nodes
+package nodeid
 
 import (
 	"context"
@@ -17,7 +17,7 @@ import (
 
 func deleteRoute(r *routes.Blueprint, h *handler) {
 	r.Delete(
-		"/{id}",
+		"/",
 		"Delete node",
 		routes.Func(h.deleteHandler),
 	)

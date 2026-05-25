@@ -67,7 +67,7 @@ Config lookup order:
 - `$DASH_HOME/configs/config.local.yaml`
 - `$DASH_HOME/configs/config.yaml`
 
-`database.retention_days` is optional and defaults to `45` days. The 5-minute traffic fact table uses independent `database.traffic_retention_days`; when omitted it uses `max(database.retention_days, 45)`. For 95th percentile billing history, set it to `90` or higher.
+`database.retention_days` is optional and defaults to `45` days. The 5-minute traffic fact table uses independent `database.traffic_retention_days`; when omitted it uses `max(database.retention_days, 45)`. It is kept writable and pruned by rolling retention; historical 95th percentile billing values are stored in monthly snapshots. For 95th percentile billing history, set it to `90` or higher.
 
 ## Deployment Baseline
 

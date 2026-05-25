@@ -67,7 +67,7 @@ go run ./cmd/dash -debug
 - `$DASH_HOME/configs/config.local.yaml`
 - `$DASH_HOME/configs/config.yaml`
 
-`database.retention_days` 可选，省略时默认 `45` 天。流量 5 分钟事实表使用独立的 `database.traffic_retention_days`，省略时取 `max(database.retention_days, 45)`。如果需要 95 计费历史，建议设置为 `90` 或更高。
+`database.retention_days` 可选，省略时默认 `45` 天。流量 5 分钟事实表使用独立的 `database.traffic_retention_days`，省略时取 `max(database.retention_days, 45)`。它保持可写并通过滚动保留删除；历史 95 计费值保存在月度快照中。如果需要 95 计费历史，建议设置为 `90` 或更高。
 
 ## 部署基线
 
