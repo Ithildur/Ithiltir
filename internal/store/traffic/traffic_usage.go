@@ -2,6 +2,7 @@ package traffic
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math"
 	"time"
@@ -26,7 +27,6 @@ type trafficUsageAccumulator struct {
 }
 
 type trafficUsageFetch struct {
-	IfaceCount          int       `gorm:"column:iface_count"`
 	InBytes             int64     `gorm:"column:in_bytes"`
 	OutBytes            int64     `gorm:"column:out_bytes"`
 	InPeakBytesPerSec   float64   `gorm:"column:in_peak_bytes_per_sec"`
@@ -36,6 +36,18 @@ type trafficUsageFetch struct {
 	GapCount            int       `gorm:"column:gap_count"`
 	ResetCount          int       `gorm:"column:reset_count"`
 	CoveredUntil        time.Time `gorm:"column:covered_until"`
+}
+
+type trafficUsageNICRow struct {
+	ServerID          int64     `gorm:"column:server_id"`
+	Iface             string    `gorm:"column:iface"`
+	ServerCycleMode   string    `gorm:"column:traffic_cycle_mode"`
+	BillingStartDay   int       `gorm:"column:traffic_billing_start_day"`
+	BillingAnchorDate string    `gorm:"column:traffic_billing_anchor_date"`
+	BillingTimezone   string    `gorm:"column:traffic_billing_timezone"`
+	CollectedAt       time.Time `gorm:"column:collected_at"`
+	BytesRecv         int64     `gorm:"column:bytes_recv"`
+	BytesSent         int64     `gorm:"column:bytes_sent"`
 }
 
 func (s *Store) BackfillTrafficMonthUsage(ctx context.Context, settings Settings, loc *time.Location, start, end time.Time) error {
@@ -63,7 +75,7 @@ func (s *Store) BackfillTrafficMonthUsage(ctx context.Context, settings Settings
 	}
 
 	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		rows, err := loadTrafficSampleRows(tx, start, end)
+		rows, err := loadTrafficUsageRows(tx, start, end)
 		if err != nil {
 			return err
 		}
@@ -74,7 +86,10 @@ func (s *Store) BackfillTrafficMonthUsage(ctx context.Context, settings Settings
 		if err != nil {
 			return err
 		}
-		items := buildTrafficMonthUsageRows(rows, settings, loc, start, end, progress)
+		items, err := buildTrafficMonthUsageRows(rows, settings, loc, start, end, progress)
+		if err != nil {
+			return err
+		}
 		if len(items) == 0 {
 			return nil
 		}
@@ -82,7 +97,95 @@ func (s *Store) BackfillTrafficMonthUsage(ctx context.Context, settings Settings
 	})
 }
 
-func loadTrafficUsageProgress(tx *gorm.DB, start, end time.Time, samples []trafficNICRow) (map[trafficUsageKey]time.Time, error) {
+func loadTrafficUsageRows(tx *gorm.DB, start, end time.Time) ([]trafficUsageNICRow, error) {
+	var rows []trafficUsageNICRow
+	err := tx.Raw(`
+	WITH current_rows AS (
+		SELECT
+			n.server_id,
+			n.iface,
+			COALESCE(NULLIF(s.traffic_cycle_mode, ''), 'default') AS traffic_cycle_mode,
+			COALESCE(s.traffic_billing_start_day, 1) AS traffic_billing_start_day,
+			COALESCE(s.traffic_billing_anchor_date, '') AS traffic_billing_anchor_date,
+			COALESCE(s.traffic_billing_timezone, '') AS traffic_billing_timezone,
+			n.collected_at,
+			n.bytes_recv,
+			n.bytes_sent
+		FROM nic_metrics n
+		JOIN servers s ON s.id = n.server_id AND s.is_deleted = FALSE
+		WHERE n.collected_at >= ? AND n.collected_at <= ?
+	),
+	scoped_pairs AS (
+		SELECT DISTINCT
+			server_id,
+			iface,
+			traffic_cycle_mode,
+			traffic_billing_start_day,
+			traffic_billing_anchor_date,
+			traffic_billing_timezone
+		FROM current_rows
+	),
+	prev_rows AS (
+		SELECT
+			s.server_id,
+			s.iface,
+			s.traffic_cycle_mode,
+			s.traffic_billing_start_day,
+			s.traffic_billing_anchor_date,
+			s.traffic_billing_timezone,
+			p.collected_at,
+			p.bytes_recv,
+			p.bytes_sent
+		FROM scoped_pairs s
+		JOIN LATERAL (
+			SELECT
+				n.collected_at,
+				n.bytes_recv,
+				n.bytes_sent
+			FROM nic_metrics n
+			WHERE n.server_id = s.server_id
+				AND n.iface = s.iface
+				AND n.collected_at < ?
+			ORDER BY n.collected_at DESC
+			LIMIT 1
+		) p ON true
+	),
+	next_rows AS (
+		SELECT
+			s.server_id,
+			s.iface,
+			s.traffic_cycle_mode,
+			s.traffic_billing_start_day,
+			s.traffic_billing_anchor_date,
+			s.traffic_billing_timezone,
+			p.collected_at,
+			p.bytes_recv,
+			p.bytes_sent
+		FROM scoped_pairs s
+		JOIN LATERAL (
+			SELECT
+				n.collected_at,
+				n.bytes_recv,
+				n.bytes_sent
+			FROM nic_metrics n
+			WHERE n.server_id = s.server_id
+				AND n.iface = s.iface
+				AND n.collected_at > ?
+			ORDER BY n.collected_at ASC
+			LIMIT 1
+		) p ON true
+	)
+	SELECT server_id, iface, traffic_cycle_mode, traffic_billing_start_day, traffic_billing_anchor_date, traffic_billing_timezone, collected_at, bytes_recv, bytes_sent FROM prev_rows
+	UNION ALL
+	SELECT server_id, iface, traffic_cycle_mode, traffic_billing_start_day, traffic_billing_anchor_date, traffic_billing_timezone, collected_at, bytes_recv, bytes_sent FROM current_rows
+	UNION ALL
+	SELECT server_id, iface, traffic_cycle_mode, traffic_billing_start_day, traffic_billing_anchor_date, traffic_billing_timezone, collected_at, bytes_recv, bytes_sent FROM next_rows
+	ORDER BY server_id, iface, collected_at
+	`, start, end, start, end).Scan(&rows).Error
+	return rows, err
+}
+
+func loadTrafficUsageProgress(tx *gorm.DB, start, end time.Time, samples []trafficUsageNICRow) (map[trafficUsageKey]time.Time, error) {
 	serverIDs := trafficUsageServerIDs(samples)
 	if len(serverIDs) == 0 {
 		return map[trafficUsageKey]time.Time{}, nil
@@ -103,7 +206,7 @@ func loadTrafficUsageProgress(tx *gorm.DB, start, end time.Time, samples []traff
 	return out, nil
 }
 
-func trafficUsageServerIDs(rows []trafficNICRow) []int64 {
+func trafficUsageServerIDs(rows []trafficUsageNICRow) []int64 {
 	seen := make(map[int64]struct{})
 	out := make([]int64, 0)
 	for _, row := range rows {
@@ -119,9 +222,9 @@ func trafficUsageServerIDs(rows []trafficNICRow) []int64 {
 	return out
 }
 
-func buildTrafficMonthUsageRows(rows []trafficNICRow, settings Settings, loc *time.Location, start, end time.Time, progress map[trafficUsageKey]time.Time) []model.TrafficMonthUsage {
+func buildTrafficMonthUsageRows(rows []trafficUsageNICRow, settings Settings, loc *time.Location, start, end time.Time, progress map[trafficUsageKey]time.Time) ([]model.TrafficMonthUsage, error) {
 	usage := make(map[trafficUsageKey]*trafficUsageAccumulator)
-	var prev trafficNICRow
+	var prev trafficUsageNICRow
 	hasPrev := false
 
 	for _, row := range rows {
@@ -131,7 +234,9 @@ func buildTrafficMonthUsageRows(rows []trafficNICRow, settings Settings, loc *ti
 			continue
 		}
 		if row.CollectedAt.After(prev.CollectedAt) {
-			mergeTrafficUsagePair(usage, progress, settings, loc, start, end, prev, row)
+			if err := mergeTrafficUsagePair(usage, progress, settings, loc, start, end, prev, row); err != nil {
+				return nil, err
+			}
 		}
 		prev = row
 	}
@@ -140,38 +245,41 @@ func buildTrafficMonthUsageRows(rows []trafficNICRow, settings Settings, loc *ti
 	for _, acc := range usage {
 		out = append(out, acc.row)
 	}
-	return out
+	return out, nil
 }
 
-func mergeTrafficUsagePair(usage map[trafficUsageKey]*trafficUsageAccumulator, progress map[trafficUsageKey]time.Time, settings Settings, loc *time.Location, start, end time.Time, prev, current trafficNICRow) {
+func mergeTrafficUsagePair(usage map[trafficUsageKey]*trafficUsageAccumulator, progress map[trafficUsageKey]time.Time, settings Settings, loc *time.Location, start, end time.Time, prev, current trafficUsageNICRow) error {
 	inDelta := current.BytesRecv - prev.BytesRecv
 	outDelta := current.BytesSent - prev.BytesSent
-	cycleSettings := SettingsWithServerCycleSettings(settings, serverCycleSettingsFromRow(current))
-	cycleLoc := SettingsLocation(cycleSettings, loc)
+	effective, err := SettingsWithServerCycle(settings, serverCycleSettingsFromRow(current))
+	if err != nil {
+		return fmt.Errorf("server %d traffic cycle settings: %w", current.ServerID, err)
+	}
+	cycleLoc := SettingsLocation(effective, loc)
 	if inDelta < 0 || outDelta < 0 {
-		mergeTrafficUsageReset(usage, progress, cycleSettings, cycleLoc, start, end, current)
-		return
+		mergeTrafficUsageReset(usage, progress, effective, cycleLoc, start, end, current)
+		return nil
 	}
 	if inDelta == 0 && outDelta == 0 {
-		return
+		return nil
 	}
 
 	pairStart := prev.CollectedAt.UTC()
 	pairEnd := current.CollectedAt.UTC()
 	if !pairEnd.After(pairStart) || !pairEnd.After(start) || !pairStart.Before(end) {
-		return
+		return nil
 	}
 
 	totalSec := pairEnd.Sub(pairStart).Seconds()
 	if totalSec <= 0 {
-		return
+		return nil
 	}
 	inRate := float64(inDelta) / totalSec
 	outRate := float64(outDelta) / totalSec
 	gap := totalSec > trafficMaxBillingGap.Seconds()
 
 	for cursor := maxTime(pairStart, start); cursor.Before(pairEnd) && cursor.Before(end); {
-		cycle := currentTrafficCycleAnchored(cycleSettings.CycleMode, cycleSettings.BillingStartDay, cycleSettings.BillingAnchorDate, cycleLoc, cursor)
+		cycle := currentTrafficCycleAnchored(effective.CycleMode, effective.BillingStartDay, effective.BillingAnchorDate, cycleLoc, cursor)
 		segEnd := minTime(minTime(pairEnd, cycle.End), end)
 		if !segEnd.After(cursor) {
 			break
@@ -195,9 +303,10 @@ func mergeTrafficUsagePair(usage map[trafficUsageKey]*trafficUsageAccumulator, p
 		}
 		cursor = segEnd
 	}
+	return nil
 }
 
-func mergeTrafficUsageReset(usage map[trafficUsageKey]*trafficUsageAccumulator, progress map[trafficUsageKey]time.Time, settings Settings, loc *time.Location, start, end time.Time, row trafficNICRow) {
+func mergeTrafficUsageReset(usage map[trafficUsageKey]*trafficUsageAccumulator, progress map[trafficUsageKey]time.Time, settings Settings, loc *time.Location, start, end time.Time, row trafficUsageNICRow) {
 	at := row.CollectedAt.UTC()
 	if at.Before(start) || !at.Before(end) {
 		return
@@ -214,7 +323,7 @@ func mergeTrafficUsageReset(usage map[trafficUsageKey]*trafficUsageAccumulator, 
 	progress[key] = at
 }
 
-func serverCycleSettingsFromRow(row trafficNICRow) ServerCycleSettings {
+func serverCycleSettingsFromRow(row trafficUsageNICRow) ServerCycleSettings {
 	return ServerCycleSettings{
 		Mode:              ServerCycleMode(row.ServerCycleMode),
 		BillingStartDay:   row.BillingStartDay,
@@ -347,27 +456,54 @@ func (s *Store) fetchTrafficUsage(ctx context.Context, q TrafficQuery, cycle Tra
 func (s *Store) fetchTrafficUsageIface(ctx context.Context, q TrafficQuery, cycle TrafficCycle, iface string) (trafficUsageFetch, bool, error) {
 	db := s.db.WithContext(ctx).
 		Table("traffic_month_usage").
-		Select(`COUNT(*) AS iface_count,
-			COALESCE(SUM(in_bytes), 0) AS in_bytes,
-			COALESCE(SUM(out_bytes), 0) AS out_bytes,
-			COALESCE(SUM(in_peak_bytes_per_sec), 0) AS in_peak_bytes_per_sec,
-			COALESCE(SUM(out_peak_bytes_per_sec), 0) AS out_peak_bytes_per_sec,
-			COALESCE(SUM(both_peak_bytes_per_sec), 0) AS both_peak_bytes_per_sec,
-			COALESCE(SUM(sample_count), 0) AS sample_count,
-			COALESCE(SUM(gap_count), 0) AS gap_count,
-			COALESCE(SUM(reset_count), 0) AS reset_count,
-			COALESCE(MAX(covered_until), ?::timestamptz) AS covered_until`, cycle.Start).
 		Where("server_id = ?", q.ServerID).
 		Where("cycle_mode = ?", string(cycle.Mode)).
 		Where("billing_start_day = ?", cycle.BillingStartDay).
 		Where("cycle_start = ? AND cycle_end = ?", cycle.Start, cycle.End).
 		Where("iface = ?", iface)
 
-	var row trafficUsageFetch
-	if err := db.Scan(&row).Error; err != nil {
+	var row struct {
+		InBytes             int64     `gorm:"column:in_bytes"`
+		OutBytes            int64     `gorm:"column:out_bytes"`
+		InPeakBytesPerSec   float64   `gorm:"column:in_peak_bytes_per_sec"`
+		OutPeakBytesPerSec  float64   `gorm:"column:out_peak_bytes_per_sec"`
+		BothPeakBytesPerSec float64   `gorm:"column:both_peak_bytes_per_sec"`
+		SampleCount         int       `gorm:"column:sample_count"`
+		GapCount            int       `gorm:"column:gap_count"`
+		ResetCount          int       `gorm:"column:reset_count"`
+		CoveredUntil        time.Time `gorm:"column:covered_until"`
+	}
+	err := db.
+		Select([]string{
+			"in_bytes",
+			"out_bytes",
+			"in_peak_bytes_per_sec",
+			"out_peak_bytes_per_sec",
+			"both_peak_bytes_per_sec",
+			"sample_count",
+			"gap_count",
+			"reset_count",
+			"covered_until",
+		}).
+		Take(&row).
+		Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return trafficUsageFetch{}, false, nil
+		}
 		return trafficUsageFetch{}, false, err
 	}
-	return row, row.IfaceCount > 0, nil
+	return trafficUsageFetch{
+		InBytes:             row.InBytes,
+		OutBytes:            row.OutBytes,
+		InPeakBytesPerSec:   row.InPeakBytesPerSec,
+		OutPeakBytesPerSec:  row.OutPeakBytesPerSec,
+		BothPeakBytesPerSec: row.BothPeakBytesPerSec,
+		SampleCount:         row.SampleCount,
+		GapCount:            row.GapCount,
+		ResetCount:          row.ResetCount,
+		CoveredUntil:        row.CoveredUntil,
+	}, true, nil
 }
 
 func trafficUsageKeyFromCycle(serverID int64, iface string, cycle TrafficCycle) trafficUsageKey {

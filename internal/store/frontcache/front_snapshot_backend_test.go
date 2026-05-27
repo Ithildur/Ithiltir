@@ -4,25 +4,23 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"net/url"
+	"strconv"
 	"testing"
 	"time"
 
 	"dash/internal/infra/cachekeys"
 	"dash/internal/metrics"
 	"dash/internal/model"
+	pgtest "dash/internal/testutil/postgres"
 
 	"github.com/alicebob/miniredis/v2"
 	"github.com/redis/go-redis/v9"
 	"gorm.io/datatypes"
-	"gorm.io/driver/sqlite"
-	"gorm.io/gorm"
 )
 
-func TestEnsureSnapshotPublishesAfterMiss(t *testing.T) {
+func TestIntegrationEnsureSnapshotPublishesAfterMiss(t *testing.T) {
 	ctx := context.Background()
-	db := newFrontCacheDB(t)
-	st := New(db, nil)
+	st := New(pgtest.NewDB(t), nil)
 
 	nodes, err := st.EnsureSnapshot(ctx, FrontSnapshotOptions{
 		CacheTimeout:  time.Second,
@@ -37,24 +35,24 @@ func TestEnsureSnapshotPublishesAfterMiss(t *testing.T) {
 	}
 }
 
-func TestFetchFrontNodesReadsCurrentMetrics(t *testing.T) {
+func TestIntegrationFetchFrontNodesReadsCurrentMetrics(t *testing.T) {
 	ctx := context.Background()
-	db := newFrontCacheDB(t)
+	db := pgtest.NewDB(t)
 	st := New(db, nil)
 
 	collectedAt := time.Date(2026, 4, 28, 12, 0, 0, 0, time.UTC)
-	if err := db.Create(&model.Server{
-		ID:             1,
+	srv := model.Server{
 		Name:           "node-a",
 		Hostname:       "node-a.local",
 		Secret:         "secret-a",
 		IsGuestVisible: true,
 		Tags:           datatypes.JSON([]byte(`["edge","db"]`)),
-	}).Error; err != nil {
+	}
+	if err := db.Create(&srv).Error; err != nil {
 		t.Fatalf("Create(Server) error = %v", err)
 	}
 	if err := db.Create(&model.ServerMetric{
-		ServerID:    1,
+		ServerID:    srv.ID,
 		CollectedAt: collectedAt.Add(time.Hour),
 		MetricsSnapshot: model.MetricsSnapshot{
 			CPUUsageRatio: 0.99,
@@ -65,7 +63,7 @@ func TestFetchFrontNodesReadsCurrentMetrics(t *testing.T) {
 		t.Fatalf("Create(ServerMetric) error = %v", err)
 	}
 	if err := db.Create(&model.ServerCurrentMetric{
-		ServerID:    1,
+		ServerID:    srv.ID,
 		CollectedAt: collectedAt,
 		MetricsSnapshot: model.MetricsSnapshot{
 			CPUUsageRatio: 0.25,
@@ -76,7 +74,7 @@ func TestFetchFrontNodesReadsCurrentMetrics(t *testing.T) {
 		t.Fatalf("Create(ServerCurrentMetric) error = %v", err)
 	}
 	if err := db.Create(&model.ServerCurrentNICMetric{
-		ServerID:            1,
+		ServerID:            srv.ID,
 		Iface:               "eth0",
 		CollectedAt:         collectedAt,
 		BytesRecv:           10,
@@ -108,9 +106,9 @@ func TestFetchFrontNodesReadsCurrentMetrics(t *testing.T) {
 	}
 }
 
-func TestFrontNodesComposeRuntimeFields(t *testing.T) {
+func TestIntegrationFrontNodesComposeRuntimeFields(t *testing.T) {
 	ctx := context.Background()
-	db := newFrontCacheDB(t)
+	db := pgtest.NewDB(t)
 	srv := miniredis.RunT(t)
 	client := redis.NewClient(&redis.Options{Addr: srv.Addr()})
 	t.Cleanup(func() { _ = client.Close() })
@@ -132,17 +130,17 @@ func TestFrontNodesComposeRuntimeFields(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Marshal(Thermal) error = %v", err)
 	}
-	if err := db.Create(&model.Server{
-		ID:             1,
+	server := model.Server{
 		Name:           "node-a",
 		Hostname:       "node-a.local",
 		Secret:         "secret-a",
 		IsGuestVisible: true,
-	}).Error; err != nil {
+	}
+	if err := db.Create(&server).Error; err != nil {
 		t.Fatalf("Create(Server) error = %v", err)
 	}
 	if err := db.Create(&model.ServerCurrentMetric{
-		ServerID:    1,
+		ServerID:    server.ID,
 		CollectedAt: collectedAt,
 		MetricsSnapshot: model.MetricsSnapshot{
 			CPUUsageRatio: 0.25,
@@ -156,7 +154,7 @@ func TestFrontNodesComposeRuntimeFields(t *testing.T) {
 
 	temp := 51.5
 	health := "passed"
-	cached := testNode("1", "node-a")
+	cached := testNode(strconv.FormatInt(server.ID, 10), "node-a")
 	cached.Observation.ReceivedAt = metrics.FormatTimestamp(collectedAt)
 	cached.Disk.Smart = &metrics.DiskSmart{
 		Status: "ok",
@@ -418,26 +416,4 @@ func hasFrontSearchText(items []string, want string) bool {
 		}
 	}
 	return false
-}
-
-func newFrontCacheDB(t *testing.T) *gorm.DB {
-	t.Helper()
-
-	dsn := "file:" + url.QueryEscape(t.Name()) + "?mode=memory&cache=shared"
-	db, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{})
-	if err != nil {
-		t.Fatalf("gorm.Open() error = %v", err)
-	}
-	if err := db.AutoMigrate(
-		&model.Server{},
-		&model.ServerMetric{},
-		&model.ServerCurrentMetric{},
-		&model.ServerCurrentDiskMetric{},
-		&model.ServerCurrentDiskUsageMetric{},
-		&model.ServerCurrentNICMetric{},
-		&model.SystemSetting{},
-	); err != nil {
-		t.Fatalf("AutoMigrate() error = %v", err)
-	}
-	return db
 }

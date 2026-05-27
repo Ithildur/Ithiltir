@@ -3,32 +3,24 @@ package metrics
 import (
 	"context"
 	"net/http/httptest"
-	"net/url"
 	"testing"
 
 	"dash/internal/model"
 	"dash/internal/store"
 	"dash/internal/store/metricdata"
+	pgtest "dash/internal/testutil/postgres"
 
-	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 )
 
 func newHistoryTestStore(t *testing.T) (*store.Stores, *gorm.DB) {
 	t.Helper()
 
-	dsn := "file:" + url.QueryEscape(t.Name()) + "?mode=memory&cache=shared"
-	db, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{})
-	if err != nil {
-		t.Fatalf("gorm.Open() error = %v", err)
-	}
-	if err := db.AutoMigrate(&model.Server{}, &model.MetricSetting{}); err != nil {
-		t.Fatalf("AutoMigrate() error = %v", err)
-	}
+	db := pgtest.NewDB(t)
 	return store.New(db, nil), db
 }
 
-func TestHistoryGuestAccessDisabledByDefault(t *testing.T) {
+func TestIntegrationHistoryGuestAccessDisabledByDefault(t *testing.T) {
 	st, _ := newHistoryTestStore(t)
 	h := newHandler(st.Metric, st.Front, nil)
 	r := httptest.NewRequest("GET", "/api/metrics/history?server_id=1", nil)
@@ -42,7 +34,7 @@ func TestHistoryGuestAccessDisabledByDefault(t *testing.T) {
 	}
 }
 
-func TestHistoryGuestAccessByNodeUsesGuestVisible(t *testing.T) {
+func TestIntegrationHistoryGuestAccessByNodeUsesGuestVisible(t *testing.T) {
 	st, db := newHistoryTestStore(t)
 	ctx := context.Background()
 	h := newHandler(st.Metric, st.Front, nil)
@@ -51,26 +43,10 @@ func TestHistoryGuestAccessByNodeUsesGuestVisible(t *testing.T) {
 	if err := st.Metric.SetHistoryGuestAccessMode(ctx, metricdata.HistoryGuestAccessByNode); err != nil {
 		t.Fatalf("SetHistoryGuestAccessMode() error = %v", err)
 	}
-	if err := db.WithContext(ctx).Create(&model.Server{
-		Name:           "hidden",
-		Hostname:       "hidden-host",
-		Secret:         "secret-hidden",
-		DisplayOrder:   1,
-		IsGuestVisible: false,
-	}).Error; err != nil {
-		t.Fatalf("Create(hidden) error = %v", err)
-	}
-	if err := db.WithContext(ctx).Create(&model.Server{
-		Name:           "visible",
-		Hostname:       "visible-host",
-		Secret:         "secret-visible",
-		DisplayOrder:   2,
-		IsGuestVisible: true,
-	}).Error; err != nil {
-		t.Fatalf("Create(visible) error = %v", err)
-	}
+	hidden := createHistoryServer(t, db, "hidden", false)
+	visible := createHistoryServer(t, db, "visible", true)
 
-	allowed, err := h.canReadHistory(ctx, r, 1)
+	allowed, err := h.canReadHistory(ctx, r, hidden.ID)
 	if err != nil {
 		t.Fatalf("canReadHistory(hidden) error = %v", err)
 	}
@@ -78,11 +54,26 @@ func TestHistoryGuestAccessByNodeUsesGuestVisible(t *testing.T) {
 		t.Fatal("canReadHistory(hidden) = true, want false")
 	}
 
-	allowed, err = h.canReadHistory(ctx, r, 2)
+	allowed, err = h.canReadHistory(ctx, r, visible.ID)
 	if err != nil {
 		t.Fatalf("canReadHistory(visible) error = %v", err)
 	}
 	if !allowed {
 		t.Fatal("canReadHistory(visible) = false, want true")
 	}
+}
+
+func createHistoryServer(t *testing.T, db *gorm.DB, name string, guestVisible bool) model.Server {
+	t.Helper()
+
+	srv := model.Server{
+		Name:           name,
+		Hostname:       name + "-host",
+		Secret:         name + "-secret",
+		IsGuestVisible: guestVisible,
+	}
+	if err := db.WithContext(context.Background()).Create(&srv).Error; err != nil {
+		t.Fatalf("Create(%s) error = %v", name, err)
+	}
+	return srv
 }

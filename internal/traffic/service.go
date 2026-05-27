@@ -121,15 +121,7 @@ func (s *Service) materializeOnce(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	needsTimezoneSave := settings.BillingTimezone == ""
 	settings = trafficstore.SettingsWithTimezone(settings, s.location)
-	if needsTimezoneSave {
-		if err := s.withWriteTimeout(ctx, func(c context.Context) error {
-			return s.store.SetSettings(c, settings)
-		}); err != nil {
-			return err
-		}
-	}
 
 	var errs error
 	if settings.UsageMode == trafficstore.UsageBilling {

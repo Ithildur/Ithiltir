@@ -43,8 +43,8 @@ type RebuildState struct {
 
 type rebuildStore interface {
 	ServerTrafficSource(context.Context, int64, time.Time) (trafficstore.ServerTrafficSource, error)
-	DeleteServerTrafficMonthlySnapshots(context.Context, int64, time.Time, time.Time) error
-	RebuildServerTraffic5mChunk(context.Context, int64, []string, time.Time, time.Time) error
+	DeleteTrafficMonthlySnapshots(context.Context, int64, time.Time, time.Time) error
+	RebuildTraffic5mChunk(context.Context, int64, []string, time.Time, time.Time) error
 }
 
 type trafficWriteGate interface {
@@ -172,7 +172,7 @@ func (r *RebuildRunner) rebuild(ctx context.Context, serverID int64) error {
 
 	// Invalidate monthly snapshots once rebuild starts; old snapshots are no longer trusted.
 	if _, err := infra.WithPGWriteTimeout(ctx, func(c context.Context) (struct{}, error) {
-		return struct{}{}, r.store.DeleteServerTrafficMonthlySnapshots(c, serverID, source.Start, source.End)
+		return struct{}{}, r.store.DeleteTrafficMonthlySnapshots(c, serverID, source.Start, source.End)
 	}); err != nil {
 		return fmt.Errorf("delete server traffic monthly snapshots %d %s..%s: %w", serverID, source.Start, source.End, err)
 	}
@@ -183,7 +183,7 @@ func (r *RebuildRunner) rebuild(ctx context.Context, serverID int64) error {
 			next = source.End
 		}
 		chunkCtx, cancel := context.WithTimeout(ctx, rebuildChunkTimeout)
-		err := r.store.RebuildServerTraffic5mChunk(chunkCtx, serverID, source.Ifaces, cursor, next)
+		err := r.store.RebuildTraffic5mChunk(chunkCtx, serverID, source.Ifaces, cursor, next)
 		cancel()
 		if err != nil {
 			return fmt.Errorf("rebuild server traffic 5m %d %s..%s: %w", serverID, cursor, next, err)

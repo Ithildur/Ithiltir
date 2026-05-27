@@ -46,7 +46,8 @@ func (h *handler) patchSettingsHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	current, err := loadSettings(r.Context(), h.traffic, h.location)
+	// PATCH must preserve empty billing_timezone as app-timezone inheritance.
+	current, err := loadStoredSettings(r.Context(), h.traffic)
 	if err != nil {
 		httperr.Write(w, http.StatusServiceUnavailable, "db_error", "failed to fetch traffic settings")
 		return

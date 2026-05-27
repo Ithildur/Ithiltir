@@ -31,6 +31,7 @@ type nodeView struct {
 	TrafficBillingStartDay   int16       `json:"traffic_billing_start_day"`
 	TrafficBillingAnchorDate string      `json:"traffic_billing_anchor_date"`
 	TrafficBillingTimezone   string      `json:"traffic_billing_timezone"`
+	TrafficDirectionMode     string      `json:"traffic_direction_mode"`
 	Secret                   string      `json:"secret"`
 	Tags                     []string    `json:"tags"`
 	DisplayOrder             int         `json:"display_order"`
@@ -123,6 +124,7 @@ func nodeViews(nodes []nodestore.NodeItem) ([]nodeView, error) {
 			TrafficBillingStartDay:   n.TrafficBillingStartDay,
 			TrafficBillingAnchorDate: n.TrafficBillingAnchorDate,
 			TrafficBillingTimezone:   n.TrafficBillingTimezone,
+			TrafficDirectionMode:     n.TrafficDirectionMode,
 			Secret:                   n.Secret,
 			Tags:                     tags,
 			DisplayOrder:             n.DisplayOrder,

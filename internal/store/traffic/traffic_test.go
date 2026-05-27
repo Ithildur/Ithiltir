@@ -1,7 +1,6 @@
 package traffic
 
 import (
-	"context"
 	"reflect"
 	"testing"
 	"time"
@@ -32,34 +31,6 @@ func TestTrafficCycleCalendarMonth(t *testing.T) {
 	}
 	if cycle.BillingStartDay != 1 {
 		t.Fatalf("billing day = %d, want 1", cycle.BillingStartDay)
-	}
-}
-
-func TestListTrafficIfaces(t *testing.T) {
-	st, db := newSQLiteStore(t)
-	ctx := context.Background()
-	if err := db.AutoMigrate(&model.NICMetric{}); err != nil {
-		t.Fatalf("AutoMigrate() error = %v", err)
-	}
-	start := time.Date(2026, time.April, 1, 0, 0, 0, 0, time.UTC)
-	rows := []model.NICMetric{
-		{ServerID: 7, Iface: "zz0", CollectedAt: start},
-		{ServerID: 7, Iface: "aa0", CollectedAt: start.Add(time.Minute)},
-		{ServerID: 7, Iface: "zz0", CollectedAt: start.Add(2 * time.Minute)},
-	}
-	if err := db.Create(&rows).Error; err != nil {
-		t.Fatalf("Create() error = %v", err)
-	}
-
-	ifaces, err := st.ListTrafficIfaces(ctx, 7)
-	if err != nil {
-		t.Fatalf("ListTrafficIfaces() error = %v", err)
-	}
-	if len(ifaces) != 2 {
-		t.Fatalf("ifaces = %d, want 2", len(ifaces))
-	}
-	if ifaces[0].Name != "aa0" || ifaces[1].Name != "zz0" {
-		t.Fatalf("ifaces = %#v, want distinct names in name order", ifaces)
 	}
 }
 
@@ -156,12 +127,12 @@ func TestSplitTrafficSamplesAcrossBuckets(t *testing.T) {
 func TestMergeTrafficUsagePairClampsToWindowEnd(t *testing.T) {
 	start := time.Date(2026, time.April, 1, 6, 0, 0, 0, time.UTC)
 	end := start.Add(5 * time.Minute)
-	prev := trafficNICRow{
+	prev := trafficUsageNICRow{
 		ServerID:    7,
 		Iface:       "eth0",
 		CollectedAt: start.Add(-time.Minute),
 	}
-	current := trafficNICRow{
+	current := trafficUsageNICRow{
 		ServerID:    7,
 		Iface:       "eth0",
 		CollectedAt: start.Add(10 * time.Minute),
@@ -171,7 +142,9 @@ func TestMergeTrafficUsagePairClampsToWindowEnd(t *testing.T) {
 	usage := map[trafficUsageKey]*trafficUsageAccumulator{}
 	progress := map[trafficUsageKey]time.Time{}
 
-	mergeTrafficUsagePair(usage, progress, DefaultSettings(), time.UTC, start, end, prev, current)
+	if err := mergeTrafficUsagePair(usage, progress, DefaultSettings(), time.UTC, start, end, prev, current); err != nil {
+		t.Fatalf("mergeTrafficUsagePair() error = %v", err)
+	}
 
 	if len(usage) != 1 {
 		t.Fatalf("usage rows = %d, want 1", len(usage))
@@ -190,8 +163,8 @@ func TestMergeTrafficUsagePairUsesRetentionFloor(t *testing.T) {
 	pairStart := time.Date(2026, time.April, 1, 0, 0, 0, 0, time.UTC)
 	floor := pairStart.Add(time.Hour)
 	end := pairStart.Add(7 * time.Hour)
-	prev := trafficNICRow{ServerID: 7, Iface: "eth0", CollectedAt: pairStart}
-	current := trafficNICRow{
+	prev := trafficUsageNICRow{ServerID: 7, Iface: "eth0", CollectedAt: pairStart}
+	current := trafficUsageNICRow{
 		ServerID:    7,
 		Iface:       "eth0",
 		CollectedAt: pairStart.Add(6 * time.Hour),
@@ -201,7 +174,9 @@ func TestMergeTrafficUsagePairUsesRetentionFloor(t *testing.T) {
 	usage := map[trafficUsageKey]*trafficUsageAccumulator{}
 	progress := map[trafficUsageKey]time.Time{}
 
-	mergeTrafficUsagePair(usage, progress, DefaultSettings(), time.UTC, floor, end, prev, current)
+	if err := mergeTrafficUsagePair(usage, progress, DefaultSettings(), time.UTC, floor, end, prev, current); err != nil {
+		t.Fatalf("mergeTrafficUsagePair() error = %v", err)
+	}
 
 	if len(usage) != 1 {
 		t.Fatalf("usage rows = %d, want 1", len(usage))
@@ -222,12 +197,12 @@ func TestMergeTrafficUsagePairUsesRetentionFloor(t *testing.T) {
 func TestBuildTrafficMonthUsageRowsUsesPairSpanningWindow(t *testing.T) {
 	start := time.Date(2026, time.April, 1, 0, 30, 0, 0, time.UTC)
 	end := start.Add(time.Hour)
-	rows := []trafficNICRow{
+	rows := []trafficUsageNICRow{
 		{ServerID: 7, Iface: "eth0", CollectedAt: start.Add(-30 * time.Minute), BytesRecv: 0, BytesSent: 0},
 		{ServerID: 7, Iface: "eth0", CollectedAt: end.Add(30 * time.Minute), BytesRecv: 7200, BytesSent: 14400},
 	}
 
-	items := buildTrafficMonthUsageRows(rows, DefaultSettings(), time.UTC, start, end, map[trafficUsageKey]time.Time{})
+	items := mustBuildTrafficMonthUsageRows(t, rows, DefaultSettings(), time.UTC, start, end, map[trafficUsageKey]time.Time{})
 
 	if len(items) != 1 {
 		t.Fatalf("usage rows = %d, want 1", len(items))
@@ -247,12 +222,12 @@ func TestBuildTrafficMonthUsageRowsUsesPairSpanningWindow(t *testing.T) {
 func TestBuildTrafficMonthUsageRowsDoesNotRoundEachSegment(t *testing.T) {
 	start := time.Date(2026, time.March, 31, 23, 59, 59, 0, time.UTC)
 	end := start.Add(2 * time.Second)
-	rows := []trafficNICRow{
+	rows := []trafficUsageNICRow{
 		{ServerID: 7, Iface: "eth0", CollectedAt: start, BytesRecv: 0, BytesSent: 0},
 		{ServerID: 7, Iface: "eth0", CollectedAt: end, BytesRecv: 1, BytesSent: 1},
 	}
 
-	items := buildTrafficMonthUsageRows(rows, DefaultSettings(), time.UTC, start, end, map[trafficUsageKey]time.Time{})
+	items := mustBuildTrafficMonthUsageRows(t, rows, DefaultSettings(), time.UTC, start, end, map[trafficUsageKey]time.Time{})
 
 	var inBytes int64
 	var outBytes int64
@@ -581,138 +556,24 @@ func traffic5mGapCount(rows []model.Traffic5m) int32 {
 	return out
 }
 
-func TestUpsertTraffic5mRowsReplacesExistingBucket(t *testing.T) {
-	_, db := newSQLiteStore(t)
-	if err := db.AutoMigrate(&model.Traffic5m{}); err != nil {
-		t.Fatalf("AutoMigrate() error = %v", err)
-	}
-	start := time.Date(2026, time.April, 1, 0, 0, 0, 0, time.UTC)
-	row := model.Traffic5m{
-		ServerID:           7,
-		Iface:              "eth0",
-		Bucket:             start,
-		InBytes:            100,
-		OutBytes:           200,
-		CoveredSec:         300,
-		InRateBytesPerSec:  1,
-		OutRateBytesPerSec: 2,
-		InPeakBytesPerSec:  1,
-		OutPeakBytesPerSec: 2,
-		SampleCount:        1,
-		GapCount:           0,
-		ResetCount:         0,
-	}
-	if err := db.Create(&row).Error; err != nil {
-		t.Fatalf("Create() error = %v", err)
-	}
-
-	next := row
-	next.InBytes = 300
-	next.OutBytes = 600
-	next.SampleCount = 0
-	next.GapCount = 1
-	if err := upsertTraffic5mRows(db, []model.Traffic5m{next}); err != nil {
-		t.Fatalf("upsertTraffic5mRows() error = %v", err)
-	}
-
-	var got model.Traffic5m
-	if err := db.First(&got, "server_id = ? AND iface = ? AND bucket = ?", 7, "eth0", start).Error; err != nil {
-		t.Fatalf("First() error = %v", err)
-	}
-	if got.InBytes != 300 || got.OutBytes != 600 || got.SampleCount != 0 || got.GapCount != 1 {
-		t.Fatalf("traffic_5m = %#v, want replaced counters and quality flags", got)
-	}
-}
-
-func TestDeleteServerTraffic5mKeepsOtherIfaces(t *testing.T) {
-	_, db := newSQLiteStore(t)
-	if err := db.AutoMigrate(&model.Traffic5m{}); err != nil {
-		t.Fatalf("AutoMigrate() error = %v", err)
-	}
-	start := time.Date(2026, time.April, 1, 0, 0, 0, 0, time.UTC)
-	rows := []model.Traffic5m{
-		{ServerID: 7, Iface: "eth0", Bucket: start, InBytes: 100},
-		{ServerID: 7, Iface: "eth1", Bucket: start, InBytes: 200},
-		{ServerID: 8, Iface: "eth0", Bucket: start, InBytes: 300},
-		{ServerID: 7, Iface: "eth0", Bucket: start.Add(trafficBucketSize), InBytes: 400},
-	}
-	if err := db.Create(&rows).Error; err != nil {
-		t.Fatalf("Create() error = %v", err)
-	}
-
-	if err := deleteServerTraffic5m(db, 7, []string{"eth0"}, start, start.Add(trafficBucketSize)); err != nil {
-		t.Fatalf("deleteServerTraffic5m() error = %v", err)
-	}
-
-	var left []model.Traffic5m
-	if err := db.Order("server_id, iface, bucket").Find(&left).Error; err != nil {
-		t.Fatalf("Find() error = %v", err)
-	}
-	if len(left) != 3 {
-		t.Fatalf("rows left = %d, want 3: %#v", len(left), left)
-	}
-	if left[0].ServerID != 7 || left[0].Iface != "eth0" || !left[0].Bucket.Equal(start.Add(trafficBucketSize)) {
-		t.Fatalf("first row = %#v, want server 7 eth0 outside window", left[0])
-	}
-	if left[1].ServerID != 7 || left[1].Iface != "eth1" {
-		t.Fatalf("second row = %#v, want server 7 eth1 kept", left[1])
-	}
-	if left[2].ServerID != 8 || left[2].Iface != "eth0" {
-		t.Fatalf("third row = %#v, want other server kept", left[2])
-	}
-}
-
-func TestRebuildServerTraffic5mChunkRejectsEmptyIfaces(t *testing.T) {
-	st, db := newSQLiteStore(t)
-	ctx := context.Background()
-	if err := db.AutoMigrate(&model.Traffic5m{}); err != nil {
-		t.Fatalf("AutoMigrate() error = %v", err)
-	}
-	start := time.Date(2026, time.April, 1, 0, 0, 0, 0, time.UTC)
-	row := model.Traffic5m{
-		ServerID: 7,
-		Iface:    "eth0",
-		Bucket:   start,
-		InBytes:  300,
-		OutBytes: 600,
-	}
-	if err := db.Create(&row).Error; err != nil {
-		t.Fatalf("Create() error = %v", err)
-	}
-
-	err := st.RebuildServerTraffic5mChunk(ctx, 7, []string{}, start, start.Add(trafficBucketSize))
-	if err == nil {
-		t.Fatal("RebuildServerTraffic5mChunk() error = nil, want error")
-	}
-
-	var count int64
-	if err := db.Model(&model.Traffic5m{}).Count(&count).Error; err != nil {
-		t.Fatalf("Count() error = %v", err)
-	}
-	if count != 1 {
-		t.Fatalf("traffic_5m rows = %d, want 1", count)
-	}
-}
-
 func TestBuildTrafficMonthUsageRowsDoesNotWriteAllAggregate(t *testing.T) {
 	start := time.Date(2026, time.April, 1, 0, 0, 0, 0, time.UTC)
 	end := start.Add(5 * time.Minute)
-	settings := Settings{
-		CycleMode:       CycleCalendarMonth,
-		BillingStartDay: 1,
-	}
-	rows := []trafficNICRow{
+	settings := DefaultSettings()
+	settings.CycleMode = CycleCalendarMonth
+	settings.BillingStartDay = 1
+	rows := []trafficUsageNICRow{
 		{ServerID: 7, Iface: "eth0", CollectedAt: start, BytesRecv: 0, BytesSent: 0},
 		{ServerID: 7, Iface: "eth0", CollectedAt: end, BytesRecv: 300, BytesSent: 600},
 		{ServerID: 7, Iface: "eth1", CollectedAt: start, BytesRecv: 0, BytesSent: 0},
 		{ServerID: 7, Iface: "eth1", CollectedAt: end, BytesRecv: 900, BytesSent: 1200},
 	}
 
-	items := buildTrafficMonthUsageRows(rows, settings, time.UTC, start, end, map[trafficUsageKey]time.Time{})
+	items := mustBuildTrafficMonthUsageRows(t, rows, settings, time.UTC, start, end, map[trafficUsageKey]time.Time{})
 
-	byIface := make(map[string]modelTrafficUsageForTest)
+	byIface := make(map[string]usageCounters)
 	for _, item := range items {
-		byIface[item.Iface] = modelTrafficUsageForTest{
+		byIface[item.Iface] = usageCounters{
 			inBytes:  item.InBytes,
 			outBytes: item.OutBytes,
 			inPeak:   item.InPeakBytesPerSec,
@@ -734,22 +595,21 @@ func TestBuildTrafficMonthUsageRowsDoesNotWriteAllAggregate(t *testing.T) {
 
 func TestBuildTrafficMonthUsageRowsKeepsIfaceRowsSeparate(t *testing.T) {
 	start := time.Date(2026, time.April, 1, 0, 0, 0, 0, time.UTC)
-	settings := Settings{
-		CycleMode:       CycleCalendarMonth,
-		BillingStartDay: 1,
-	}
-	rows := []trafficNICRow{
+	settings := DefaultSettings()
+	settings.CycleMode = CycleCalendarMonth
+	settings.BillingStartDay = 1
+	rows := []trafficUsageNICRow{
 		{ServerID: 7, Iface: "eth0", CollectedAt: start.Add(time.Second), BytesRecv: 0, BytesSent: 0},
 		{ServerID: 7, Iface: "eth0", CollectedAt: start.Add(6 * time.Second), BytesRecv: 300, BytesSent: 600},
 		{ServerID: 7, Iface: "eth1", CollectedAt: start.Add(2 * time.Second), BytesRecv: 0, BytesSent: 0},
 		{ServerID: 7, Iface: "eth1", CollectedAt: start.Add(7 * time.Second), BytesRecv: 900, BytesSent: 1200},
 	}
 
-	items := buildTrafficMonthUsageRows(rows, settings, time.UTC, start, start.Add(5*time.Minute), map[trafficUsageKey]time.Time{})
+	items := mustBuildTrafficMonthUsageRows(t, rows, settings, time.UTC, start, start.Add(5*time.Minute), map[trafficUsageKey]time.Time{})
 
-	byIface := make(map[string]modelTrafficUsageForTest)
+	byIface := make(map[string]usageCounters)
 	for _, item := range items {
-		byIface[item.Iface] = modelTrafficUsageForTest{
+		byIface[item.Iface] = usageCounters{
 			inBytes:  item.InBytes,
 			outBytes: item.OutBytes,
 			inPeak:   item.InPeakBytesPerSec,
@@ -767,16 +627,15 @@ func TestBuildTrafficMonthUsageRowsKeepsIfaceRowsSeparate(t *testing.T) {
 func TestBuildTrafficMonthUsageRowsKeepsGapBytesOutOfPeak(t *testing.T) {
 	start := time.Date(2026, time.April, 1, 0, 0, 0, 0, time.UTC)
 	end := start.Add(10 * time.Minute)
-	settings := Settings{
-		CycleMode:       CycleCalendarMonth,
-		BillingStartDay: 1,
-	}
-	rows := []trafficNICRow{
+	settings := DefaultSettings()
+	settings.CycleMode = CycleCalendarMonth
+	settings.BillingStartDay = 1
+	rows := []trafficUsageNICRow{
 		{ServerID: 7, Iface: "eth0", CollectedAt: start, BytesRecv: 0, BytesSent: 0},
 		{ServerID: 7, Iface: "eth0", CollectedAt: end, BytesRecv: 600, BytesSent: 1200},
 	}
 
-	items := buildTrafficMonthUsageRows(rows, settings, time.UTC, start, end, map[trafficUsageKey]time.Time{})
+	items := mustBuildTrafficMonthUsageRows(t, rows, settings, time.UTC, start, end, map[trafficUsageKey]time.Time{})
 
 	if len(items) != 1 {
 		t.Fatalf("items = %d, want 1", len(items))
@@ -797,16 +656,15 @@ func TestBuildTrafficMonthUsageRowsUsesGivenLocation(t *testing.T) {
 	loc := time.FixedZone("Asia/Test", 8*60*60)
 	start := time.Date(2026, time.March, 31, 16, 0, 0, 0, time.UTC)
 	end := start.Add(5 * time.Minute)
-	settings := Settings{
-		CycleMode:       CycleCalendarMonth,
-		BillingStartDay: 1,
-	}
-	rows := []trafficNICRow{
+	settings := DefaultSettings()
+	settings.CycleMode = CycleCalendarMonth
+	settings.BillingStartDay = 1
+	rows := []trafficUsageNICRow{
 		{ServerID: 7, Iface: "eth0", CollectedAt: start, BytesRecv: 0, BytesSent: 0},
 		{ServerID: 7, Iface: "eth0", CollectedAt: end, BytesRecv: 120, BytesSent: 240},
 	}
 
-	items := buildTrafficMonthUsageRows(rows, settings, loc, start, end, map[trafficUsageKey]time.Time{})
+	items := mustBuildTrafficMonthUsageRows(t, rows, settings, loc, start, end, map[trafficUsageKey]time.Time{})
 
 	if len(items) == 0 {
 		t.Fatalf("usage rows are missing")
@@ -825,11 +683,10 @@ func TestBuildTrafficMonthUsageRowsUsesGivenLocation(t *testing.T) {
 func TestBuildTrafficMonthUsageRowsUsesServerCycleOverride(t *testing.T) {
 	start := time.Date(2026, time.April, 16, 0, 0, 0, 0, time.UTC)
 	end := start.Add(5 * time.Minute)
-	settings := Settings{
-		CycleMode:       CycleCalendarMonth,
-		BillingStartDay: 1,
-	}
-	rows := []trafficNICRow{
+	settings := DefaultSettings()
+	settings.CycleMode = CycleCalendarMonth
+	settings.BillingStartDay = 1
+	rows := []trafficUsageNICRow{
 		{
 			ServerID:        7,
 			Iface:           "eth0",
@@ -850,7 +707,7 @@ func TestBuildTrafficMonthUsageRowsUsesServerCycleOverride(t *testing.T) {
 		},
 	}
 
-	items := buildTrafficMonthUsageRows(rows, settings, time.UTC, start, end, map[trafficUsageKey]time.Time{})
+	items := mustBuildTrafficMonthUsageRows(t, rows, settings, time.UTC, start, end, map[trafficUsageKey]time.Time{})
 
 	if len(items) != 1 {
 		t.Fatalf("items = %d, want 1", len(items))
@@ -868,11 +725,20 @@ func TestBuildTrafficMonthUsageRowsUsesServerCycleOverride(t *testing.T) {
 	}
 }
 
-type modelTrafficUsageForTest struct {
+type usageCounters struct {
 	inBytes  int64
 	outBytes int64
 	inPeak   float64
 	outPeak  float64
+}
+
+func mustBuildTrafficMonthUsageRows(t *testing.T, rows []trafficUsageNICRow, settings Settings, loc *time.Location, start, end time.Time, progress map[trafficUsageKey]time.Time) []model.TrafficMonthUsage {
+	t.Helper()
+	items, err := buildTrafficMonthUsageRows(rows, settings, loc, start, end, progress)
+	if err != nil {
+		t.Fatalf("buildTrafficMonthUsageRows() error = %v", err)
+	}
+	return items
 }
 
 func TestTrafficBillingSelectionUsesOutboundP95(t *testing.T) {

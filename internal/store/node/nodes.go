@@ -32,6 +32,7 @@ type NodeUpdate struct {
 	TrafficBillingStartDay   *int
 	TrafficBillingAnchorDate *string
 	TrafficBillingTimezone   *string
+	TrafficDirectionMode     *trafficstore.ServerDirectionMode
 	DisplayOrder             *int
 	Tags                     *datatypes.JSON
 	Secret                   *string
@@ -51,6 +52,7 @@ type NodeItem struct {
 	TrafficBillingStartDay   int16          `json:"traffic_billing_start_day"`
 	TrafficBillingAnchorDate string         `json:"traffic_billing_anchor_date"`
 	TrafficBillingTimezone   string         `json:"traffic_billing_timezone"`
+	TrafficDirectionMode     string         `json:"traffic_direction_mode"`
 	Secret                   string         `json:"secret"`
 	Tags                     datatypes.JSON `json:"tags"`
 	DisplayOrder             int            `json:"display_order"`
@@ -58,12 +60,11 @@ type NodeItem struct {
 	AgentVersion             *string        `json:"version" gorm:"column:agent_version"`
 }
 
-// Nodes returns nodes with basic fields for listing.
 func (s *Store) Nodes(ctx context.Context) ([]NodeItem, error) {
 	var nodes []NodeItem
 	err := s.db.WithContext(ctx).
 		Model(&model.Server{}).
-		Select("id", "name", "hostname", "ip", "os", "arch", "is_guest_visible", "traffic_p95_enabled", "traffic_cycle_mode", "traffic_billing_start_day", "traffic_billing_anchor_date", "traffic_billing_timezone", "secret", "tags", "display_order", "agent_version").
+		Select([]string{"id", "name", "hostname", "ip", "os", "arch", "is_guest_visible", "traffic_p95_enabled", "traffic_cycle_mode", "traffic_billing_start_day", "traffic_billing_anchor_date", "traffic_billing_timezone", "traffic_direction_mode", "secret", "tags", "display_order", "agent_version"}).
 		Where("is_deleted = ?", false).
 		Order("display_order DESC").
 		Find(&nodes).
@@ -416,6 +417,9 @@ func patchFields(upd NodeUpdate) map[string]any {
 	}
 	if upd.TrafficBillingTimezone != nil {
 		m["traffic_billing_timezone"] = *upd.TrafficBillingTimezone
+	}
+	if upd.TrafficDirectionMode != nil {
+		m["traffic_direction_mode"] = string(*upd.TrafficDirectionMode)
 	}
 	if upd.DisplayOrder != nil {
 		m["display_order"] = *upd.DisplayOrder

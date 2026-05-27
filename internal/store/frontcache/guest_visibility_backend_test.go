@@ -7,6 +7,7 @@ import (
 
 	"dash/internal/infra/cachekeys"
 	"dash/internal/model"
+	pgtest "dash/internal/testutil/postgres"
 
 	"github.com/alicebob/miniredis/v2"
 	"github.com/redis/go-redis/v9"
@@ -71,38 +72,41 @@ func TestGuestVisibilityPublishedEmptySet(t *testing.T) {
 	}
 }
 
-func TestEnsureGuestVisibleIDsRebuildsAfterMetaClear(t *testing.T) {
+func TestIntegrationEnsureGuestVisibleIDsRebuildsAfterMetaClear(t *testing.T) {
 	ctx := context.Background()
-	db := newFrontCacheDB(t)
-	if err := db.Create(&[]model.Server{
-		{ID: 1, Name: "one", Hostname: "one", Secret: "one", IsGuestVisible: true},
-		{ID: 2, Name: "two", Hostname: "two", Secret: "two", IsGuestVisible: false},
-	}).Error; err != nil {
+	db := pgtest.NewDB(t)
+	servers := []model.Server{
+		{Name: "one", Hostname: "one", Secret: "one", IsGuestVisible: true},
+		{Name: "two", Hostname: "two", Secret: "two", IsGuestVisible: false},
+	}
+	if err := db.Create(&servers).Error; err != nil {
 		t.Fatalf("create servers: %v", err)
 	}
+	visibleID := servers[0].ID
+	hiddenID := servers[1].ID
 
 	st := New(db, nil)
-	if err := st.replaceGuestVisibleIDs(ctx, map[int64]struct{}{1: {}}); err != nil {
+	if err := st.replaceGuestVisibleIDs(ctx, map[int64]struct{}{visibleID: {}}); err != nil {
 		t.Fatalf("replace guest visibility: %v", err)
 	}
 	if err := st.ClearGuestVisibilityMeta(ctx); err != nil {
 		t.Fatalf("clear guest visibility meta: %v", err)
 	}
 
-	got, err := st.EnsureGuestVisibleIDs(ctx, []int64{1, 2}, GuestVisibilityOptions{
+	got, err := st.EnsureGuestVisibleIDs(ctx, []int64{visibleID, hiddenID}, GuestVisibilityOptions{
 		CacheTimeout: time.Second,
 		BuildTimeout: time.Second,
 	})
 	if err != nil {
 		t.Fatalf("ensure guest visibility: %v", err)
 	}
-	if _, ok := got[1]; !ok {
-		t.Fatalf("expected guest-visible server 1")
+	if _, ok := got[visibleID]; !ok {
+		t.Fatalf("expected guest-visible server %d", visibleID)
 	}
-	if _, ok := got[2]; ok {
-		t.Fatalf("server 2 should not be guest-visible")
+	if _, ok := got[hiddenID]; ok {
+		t.Fatalf("server %d should not be guest-visible", hiddenID)
 	}
-	if _, ok, err := st.loadGuestVisibleIDs(ctx, []int64{1, 2}); err != nil || !ok {
+	if _, ok, err := st.loadGuestVisibleIDs(ctx, []int64{visibleID, hiddenID}); err != nil || !ok {
 		t.Fatalf("ensure should republish guest visibility, ok=%v err=%v", ok, err)
 	}
 }

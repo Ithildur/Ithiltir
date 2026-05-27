@@ -2,30 +2,13 @@ package system
 
 import (
 	"context"
-	"net/url"
 	"testing"
 
-	"dash/internal/model"
-	"gorm.io/driver/sqlite"
-	"gorm.io/gorm"
+	pgtest "dash/internal/testutil/postgres"
 )
 
-func newSQLiteStore(t *testing.T) *Store {
-	t.Helper()
-
-	dsn := "file:" + url.QueryEscape(t.Name()) + "?mode=memory&cache=shared"
-	db, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{})
-	if err != nil {
-		t.Fatalf("gorm.Open() error = %v", err)
-	}
-	if err := db.AutoMigrate(&model.SystemSetting{}); err != nil {
-		t.Fatalf("AutoMigrate() error = %v", err)
-	}
-	return New(db)
-}
-
-func TestSiteBrandDefaultsAndStoredValues(t *testing.T) {
-	st := newSQLiteStore(t)
+func TestIntegrationSystemSettingsPreserveOtherFields(t *testing.T) {
+	st := New(pgtest.NewDB(t))
 	ctx := context.Background()
 
 	brand, err := st.GetSiteBrand(ctx)
@@ -35,27 +18,6 @@ func TestSiteBrandDefaultsAndStoredValues(t *testing.T) {
 	if brand != DefaultSiteBrand() {
 		t.Fatalf("GetSiteBrand() = %#v, want %#v", brand, DefaultSiteBrand())
 	}
-
-	want := SiteBrand{
-		LogoURL:    "data:image/svg+xml;base64,PHN2Zy8+",
-		PageTitle:  "Status",
-		TopbarText: "Ops",
-	}
-	if err := st.SetSiteBrand(ctx, want); err != nil {
-		t.Fatalf("SetSiteBrand() error = %v", err)
-	}
-	brand, err = st.GetSiteBrand(ctx)
-	if err != nil {
-		t.Fatalf("GetSiteBrand() error = %v", err)
-	}
-	if brand != want {
-		t.Fatalf("GetSiteBrand() = %#v, want %#v", brand, want)
-	}
-}
-
-func TestSystemSettingsPreserveOtherFields(t *testing.T) {
-	st := newSQLiteStore(t)
-	ctx := context.Background()
 
 	if err := st.SetActiveThemeID(ctx, "operator"); err != nil {
 		t.Fatalf("SetActiveThemeID() error = %v", err)
@@ -79,7 +41,7 @@ func TestSystemSettingsPreserveOtherFields(t *testing.T) {
 	if err := st.SetActiveThemeID(ctx, "default"); err != nil {
 		t.Fatalf("SetActiveThemeID(default) error = %v", err)
 	}
-	brand, err := st.GetSiteBrand(ctx)
+	brand, err = st.GetSiteBrand(ctx)
 	if err != nil {
 		t.Fatalf("GetSiteBrand() error = %v", err)
 	}

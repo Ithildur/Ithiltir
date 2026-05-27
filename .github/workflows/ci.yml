@@ -13,6 +13,20 @@ permissions:
 jobs:
   package:
     runs-on: ubuntu-latest
+    services:
+      timescaledb:
+        image: timescale/timescaledb:2.27.1-pg16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
 
     steps:
       - name: Checkout
@@ -35,6 +49,8 @@ jobs:
         run: cd web && bun install --frozen-lockfile
 
       - name: Go Test
+        env:
+          TEST_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres?sslmode=disable
         run: go test ./...
 
       - name: Frontend Lint

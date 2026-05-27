@@ -2,7 +2,6 @@ package traffic
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"fmt"
 	"math"
@@ -210,40 +209,49 @@ func (s *Store) TrafficP95Enabled(ctx context.Context, serverID int64) (bool, er
 	return row.Enabled, err
 }
 
-func (s *Store) ServerCycleSettings(ctx context.Context, serverID int64) (ServerCycleSettings, error) {
+func (s *Store) EffectiveServerSettings(ctx context.Context, serverID int64, defaults Settings) (Settings, error) {
 	if s == nil || s.db == nil {
-		return ServerCycleSettings{Mode: ServerCycleDefault}, fmt.Errorf("store: db is nil")
+		return Settings{}, fmt.Errorf("store: db is nil")
 	}
 	if serverID <= 0 {
-		return ServerCycleSettings{Mode: ServerCycleDefault}, fmt.Errorf("invalid server id")
+		return Settings{}, fmt.Errorf("invalid server id")
+	}
+	defaults, ok := NormalizeSettings(defaults)
+	if !ok {
+		return Settings{}, fmt.Errorf("invalid traffic settings")
 	}
 	var row struct {
-		Mode              string `gorm:"column:traffic_cycle_mode"`
+		CycleMode         string `gorm:"column:traffic_cycle_mode"`
 		BillingStartDay   int16  `gorm:"column:traffic_billing_start_day"`
 		BillingAnchorDate string `gorm:"column:traffic_billing_anchor_date"`
 		BillingTimezone   string `gorm:"column:traffic_billing_timezone"`
+		DirectionMode     string `gorm:"column:traffic_direction_mode"`
 	}
 	err := s.db.WithContext(ctx).
 		Model(&model.Server{}).
-		Select("traffic_cycle_mode", "traffic_billing_start_day", "traffic_billing_anchor_date", "traffic_billing_timezone").
+		Select("traffic_cycle_mode", "traffic_billing_start_day", "traffic_billing_anchor_date", "traffic_billing_timezone", "traffic_direction_mode").
 		Where("id = ? AND is_deleted = ?", serverID, false).
 		Take(&row).Error
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return ServerCycleSettings{Mode: ServerCycleDefault}, nil
+			return defaults, nil
 		}
-		return ServerCycleSettings{Mode: ServerCycleDefault}, err
+		return Settings{}, err
 	}
-	cycle, err := NormalizeServerCycleSettings(ServerCycleSettings{
-		Mode:              ServerCycleMode(row.Mode),
+	settings, err := SettingsWithServerCycle(defaults, ServerCycleSettings{
+		Mode:              ServerCycleMode(row.CycleMode),
 		BillingStartDay:   int(row.BillingStartDay),
 		BillingAnchorDate: strings.TrimSpace(row.BillingAnchorDate),
 		BillingTimezone:   strings.TrimSpace(row.BillingTimezone),
 	})
 	if err != nil {
-		return ServerCycleSettings{Mode: ServerCycleDefault}, nil
+		return Settings{}, fmt.Errorf("server %d traffic cycle settings: %w", serverID, err)
 	}
-	return cycle, nil
+	settings, err = SettingsWithServerDirection(settings, ServerDirectionMode(row.DirectionMode))
+	if err != nil {
+		return Settings{}, fmt.Errorf("server %d traffic direction settings: %w", serverID, err)
+	}
+	return settings, nil
 }
 
 func (s *Store) TrafficSummary(ctx context.Context, q TrafficQuery) (TrafficSummary, error) {
@@ -513,7 +521,10 @@ func (s *Store) trafficMonthlyCycleSettings(ctx context.Context, global Settings
 	seen := make(map[trafficMonthlySettingsKey]struct{}, len(rows)+1)
 	out := make([]Settings, 0, len(rows)+1)
 	for _, row := range rows {
-		settings := SettingsWithServerCycleSettings(global, row.serverCycleSettings())
+		settings, err := SettingsWithServerCycle(global, row.serverCycleSettings())
+		if err != nil {
+			return nil, fmt.Errorf("server %d traffic cycle settings: %w", row.ServerID, err)
+		}
 		key := trafficMonthlySettingsKeyFrom(settings)
 		if _, ok := seen[key]; ok {
 			continue
@@ -549,7 +560,10 @@ func (s *Store) trafficMonthlyCandidates(ctx context.Context, global, target Set
 	out := make([]trafficMonthlyCandidate, 0, len(rows))
 	targetKey := trafficMonthlySettingsKeyFrom(target)
 	for _, row := range rows {
-		effective := SettingsWithServerCycleSettings(global, row.serverCycleSettings())
+		effective, err := SettingsWithServerCycle(global, row.serverCycleSettings())
+		if err != nil {
+			return nil, fmt.Errorf("server %d traffic cycle settings: %w", row.ServerID, err)
+		}
 		if trafficMonthlySettingsKeyFrom(effective) != targetKey {
 			continue
 		}
@@ -755,18 +769,27 @@ func (s *Store) trafficEffectiveWindow(ctx context.Context, serverID int64, ifac
 
 func (s *Store) firstTrafficMetricTime(ctx context.Context, serverID int64, iface string, before time.Time) (time.Time, bool, error) {
 	iface = normalizeTrafficIface(iface)
-	db := s.db.WithContext(ctx).
+	var row struct {
+		CollectedAt time.Time `gorm:"column:collected_at"`
+	}
+	err := s.db.WithContext(ctx).
 		Table("nic_metrics").
-		Select("MIN(collected_at)").
-		Where("server_id = ? AND iface = ? AND collected_at < ?", serverID, iface, before)
-	var first sql.NullTime
-	if err := db.Scan(&first).Error; err != nil {
+		Select("collected_at").
+		Where("server_id = ? AND iface = ? AND collected_at < ?", serverID, iface, before).
+		Order("collected_at ASC").
+		Limit(1).
+		Take(&row).
+		Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return time.Time{}, false, nil
+		}
 		return time.Time{}, false, err
 	}
-	if !first.Valid || first.Time.IsZero() {
+	if row.CollectedAt.IsZero() {
 		return time.Time{}, false, nil
 	}
-	return first.Time.UTC(), true, nil
+	return row.CollectedAt.UTC(), true, nil
 }
 
 func emptyTrafficStatWithP95(start, end time.Time, cycleComplete bool, status TrafficSnapshotStatus, usage UsageMode, p95Enabled bool) TrafficStat {

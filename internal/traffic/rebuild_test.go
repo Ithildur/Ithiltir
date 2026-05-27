@@ -35,11 +35,11 @@ func (s *blockingRebuildStore) ServerTrafficSource(context.Context, int64, time.
 	}, nil
 }
 
-func (s *blockingRebuildStore) DeleteServerTrafficMonthlySnapshots(context.Context, int64, time.Time, time.Time) error {
+func (s *blockingRebuildStore) DeleteTrafficMonthlySnapshots(context.Context, int64, time.Time, time.Time) error {
 	return nil
 }
 
-func (s *blockingRebuildStore) RebuildServerTraffic5mChunk(ctx context.Context, serverID int64, _ []string, _, _ time.Time) error {
+func (s *blockingRebuildStore) RebuildTraffic5mChunk(ctx context.Context, serverID int64, _ []string, _, _ time.Time) error {
 	s.started <- serverID
 	select {
 	case <-s.release:
@@ -62,12 +62,12 @@ func (s *recordingRebuildStore) ServerTrafficSource(_ context.Context, _ int64, 
 	return s.source, nil
 }
 
-func (s *recordingRebuildStore) DeleteServerTrafficMonthlySnapshots(_ context.Context, _ int64, start, _ time.Time) error {
+func (s *recordingRebuildStore) DeleteTrafficMonthlySnapshots(_ context.Context, _ int64, start, _ time.Time) error {
 	s.deleteStart = start
 	return nil
 }
 
-func (s *recordingRebuildStore) RebuildServerTraffic5mChunk(_ context.Context, _ int64, _ []string, start, end time.Time) error {
+func (s *recordingRebuildStore) RebuildTraffic5mChunk(_ context.Context, _ int64, _ []string, start, end time.Time) error {
 	if s.chunkStart.IsZero() {
 		s.chunkStart = start
 	}

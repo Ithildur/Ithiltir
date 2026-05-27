@@ -105,6 +105,7 @@ type Server struct {
 	TrafficBillingStartDay   int16          `gorm:"column:traffic_billing_start_day;not null;default:1"`
 	TrafficBillingAnchorDate string         `gorm:"column:traffic_billing_anchor_date;size:10;not null;default:''"`
 	TrafficBillingTimezone   string         `gorm:"column:traffic_billing_timezone;size:64;not null;default:''"`
+	TrafficDirectionMode     string         `gorm:"column:traffic_direction_mode;size:16;not null;default:'default'"`
 	IsDeleted                bool           `gorm:"column:is_deleted;not null;default:false"`
 	AgentVersion             *string        `gorm:"column:agent_version"`
 	Remark                   *string        `gorm:"column:remark"`

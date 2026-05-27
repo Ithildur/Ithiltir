@@ -89,19 +89,21 @@ func loadSettings(ctx context.Context, st *trafficstore.Store, loc *time.Locatio
 	})
 }
 
+func loadStoredSettings(ctx context.Context, st *trafficstore.Store) (trafficstore.Settings, error) {
+	return infra.WithPGReadTimeout(ctx, func(c context.Context) (trafficstore.Settings, error) {
+		return st.GetSettings(c)
+	})
+}
+
 func loadP95Enabled(ctx context.Context, st *trafficstore.Store, serverID int64) (bool, error) {
 	return infra.WithPGReadTimeout(ctx, func(c context.Context) (bool, error) {
 		return st.TrafficP95Enabled(c, serverID)
 	})
 }
 
-func loadEffectiveCycleSettings(ctx context.Context, st *trafficstore.Store, serverID int64, defaults trafficstore.Settings) (trafficstore.Settings, error) {
+func loadEffectiveSettings(ctx context.Context, st *trafficstore.Store, serverID int64, defaults trafficstore.Settings) (trafficstore.Settings, error) {
 	return infra.WithPGReadTimeout(ctx, func(c context.Context) (trafficstore.Settings, error) {
-		cycle, err := st.ServerCycleSettings(c, serverID)
-		if err != nil {
-			return trafficstore.Settings{}, err
-		}
-		return trafficstore.SettingsWithServerCycleSettings(defaults, cycle), nil
+		return st.EffectiveServerSettings(c, serverID, defaults)
 	})
 }
 

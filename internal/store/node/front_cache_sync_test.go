@@ -10,13 +10,10 @@ import (
 	"dash/internal/metrics"
 	"dash/internal/model"
 	"dash/internal/store/frontcache"
-
-	"github.com/alicebob/miniredis/v2"
-	"github.com/redis/go-redis/v9"
 )
 
-func TestUpdateNodePatchesFrontNodeSnapshot(t *testing.T) {
-	st := newSQLiteStore(t)
+func TestIntegrationUpdateNodePatchesFrontNodeSnapshot(t *testing.T) {
+	st, _ := newIntegrationStore(t)
 	ctx := context.Background()
 	srv := createCacheSyncServer(t, st, "old", 1)
 	putFrontNodeSnapshot(t, st, srv, "old", 1)
@@ -48,8 +45,8 @@ func TestUpdateNodePatchesFrontNodeSnapshot(t *testing.T) {
 	}
 }
 
-func TestDeleteNodeRemovesFrontNodeSnapshot(t *testing.T) {
-	st := newSQLiteStore(t)
+func TestIntegrationDeleteNodeRemovesFrontNodeSnapshot(t *testing.T) {
+	st, _ := newIntegrationStore(t)
 	ctx := context.Background()
 	srv := createCacheSyncServer(t, st, "node", 1)
 	putFrontNodeSnapshot(t, st, srv, "node", 1)
@@ -76,16 +73,11 @@ func TestDeleteNodeRemovesFrontNodeSnapshot(t *testing.T) {
 	}
 }
 
-func TestCreateNodeClearsFrontSnapshotMeta(t *testing.T) {
+func TestIntegrationCreateNodeClearsFrontSnapshotMeta(t *testing.T) {
+	st, client := newIntegrationStore(t)
 	ctx := context.Background()
-	db := newSQLiteDB(t)
-	srv := miniredis.RunT(t)
-	client := redis.NewClient(&redis.Options{Addr: srv.Addr()})
-	t.Cleanup(func() { _ = client.Close() })
 
-	front := frontcache.New(db, client)
-	st := New(db, client, front)
-	if _, err := front.EnsureSnapshot(ctx, frontcache.FrontSnapshotOptions{
+	if _, err := st.front.EnsureSnapshot(ctx, frontcache.FrontSnapshotOptions{
 		CacheTimeout:  time.Second,
 		BuildTimeout:  time.Second,
 		StaleAfterSec: 60,

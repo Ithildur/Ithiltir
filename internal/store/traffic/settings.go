@@ -18,6 +18,7 @@ type GuestAccessMode string
 type UsageMode string
 type BillingCycleMode string
 type ServerCycleMode string
+type ServerDirectionMode string
 type DirectionMode string
 
 const (
@@ -33,6 +34,8 @@ const (
 
 	ServerCycleDefault ServerCycleMode = "default"
 
+	ServerDirectionDefault ServerDirectionMode = "default"
+
 	DirectionOut  DirectionMode = "out"
 	DirectionBoth DirectionMode = "both"
 	DirectionMax  DirectionMode = "max"
@@ -43,6 +46,7 @@ var (
 	ErrInvalidServerCycleStartDay   = errors.New("invalid server cycle billing start day")
 	ErrInvalidServerCycleAnchorDate = errors.New("invalid server cycle billing anchor date")
 	ErrInvalidServerCycleTimezone   = errors.New("invalid server cycle billing timezone")
+	ErrInvalidServerDirectionMode   = errors.New("invalid server direction mode")
 )
 
 type Settings struct {
@@ -122,6 +126,21 @@ func NormalizeServerCycleMode(mode ServerCycleMode) (ServerCycleMode, bool) {
 	}
 }
 
+func NormalizeServerDirectionMode(mode ServerDirectionMode) (ServerDirectionMode, bool) {
+	switch mode {
+	case "", ServerDirectionDefault:
+		return ServerDirectionDefault, true
+	case ServerDirectionMode(DirectionOut):
+		return ServerDirectionMode(DirectionOut), true
+	case ServerDirectionMode(DirectionBoth):
+		return ServerDirectionMode(DirectionBoth), true
+	case ServerDirectionMode(DirectionMax):
+		return ServerDirectionMode(DirectionMax), true
+	default:
+		return ServerDirectionDefault, false
+	}
+}
+
 func NormalizeServerCycleSettings(cycle ServerCycleSettings) (ServerCycleSettings, error) {
 	mode, ok := NormalizeServerCycleMode(cycle.Mode)
 	if !ok {
@@ -137,7 +156,7 @@ func NormalizeServerCycleSettings(cycle ServerCycleSettings) (ServerCycleSetting
 
 	anchor := strings.TrimSpace(cycle.BillingAnchorDate)
 	anchorDay := 0
-	if anchor != "" {
+	if mode == ServerCycleMode(CycleWHMCS) || anchor != "" {
 		anchorTime, valid := parseTrafficAnchorDate(anchor, time.Local)
 		if !valid {
 			return ServerCycleSettings{Mode: ServerCycleDefault}, ErrInvalidServerCycleAnchorDate
@@ -157,7 +176,7 @@ func NormalizeServerCycleSettings(cycle ServerCycleSettings) (ServerCycleSetting
 		return ServerCycleSettings{Mode: ServerCycleDefault}, ErrInvalidServerCycleStartDay
 	}
 
-	if mode == ServerCycleMode(CycleWHMCS) && anchor != "" {
+	if mode == ServerCycleMode(CycleWHMCS) {
 		day = anchorDay
 	} else if mode != ServerCycleMode(CycleWHMCS) {
 		anchor = ""
@@ -171,18 +190,52 @@ func NormalizeServerCycleSettings(cycle ServerCycleSettings) (ServerCycleSetting
 	}, nil
 }
 
-func SettingsWithServerCycleSettings(settings Settings, cycle ServerCycleSettings) Settings {
-	normalized, _ := NormalizeSettings(settings)
+func SettingsWithServerCycle(settings Settings, cycle ServerCycleSettings) (Settings, error) {
+	normalized, ok := NormalizeSettings(settings)
+	if !ok {
+		return Settings{}, fmt.Errorf("invalid traffic settings")
+	}
+	mode, ok := NormalizeServerCycleMode(cycle.Mode)
+	if !ok {
+		return Settings{}, ErrInvalidServerCycleMode
+	}
+	cycle.Mode = mode
 	cycle, err := NormalizeServerCycleSettings(cycle)
-	if err != nil || cycle.Mode == ServerCycleDefault {
-		return normalized
+	if err != nil {
+		return Settings{}, err
+	}
+	if cycle.Mode == ServerCycleDefault {
+		return normalized, nil
 	}
 	normalized.CycleMode = BillingCycleMode(cycle.Mode)
 	normalized.BillingStartDay = cycle.BillingStartDay
 	normalized.BillingAnchorDate = cycle.BillingAnchorDate
 	normalized.BillingTimezone = cycle.BillingTimezone
-	next, _ := NormalizeSettings(normalized)
-	return next
+	next, ok := NormalizeSettings(normalized)
+	if !ok {
+		return Settings{}, fmt.Errorf("invalid traffic settings")
+	}
+	return next, nil
+}
+
+func SettingsWithServerDirection(settings Settings, mode ServerDirectionMode) (Settings, error) {
+	normalized, ok := NormalizeSettings(settings)
+	if !ok {
+		return Settings{}, fmt.Errorf("invalid traffic settings")
+	}
+	mode, ok = NormalizeServerDirectionMode(mode)
+	if !ok {
+		return Settings{}, ErrInvalidServerDirectionMode
+	}
+	if mode == ServerDirectionDefault {
+		return normalized, nil
+	}
+	normalized.DirectionMode = DirectionMode(mode)
+	next, ok := NormalizeSettings(normalized)
+	if !ok {
+		return Settings{}, fmt.Errorf("invalid traffic settings")
+	}
+	return next, nil
 }
 
 func NormalizeDirectionMode(mode DirectionMode) (DirectionMode, bool) {
@@ -239,7 +292,7 @@ func NormalizeSettings(settings Settings) (Settings, bool) {
 		day = 1
 		anchor = ""
 	}
-	if cycle == CycleWHMCS && anchor != "" {
+	if cycle == CycleWHMCS {
 		anchorTime, valid := parseTrafficAnchorDate(anchor, time.Local)
 		if !valid {
 			anchor = ""

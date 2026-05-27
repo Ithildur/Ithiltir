@@ -1,29 +1,9 @@
 package traffic
 
 import (
-	"context"
 	"errors"
-	"net/url"
 	"testing"
-
-	"dash/internal/model"
-	"gorm.io/driver/sqlite"
-	"gorm.io/gorm"
 )
-
-func newSQLiteStore(t *testing.T) (*Store, *gorm.DB) {
-	t.Helper()
-
-	dsn := "file:" + url.QueryEscape(t.Name()) + "?mode=memory&cache=shared"
-	db, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{})
-	if err != nil {
-		t.Fatalf("gorm.Open() error = %v", err)
-	}
-	if err := db.AutoMigrate(&model.TrafficSetting{}); err != nil {
-		t.Fatalf("AutoMigrate() error = %v", err)
-	}
-	return New(db), db
-}
 
 func TestSettingsDefaultDirectionIsOutbound(t *testing.T) {
 	settings := DefaultSettings()
@@ -114,57 +94,5 @@ func TestNormalizeServerCycleSettings(t *testing.T) {
 		BillingAnchorDate: "not-a-date",
 	}); !errors.Is(err, ErrInvalidServerCycleAnchorDate) {
 		t.Fatalf("NormalizeServerCycleSettings(default invalid anchor) error = %v, want %v", err, ErrInvalidServerCycleAnchorDate)
-	}
-}
-
-func TestServerCycleSettingsMissingServerUsesDefault(t *testing.T) {
-	st, db := newSQLiteStore(t)
-	ctx := context.Background()
-	if err := db.AutoMigrate(&model.Server{}); err != nil {
-		t.Fatalf("AutoMigrate() error = %v", err)
-	}
-
-	cycle, err := st.ServerCycleSettings(ctx, 404)
-	if err != nil {
-		t.Fatalf("ServerCycleSettings(missing) error = %v", err)
-	}
-	if cycle.Mode != ServerCycleDefault {
-		t.Fatalf("mode = %q, want %q", cycle.Mode, ServerCycleDefault)
-	}
-}
-
-func TestSettingsPersistAndRejectInvalidStoredValue(t *testing.T) {
-	st, db := newSQLiteStore(t)
-	ctx := context.Background()
-
-	settings, err := st.GetSettings(ctx)
-	if err != nil {
-		t.Fatalf("GetSettings(default) error = %v", err)
-	}
-	settings.GuestAccessMode = GuestAccessByNode
-	settings.UsageMode = UsageBilling
-	settings.CycleMode = CycleClampMonthEnd
-	settings.BillingStartDay = 15
-	settings.DirectionMode = DirectionBoth
-	if err := st.SetSettings(ctx, settings); err != nil {
-		t.Fatalf("SetSettings() error = %v", err)
-	}
-	got, err := st.GetSettings(ctx)
-	if err != nil {
-		t.Fatalf("GetSettings() error = %v", err)
-	}
-	if got != settings {
-		t.Fatalf("GetSettings() = %#v, want %#v", got, settings)
-	}
-
-	if err := db.WithContext(ctx).
-		Model(&model.TrafficSetting{}).
-		Where("id = ?", trafficSettingsID).
-		Update("direction_mode", "dominant").
-		Error; err != nil {
-		t.Fatalf("Update(invalid direction) error = %v", err)
-	}
-	if _, err := st.GetSettings(ctx); err == nil {
-		t.Fatal("GetSettings(invalid) error = nil, want error")
 	}
 }

@@ -3,48 +3,31 @@ package node
 import (
 	"context"
 	"errors"
-	"net/url"
 	"testing"
 
 	"dash/internal/model"
 	"dash/internal/store/frontcache"
+	pgtest "dash/internal/testutil/postgres"
 
-	"gorm.io/driver/sqlite"
+	"github.com/alicebob/miniredis/v2"
+	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
 )
 
-func newSQLiteStore(t *testing.T) *Store {
+func newIntegrationStore(t *testing.T) (*Store, *redis.Client) {
 	t.Helper()
 
-	db := newSQLiteDB(t)
-	return New(db, nil, frontcache.New(db, nil))
+	db := pgtest.NewDB(t)
+	srv := miniredis.RunT(t)
+	client := redis.NewClient(&redis.Options{Addr: srv.Addr()})
+	t.Cleanup(func() { _ = client.Close() })
+
+	front := frontcache.New(db, client)
+	return New(db, client, front), client
 }
 
-func newSQLiteDB(t *testing.T) *gorm.DB {
-	t.Helper()
-
-	dsn := "file:" + url.QueryEscape(t.Name()) + "?mode=memory&cache=shared"
-	db, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{})
-	if err != nil {
-		t.Fatalf("gorm.Open() error = %v", err)
-	}
-	if err := db.AutoMigrate(
-		&model.Server{},
-		&model.Group{},
-		&model.ServerGroup{},
-		&model.ServerMetric{},
-		&model.ServerCurrentMetric{},
-		&model.ServerCurrentDiskMetric{},
-		&model.ServerCurrentDiskUsageMetric{},
-		&model.ServerCurrentNICMetric{},
-	); err != nil {
-		t.Fatalf("AutoMigrate() error = %v", err)
-	}
-	return db
-}
-
-func TestUpdateStaticRejectsStaleSecret(t *testing.T) {
-	st := newSQLiteStore(t)
+func TestIntegrationUpdateStaticRejectsStaleSecret(t *testing.T) {
+	st, _ := newIntegrationStore(t)
 	ctx := context.Background()
 
 	srv := model.Server{

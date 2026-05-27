@@ -22,17 +22,18 @@ import (
 )
 
 type updateInput struct {
-	Name                     *string                       `json:"name"`
-	IsGuestVisible           *bool                         `json:"is_guest_visible"`
-	TrafficP95Enabled        *bool                         `json:"traffic_p95_enabled"`
-	TrafficCycleMode         *trafficstore.ServerCycleMode `json:"traffic_cycle_mode"`
-	TrafficBillingStartDay   *int                          `json:"traffic_billing_start_day"`
-	TrafficBillingAnchorDate *string                       `json:"traffic_billing_anchor_date"`
-	TrafficBillingTimezone   *string                       `json:"traffic_billing_timezone"`
-	DisplayOrder             *int                          `json:"display_order"`
-	Tags                     json.RawMessage               `json:"tags"`
-	Secret                   *string                       `json:"secret"`
-	GroupIDs                 *[]int64                      `json:"group_ids"`
+	Name                     *string                           `json:"name"`
+	IsGuestVisible           *bool                             `json:"is_guest_visible"`
+	TrafficP95Enabled        *bool                             `json:"traffic_p95_enabled"`
+	TrafficCycleMode         *trafficstore.ServerCycleMode     `json:"traffic_cycle_mode"`
+	TrafficBillingStartDay   *int                              `json:"traffic_billing_start_day"`
+	TrafficBillingAnchorDate *string                           `json:"traffic_billing_anchor_date"`
+	TrafficBillingTimezone   *string                           `json:"traffic_billing_timezone"`
+	TrafficDirectionMode     *trafficstore.ServerDirectionMode `json:"traffic_direction_mode"`
+	DisplayOrder             *int                              `json:"display_order"`
+	Tags                     json.RawMessage                   `json:"tags"`
+	Secret                   *string                           `json:"secret"`
+	GroupIDs                 *[]int64                          `json:"group_ids"`
 }
 
 func updateRoute(r *routes.Blueprint, h *handler) {
@@ -63,12 +64,16 @@ func (h *handler) updateHandler(w http.ResponseWriter, r *http.Request) {
 			httperr.Write(w, http.StatusBadRequest, "invalid_display_order", err.Error())
 		case errors.Is(err, errInvalidTrafficCycleMode):
 			httperr.Write(w, http.StatusBadRequest, "invalid_traffic_cycle_mode", err.Error())
+		case errors.Is(err, errIncompleteTrafficCycleSettings):
+			httperr.Write(w, http.StatusBadRequest, "invalid_traffic_cycle_settings", err.Error())
 		case errors.Is(err, errInvalidTrafficBillingStartDay):
 			httperr.Write(w, http.StatusBadRequest, "invalid_traffic_billing_start_day", err.Error())
 		case errors.Is(err, errInvalidTrafficBillingAnchor):
 			httperr.Write(w, http.StatusBadRequest, "invalid_traffic_billing_anchor_date", err.Error())
 		case errors.Is(err, errInvalidTrafficBillingTimezone):
 			httperr.Write(w, http.StatusBadRequest, "invalid_traffic_billing_timezone", err.Error())
+		case errors.Is(err, errInvalidTrafficDirectionMode):
+			httperr.Write(w, http.StatusBadRequest, "invalid_traffic_direction_mode", err.Error())
 		case errors.Is(err, nodetags.ErrInvalid):
 			httperr.Write(w, http.StatusBadRequest, "invalid_tags", err.Error())
 		default:
@@ -130,12 +135,14 @@ func (h *handler) updateHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 var (
-	errInvalidNodeName               = errors.New("name cannot be empty")
-	errInvalidDisplayOrder           = errors.New("display_order must be positive")
-	errInvalidTrafficCycleMode       = errors.New("traffic_cycle_mode is invalid")
-	errInvalidTrafficBillingStartDay = errors.New("traffic_billing_start_day must be between 1 and 31")
-	errInvalidTrafficBillingAnchor   = errors.New("traffic_billing_anchor_date is invalid")
-	errInvalidTrafficBillingTimezone = errors.New("traffic_billing_timezone is invalid")
+	errInvalidNodeName                = errors.New("name cannot be empty")
+	errInvalidDisplayOrder            = errors.New("display_order must be positive")
+	errInvalidTrafficCycleMode        = errors.New("traffic_cycle_mode is invalid")
+	errIncompleteTrafficCycleSettings = errors.New("traffic cycle fields do not match mode")
+	errInvalidTrafficBillingStartDay  = errors.New("traffic_billing_start_day must be between 1 and 31")
+	errInvalidTrafficBillingAnchor    = errors.New("traffic_billing_anchor_date is invalid")
+	errInvalidTrafficBillingTimezone  = errors.New("traffic_billing_timezone is invalid")
+	errInvalidTrafficDirectionMode    = errors.New("traffic_direction_mode is invalid")
 )
 
 func normalizeUpdate(in *updateInput) error {
@@ -155,6 +162,9 @@ func normalizeUpdate(in *updateInput) error {
 	if err := normalizeCycleUpdate(in); err != nil {
 		return err
 	}
+	if err := normalizeDirectionUpdate(in); err != nil {
+		return err
+	}
 	if in.Secret != nil {
 		secret := strings.TrimSpace(*in.Secret)
 		in.Secret = &secret
@@ -170,85 +180,76 @@ func normalizeUpdate(in *updateInput) error {
 }
 
 func normalizeCycleUpdate(in *updateInput) error {
-	if err := normalizePartialCycleFields(in); err != nil {
-		return err
+	if !hasCycleUpdate(in) {
+		return nil
 	}
 	if in.TrafficCycleMode == nil {
-		return nil
+		return errIncompleteTrafficCycleSettings
 	}
 	mode, ok := trafficstore.NormalizeServerCycleMode(*in.TrafficCycleMode)
 	if !ok {
 		return errInvalidTrafficCycleMode
 	}
-	day := 1
-	if in.TrafficBillingStartDay != nil {
-		day = *in.TrafficBillingStartDay
-	}
-	anchor := ""
-	if in.TrafficBillingAnchorDate != nil {
-		anchor = *in.TrafficBillingAnchorDate
-	}
-	timezone := ""
-	if in.TrafficBillingTimezone != nil {
-		timezone = *in.TrafficBillingTimezone
-	}
-	cycle, err := trafficstore.NormalizeServerCycleSettings(trafficstore.ServerCycleSettings{
-		Mode:              mode,
-		BillingStartDay:   day,
-		BillingAnchorDate: anchor,
-		BillingTimezone:   timezone,
-	})
+	cycle, err := cycleSettingsFromInput(mode, in)
 	if err != nil {
+		if errors.Is(err, errIncompleteTrafficCycleSettings) {
+			return err
+		}
 		return nodeCycleError(err)
 	}
 	in.TrafficCycleMode = &cycle.Mode
-	if in.TrafficBillingStartDay != nil {
-		in.TrafficBillingStartDay = &cycle.BillingStartDay
-	}
-	if in.TrafficBillingAnchorDate != nil {
-		in.TrafficBillingAnchorDate = &cycle.BillingAnchorDate
-	}
-	if in.TrafficBillingTimezone != nil {
-		in.TrafficBillingTimezone = &cycle.BillingTimezone
-	}
+	in.TrafficBillingStartDay = &cycle.BillingStartDay
+	in.TrafficBillingAnchorDate = &cycle.BillingAnchorDate
+	in.TrafficBillingTimezone = &cycle.BillingTimezone
 	return nil
 }
 
-func normalizePartialCycleFields(in *updateInput) error {
-	if in.TrafficBillingStartDay != nil {
-		if _, err := trafficstore.NormalizeServerCycleSettings(trafficstore.ServerCycleSettings{
-			Mode:            trafficstore.ServerCycleMode(trafficstore.CycleClampMonthEnd),
-			BillingStartDay: *in.TrafficBillingStartDay,
-		}); err != nil {
-			return nodeCycleError(err)
+func hasCycleUpdate(in *updateInput) bool {
+	return in.TrafficCycleMode != nil ||
+		in.TrafficBillingStartDay != nil ||
+		in.TrafficBillingAnchorDate != nil ||
+		in.TrafficBillingTimezone != nil
+}
+
+func cycleSettingsFromInput(mode trafficstore.ServerCycleMode, in *updateInput) (trafficstore.ServerCycleSettings, error) {
+	cycle := trafficstore.ServerCycleSettings{Mode: mode, BillingStartDay: 1}
+	switch mode {
+	case trafficstore.ServerCycleDefault:
+		if in.TrafficBillingStartDay != nil || in.TrafficBillingAnchorDate != nil || in.TrafficBillingTimezone != nil {
+			return cycle, errIncompleteTrafficCycleSettings
 		}
-	}
-	if in.TrafficBillingAnchorDate != nil {
-		anchor := strings.TrimSpace(*in.TrafficBillingAnchorDate)
-		if anchor != "" {
-			cycle, err := trafficstore.NormalizeServerCycleSettings(trafficstore.ServerCycleSettings{
-				Mode:              trafficstore.ServerCycleMode(trafficstore.CycleWHMCS),
-				BillingStartDay:   1,
-				BillingAnchorDate: anchor,
-			})
-			if err != nil {
-				return nodeCycleError(err)
-			}
-			anchor = cycle.BillingAnchorDate
+	case trafficstore.ServerCycleMode(trafficstore.CycleCalendarMonth):
+		if in.TrafficBillingStartDay != nil || in.TrafficBillingAnchorDate != nil || in.TrafficBillingTimezone == nil {
+			return cycle, errIncompleteTrafficCycleSettings
 		}
-		in.TrafficBillingAnchorDate = &anchor
-	}
-	if in.TrafficBillingTimezone != nil {
-		cycle, err := trafficstore.NormalizeServerCycleSettings(trafficstore.ServerCycleSettings{
-			Mode:            trafficstore.ServerCycleMode(trafficstore.CycleClampMonthEnd),
-			BillingStartDay: 1,
-			BillingTimezone: *in.TrafficBillingTimezone,
-		})
-		if err != nil {
-			return nodeCycleError(err)
+		cycle.BillingTimezone = *in.TrafficBillingTimezone
+	case trafficstore.ServerCycleMode(trafficstore.CycleClampMonthEnd):
+		if in.TrafficBillingStartDay == nil || in.TrafficBillingAnchorDate != nil || in.TrafficBillingTimezone == nil {
+			return cycle, errIncompleteTrafficCycleSettings
 		}
-		in.TrafficBillingTimezone = &cycle.BillingTimezone
+		cycle.BillingStartDay = *in.TrafficBillingStartDay
+		cycle.BillingTimezone = *in.TrafficBillingTimezone
+	case trafficstore.ServerCycleMode(trafficstore.CycleWHMCS):
+		if in.TrafficBillingStartDay != nil || in.TrafficBillingAnchorDate == nil || in.TrafficBillingTimezone == nil {
+			return cycle, errIncompleteTrafficCycleSettings
+		}
+		cycle.BillingAnchorDate = *in.TrafficBillingAnchorDate
+		cycle.BillingTimezone = *in.TrafficBillingTimezone
+	default:
+		return cycle, errInvalidTrafficCycleMode
 	}
+	return trafficstore.NormalizeServerCycleSettings(cycle)
+}
+
+func normalizeDirectionUpdate(in *updateInput) error {
+	if in.TrafficDirectionMode == nil {
+		return nil
+	}
+	mode, ok := trafficstore.NormalizeServerDirectionMode(*in.TrafficDirectionMode)
+	if !ok {
+		return errInvalidTrafficDirectionMode
+	}
+	in.TrafficDirectionMode = &mode
 	return nil
 }
 
@@ -276,6 +277,7 @@ func updateFromInput(in updateInput) nodestore.NodeUpdate {
 		TrafficBillingStartDay:   in.TrafficBillingStartDay,
 		TrafficBillingAnchorDate: in.TrafficBillingAnchorDate,
 		TrafficBillingTimezone:   in.TrafficBillingTimezone,
+		TrafficDirectionMode:     in.TrafficDirectionMode,
 		DisplayOrder:             in.DisplayOrder,
 		Secret:                   in.Secret,
 		GroupIDs:                 in.GroupIDs,
@@ -295,6 +297,7 @@ func hasNodeUpdates(upd nodestore.NodeUpdate) bool {
 		upd.TrafficBillingStartDay != nil ||
 		upd.TrafficBillingAnchorDate != nil ||
 		upd.TrafficBillingTimezone != nil ||
+		upd.TrafficDirectionMode != nil ||
 		upd.DisplayOrder != nil ||
 		upd.Tags != nil ||
 		upd.Secret != nil ||

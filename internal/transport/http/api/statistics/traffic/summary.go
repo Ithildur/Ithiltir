@@ -41,9 +41,9 @@ func (h *handler) summaryHandler(w http.ResponseWriter, r *http.Request) {
 		httperr.TryWrite(w, httperr.Forbidden(errTrafficGuestForbidden))
 		return
 	}
-	effectiveSettings, err := loadEffectiveCycleSettings(r.Context(), h.traffic, in.ServerID, settings)
+	effectiveSettings, err := loadEffectiveSettings(r.Context(), h.traffic, in.ServerID, settings)
 	if err != nil {
-		httperr.Write(w, http.StatusServiceUnavailable, "db_error", "failed to fetch traffic cycle settings")
+		httperr.Write(w, http.StatusServiceUnavailable, "db_error", "failed to fetch traffic settings")
 		return
 	}
 	in.applySettings(effectiveSettings)

@@ -97,6 +97,12 @@ cd web && bun run lint
 cd web && bun run typecheck
 ```
 
+依赖 PostgreSQL 或 TimescaleDB 的后端集成测试需要设置 `TEST_DATABASE_URL`。没有该环境变量时，这些测试会被跳过。完整后端测试需要使用 PostgreSQL 超级用户，或具备创建和删除临时数据库权限的角色：
+
+```bash
+TEST_DATABASE_URL='postgres://postgres:postgres@127.0.0.1:5432/postgres?sslmode=disable' go test ./...
+```
+
 ## 构建和打包
 
 构建前端：

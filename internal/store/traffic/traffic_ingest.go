@@ -14,15 +14,11 @@ import (
 )
 
 type trafficNICRow struct {
-	ServerID          int64     `gorm:"column:server_id"`
-	Iface             string    `gorm:"column:iface"`
-	ServerCycleMode   string    `gorm:"column:traffic_cycle_mode"`
-	BillingStartDay   int       `gorm:"column:traffic_billing_start_day"`
-	BillingAnchorDate string    `gorm:"column:traffic_billing_anchor_date"`
-	BillingTimezone   string    `gorm:"column:traffic_billing_timezone"`
-	CollectedAt       time.Time `gorm:"column:collected_at"`
-	BytesRecv         int64     `gorm:"column:bytes_recv"`
-	BytesSent         int64     `gorm:"column:bytes_sent"`
+	ServerID    int64     `gorm:"column:server_id"`
+	Iface       string    `gorm:"column:iface"`
+	CollectedAt time.Time `gorm:"column:collected_at"`
+	BytesRecv   int64     `gorm:"column:bytes_recv"`
+	BytesSent   int64     `gorm:"column:bytes_sent"`
 }
 
 func (s *Store) BackfillTraffic5m(ctx context.Context, start, end time.Time) error {
@@ -63,88 +59,72 @@ func (s *Store) BackfillTraffic5m(ctx context.Context, start, end time.Time) err
 func loadTrafficSampleRows(tx *gorm.DB, start, end time.Time) ([]trafficNICRow, error) {
 	var rows []trafficNICRow
 	err := tx.Raw(`
-WITH current_rows AS (
-	SELECT
-		n.server_id,
-		n.iface,
-		COALESCE(NULLIF(s.traffic_cycle_mode, ''), 'default') AS traffic_cycle_mode,
-		COALESCE(s.traffic_billing_start_day, 1) AS traffic_billing_start_day,
-		COALESCE(s.traffic_billing_anchor_date, '') AS traffic_billing_anchor_date,
-		COALESCE(s.traffic_billing_timezone, '') AS traffic_billing_timezone,
-		n.collected_at,
-		n.bytes_recv,
-		n.bytes_sent
-	FROM nic_metrics n
-	JOIN servers s ON s.id = n.server_id AND s.is_deleted = FALSE
-	WHERE n.collected_at >= ? AND n.collected_at <= ?
-),
-scoped_pairs AS (
-	SELECT DISTINCT
-		server_id,
-		iface,
-		traffic_cycle_mode,
-		traffic_billing_start_day,
-		traffic_billing_anchor_date,
-		traffic_billing_timezone
-	FROM current_rows
-),
-prev_rows AS (
-	SELECT
-		s.server_id,
-		s.iface,
-		s.traffic_cycle_mode,
-		s.traffic_billing_start_day,
-		s.traffic_billing_anchor_date,
-		s.traffic_billing_timezone,
-		p.collected_at,
-		p.bytes_recv,
-		p.bytes_sent
-	FROM scoped_pairs s
-	JOIN LATERAL (
+	WITH current_rows AS (
 		SELECT
+			n.server_id,
+			n.iface,
 			n.collected_at,
 			n.bytes_recv,
 			n.bytes_sent
 		FROM nic_metrics n
-		WHERE n.server_id = s.server_id
-			AND n.iface = s.iface
-			AND n.collected_at < ?
-		ORDER BY n.collected_at DESC
-		LIMIT 1
-	) p ON true
-),
-next_rows AS (
-	SELECT
-		s.server_id,
-		s.iface,
-		s.traffic_cycle_mode,
-		s.traffic_billing_start_day,
-		s.traffic_billing_anchor_date,
-		s.traffic_billing_timezone,
-		p.collected_at,
-		p.bytes_recv,
-		p.bytes_sent
-	FROM scoped_pairs s
-	JOIN LATERAL (
+		JOIN servers s ON s.id = n.server_id AND s.is_deleted = FALSE
+		WHERE n.collected_at >= ? AND n.collected_at <= ?
+	),
+	scoped_pairs AS (
+		SELECT DISTINCT
+			server_id,
+			iface
+		FROM current_rows
+	),
+	prev_rows AS (
 		SELECT
-			n.collected_at,
-			n.bytes_recv,
-			n.bytes_sent
-		FROM nic_metrics n
-		WHERE n.server_id = s.server_id
-			AND n.iface = s.iface
-			AND n.collected_at > ?
-		ORDER BY n.collected_at ASC
-		LIMIT 1
-	) p ON true
-)
-SELECT server_id, iface, traffic_cycle_mode, traffic_billing_start_day, traffic_billing_anchor_date, traffic_billing_timezone, collected_at, bytes_recv, bytes_sent FROM prev_rows
-UNION ALL
-SELECT server_id, iface, traffic_cycle_mode, traffic_billing_start_day, traffic_billing_anchor_date, traffic_billing_timezone, collected_at, bytes_recv, bytes_sent FROM current_rows
-UNION ALL
-SELECT server_id, iface, traffic_cycle_mode, traffic_billing_start_day, traffic_billing_anchor_date, traffic_billing_timezone, collected_at, bytes_recv, bytes_sent FROM next_rows
-ORDER BY server_id, iface, collected_at
-`, start, end, start, end).Scan(&rows).Error
+			s.server_id,
+			s.iface,
+			p.collected_at,
+			p.bytes_recv,
+			p.bytes_sent
+		FROM scoped_pairs s
+		JOIN LATERAL (
+			SELECT
+				n.collected_at,
+				n.bytes_recv,
+				n.bytes_sent
+			FROM nic_metrics n
+			WHERE n.server_id = s.server_id
+				AND n.iface = s.iface
+				AND n.collected_at < ?
+			ORDER BY n.collected_at DESC
+			LIMIT 1
+		) p ON true
+	),
+	next_rows AS (
+		SELECT
+			s.server_id,
+			s.iface,
+			p.collected_at,
+			p.bytes_recv,
+			p.bytes_sent
+		FROM scoped_pairs s
+		JOIN LATERAL (
+			SELECT
+				n.collected_at,
+				n.bytes_recv,
+				n.bytes_sent
+			FROM nic_metrics n
+			WHERE n.server_id = s.server_id
+				AND n.iface = s.iface
+				AND n.collected_at > ?
+			ORDER BY n.collected_at ASC
+			LIMIT 1
+		) p ON true
+	)
+	SELECT server_id, iface, collected_at, bytes_recv, bytes_sent FROM prev_rows
+	UNION ALL
+	SELECT server_id, iface, collected_at, bytes_recv, bytes_sent FROM current_rows
+	UNION ALL
+	SELECT server_id, iface, collected_at, bytes_recv, bytes_sent FROM next_rows
+	ORDER BY server_id, iface, collected_at
+	`, start, end, start, end).Scan(&rows).Error
 	return rows, err
 }
 

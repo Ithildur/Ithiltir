@@ -8,8 +8,8 @@ import (
 	"dash/internal/model"
 )
 
-func TestGroupNodesGuestVisibleHidesGroupsWithoutVisibleNodes(t *testing.T) {
-	st := newSQLiteStore(t)
+func TestIntegrationGroupNodesGuestVisibleHidesGroupsWithoutVisibleNodes(t *testing.T) {
+	st, _ := newIntegrationStore(t)
 	ctx := context.Background()
 
 	visibleGroup := createGroupNodeGroup(t, st, "public")
@@ -40,17 +40,20 @@ func TestGroupNodesGuestVisibleHidesGroupsWithoutVisibleNodes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GroupNodes(auth) error = %v", err)
 	}
-	if len(all) != 3 {
-		t.Fatalf("GroupNodes(auth) returned %d groups, want 3: %#v", len(all), all)
+	if len(all) != 4 {
+		t.Fatalf("GroupNodes(auth) returned %d groups, want 4: %#v", len(all), all)
 	}
-	if !reflect.DeepEqual(all[0].NodeIDs, []int64{visibleSrv.ID, privateSrv.ID}) {
-		t.Fatalf("GroupNodes(auth)[0].NodeIDs = %#v, want [%d %d]", all[0].NodeIDs, visibleSrv.ID, privateSrv.ID)
+	if len(all[0].NodeIDs) != 0 {
+		t.Fatalf("GroupNodes(auth)[0].NodeIDs = %#v, want empty default group", all[0].NodeIDs)
 	}
-	if !reflect.DeepEqual(all[1].NodeIDs, []int64{privateSrv.ID}) {
-		t.Fatalf("GroupNodes(auth)[1].NodeIDs = %#v, want [%d]", all[1].NodeIDs, privateSrv.ID)
+	if !reflect.DeepEqual(all[1].NodeIDs, []int64{visibleSrv.ID, privateSrv.ID}) {
+		t.Fatalf("GroupNodes(auth)[1].NodeIDs = %#v, want [%d %d]", all[1].NodeIDs, visibleSrv.ID, privateSrv.ID)
 	}
-	if len(all[2].NodeIDs) != 0 {
-		t.Fatalf("GroupNodes(auth)[2].NodeIDs = %#v, want empty", all[2].NodeIDs)
+	if !reflect.DeepEqual(all[2].NodeIDs, []int64{privateSrv.ID}) {
+		t.Fatalf("GroupNodes(auth)[2].NodeIDs = %#v, want [%d]", all[2].NodeIDs, privateSrv.ID)
+	}
+	if len(all[3].NodeIDs) != 0 {
+		t.Fatalf("GroupNodes(auth)[3].NodeIDs = %#v, want empty", all[3].NodeIDs)
 	}
 }
 

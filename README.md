@@ -97,6 +97,12 @@ cd web && bun run lint
 cd web && bun run typecheck
 ```
 
+Backend integration tests that touch PostgreSQL or TimescaleDB require `TEST_DATABASE_URL`. Without it, those tests are skipped. For a full backend test pass, use a PostgreSQL superuser or a role that can create and drop temporary databases:
+
+```bash
+TEST_DATABASE_URL='postgres://postgres:postgres@127.0.0.1:5432/postgres?sslmode=disable' go test ./...
+```
+
 ## Build And Package
 
 Build the frontend:
