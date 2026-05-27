@@ -174,7 +174,7 @@ const AlertRuleTable: React.FC<Props> = ({
                       className="ui-focus-ring p-1.5 text-(--theme-fg-action-muted) hover:text-(--theme-fg-interactive) dark:hover:text-(--theme-fg-interactive-hover) hover:bg-(--theme-bg-interactive-hover) dark:hover:bg-(--theme-bg-interactive-hover) rounded transition-colors"
                       aria-label={t('common_edit')}
                     >
-                      <Edit2 className="size-4" />
+                      <Edit2 className="size-4.5" />
                     </button>
                     <button
                       type="button"
@@ -182,7 +182,7 @@ const AlertRuleTable: React.FC<Props> = ({
                       className="ui-focus-ring p-1.5 text-(--theme-fg-danger-muted) hover:text-(--theme-fg-danger) dark:text-(--theme-fg-danger) dark:hover:text-(--theme-fg-danger-soft) hover:bg-(--theme-bg-danger-muted) dark:hover:bg-(--theme-bg-danger-subtle) rounded transition-colors"
                       aria-label={t('common_delete')}
                     >
-                      <Trash2 className="size-4" />
+                      <Trash2 className="size-4.5" />
                     </button>
                   </div>
                 </td>

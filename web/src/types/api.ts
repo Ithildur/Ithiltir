@@ -1,3 +1,5 @@
+import type { NodeTrafficDirectionMode, TrafficCycleMode } from './traffic';
+
 export interface ErrorResponse {
   code: string;
   message: string;
@@ -23,16 +25,41 @@ export interface ManagedNode {
   ip?: string | null;
   is_guest_visible: boolean;
   traffic_p95_enabled: boolean;
-  traffic_cycle_mode: 'default' | 'calendar_month' | 'whmcs_compatible' | 'clamp_to_month_end';
+  traffic_cycle_mode: 'default' | TrafficCycleMode;
   traffic_billing_start_day: number;
   traffic_billing_anchor_date: string;
   traffic_billing_timezone: string;
+  traffic_direction_mode: NodeTrafficDirectionMode;
   secret: string;
   tags: string[];
   display_order: number;
   group_ids: number[];
   version?: NodeVersion | null;
 }
+
+export interface UpdateNodeInput {
+  name?: string;
+  is_guest_visible?: boolean;
+  traffic_p95_enabled?: boolean;
+  traffic_cycle_mode?: 'default' | TrafficCycleMode;
+  traffic_billing_start_day?: number;
+  traffic_billing_anchor_date?: string;
+  traffic_billing_timezone?: string;
+  traffic_direction_mode?: NodeTrafficDirectionMode;
+  display_order?: number;
+  tags?: string[];
+  secret?: string;
+  group_ids?: number[];
+}
+
+export type NodeTrafficPatch = Pick<
+  UpdateNodeInput,
+  | 'traffic_cycle_mode'
+  | 'traffic_billing_start_day'
+  | 'traffic_billing_anchor_date'
+  | 'traffic_billing_timezone'
+  | 'traffic_direction_mode'
+>;
 
 export interface NodeVersion {
   version: string;

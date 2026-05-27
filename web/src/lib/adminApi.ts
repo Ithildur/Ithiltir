@@ -1,4 +1,4 @@
-import type { Group, NodeDeploy, ManagedNode } from '@app-types/api';
+import type { Group, NodeDeploy, ManagedNode, UpdateNodeInput } from '@app-types/api';
 import type {
   AlertChannel,
   AlertChannelType,
@@ -9,7 +9,6 @@ import type {
   SystemSettings,
   ThemePackage,
 } from '@app-types/admin';
-import type { TrafficCycleMode } from '@app-types/traffic';
 import { apiFetch } from './api';
 
 export const fetchGroupList = () =>
@@ -38,20 +37,6 @@ export const fetchNodes = () =>
   apiFetch<ManagedNode[]>('/admin/nodes', {
     method: 'GET',
   });
-
-export interface UpdateNodeInput {
-  name?: string;
-  is_guest_visible?: boolean;
-  traffic_p95_enabled?: boolean;
-  traffic_cycle_mode?: 'default' | TrafficCycleMode;
-  traffic_billing_start_day?: number;
-  traffic_billing_anchor_date?: string;
-  traffic_billing_timezone?: string;
-  display_order?: number;
-  tags?: string[];
-  secret?: string;
-  group_ids?: number[];
-}
 
 export const createNode = () =>
   apiFetch<void>('/admin/nodes', {

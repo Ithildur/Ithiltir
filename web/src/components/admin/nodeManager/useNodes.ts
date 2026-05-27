@@ -7,20 +7,11 @@ import { fetchAppVersion } from '@lib/versionApi';
 import type { Group, NodeDeploy } from '@app-types/api';
 import type { NodeRow } from '@app-types/admin';
 import type { TrafficSettings } from '@app-types/traffic';
+import { defaultTrafficSettings } from '@lib/trafficSettingsModel';
 import {
   buildGroupLookup,
   nodeRowsFromManaged,
 } from '@components/admin/nodeManager/nodeManagerModel';
-
-const defaultTrafficSettings: TrafficSettings = {
-  guest_access_mode: 'disabled',
-  usage_mode: 'lite',
-  cycle_mode: 'calendar_month',
-  billing_start_day: 1,
-  billing_anchor_date: '',
-  billing_timezone: '',
-  direction_mode: 'out',
-};
 
 export const useNodes = (
   token: string | null,
@@ -125,14 +116,10 @@ export const useNodes = (
     async (nextLookup?: Record<number, string>) => {
       if (!token) return;
       const lookup = nextLookup ?? groupLookup;
-      try {
-        const nodeRes = await fetchNodes();
-        setNodes(nodeRowsFromManaged(nodeRes, lookup));
-      } catch (error) {
-        apiError(error, t('admin_fetch_nodes_failed'));
-      }
+      const nodeRes = await fetchNodes();
+      setNodes(nodeRowsFromManaged(nodeRes, lookup));
     },
-    [groupLookup, apiError, t, token],
+    [groupLookup, token],
   );
 
   return {

@@ -2,6 +2,7 @@ export type TrafficGuestAccessMode = 'disabled' | 'by_node';
 export type TrafficUsageMode = 'lite' | 'billing';
 export type TrafficCycleMode = 'calendar_month' | 'whmcs_compatible' | 'clamp_to_month_end';
 export type TrafficDirectionMode = 'out' | 'both' | 'max';
+export type NodeTrafficDirectionMode = 'default' | TrafficDirectionMode;
 export type TrafficPeriod = 'current' | 'previous';
 export type TrafficSelectedDirection = '' | 'in' | 'out' | 'total';
 export type TrafficP95Status =

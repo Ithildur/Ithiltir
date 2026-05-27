@@ -1,48 +1,41 @@
 import React from 'react';
-import RefreshCw from 'lucide-react/dist/esm/icons/refresh-cw';
-import Button from '@components/ui/Button';
 import Checkbox from '@components/ui/Checkbox';
-import IOSSwitch from '@components/ui/IOSSwitch';
 import type { NodeRow } from '@app-types/admin';
-import type { TrafficCycleMode } from '@app-types/traffic';
-import { useI18n, type TranslationKey } from '@i18n';
+import { useI18n } from '@i18n';
+import { NodeP95Switch, TrafficRebuildButton, TrafficSettingsButton } from './NodeAdvancedActions';
 
 export interface Props {
   nodes: NodeRow[];
-  selectedNodeIds: Set<number>;
-  allVisibleSelected: boolean;
-  someVisibleSelected: boolean;
-  savingNodeIds: Set<number>;
-  savingCycleNodeIds: Set<number>;
+  selectedP95NodeIds: Set<number>;
+  allVisibleP95Selected: boolean;
+  someVisibleP95Selected: boolean;
+  savingP95NodeIds: Set<number>;
+  savingTrafficSettingsNodeIds: Set<number>;
   rebuildingTrafficNodeId: number | null;
-  trafficRebuildActive: boolean;
+  trafficRebuildBusy: boolean;
   onToggleVisibleNodes: () => void;
-  onToggleNode: (id: number) => void;
+  onToggleP95Node: (id: number) => void;
   onToggleTrafficP95: (node: NodeRow) => void;
-  onOpenCycleSettings: (node: NodeRow) => void;
+  onOpenTrafficSettings: (node: NodeRow) => void;
   onRebuildTraffic: (node: NodeRow) => void;
 }
 
 const NodeAdvancedTable: React.FC<Props> = ({
   nodes,
-  selectedNodeIds,
-  allVisibleSelected,
-  someVisibleSelected,
-  savingNodeIds,
-  savingCycleNodeIds,
+  selectedP95NodeIds,
+  allVisibleP95Selected,
+  someVisibleP95Selected,
+  savingP95NodeIds,
+  savingTrafficSettingsNodeIds,
   rebuildingTrafficNodeId,
-  trafficRebuildActive,
+  trafficRebuildBusy,
   onToggleVisibleNodes,
-  onToggleNode,
+  onToggleP95Node,
   onToggleTrafficP95,
-  onOpenCycleSettings,
+  onOpenTrafficSettings,
   onRebuildTraffic,
 }) => {
   const { t } = useI18n();
-  const cycleLabel = (node: NodeRow) => {
-    if (node.trafficCycleMode === 'default') return t('admin_node_cycle_mode_inherited');
-    return t(`traffic_cycle_${node.trafficCycleMode as TrafficCycleMode}` as TranslationKey);
-  };
 
   return (
     <table className="w-full text-sm text-left bg-(--theme-bg-default) dark:bg-(--theme-bg-default)">
@@ -51,8 +44,8 @@ const NodeAdvancedTable: React.FC<Props> = ({
           <th className="px-3 py-2.5 w-10">
             <div className="flex h-5 items-center">
               <Checkbox
-                checked={allVisibleSelected}
-                indeterminate={!allVisibleSelected && someVisibleSelected}
+                checked={allVisibleP95Selected}
+                indeterminate={!allVisibleP95Selected && someVisibleP95Selected}
                 onChange={onToggleVisibleNodes}
                 aria-label={t('admin_nodes_select_visible')}
               />
@@ -60,9 +53,9 @@ const NodeAdvancedTable: React.FC<Props> = ({
           </th>
           <th className="px-3 py-2.5">{t('admin_nodes_column_node')}</th>
           <th className="px-3 py-2.5 w-32">{t('admin_nodes_column_ip')}</th>
-          <th className="px-3 py-2.5 w-36">{t('admin_nodes_column_cycle_mode')}</th>
+          <th className="px-3 py-2.5 w-44">{t('admin_nodes_column_traffic_settings')}</th>
           <th className="px-3 py-2.5 w-20">{t('admin_nodes_column_traffic_p95')}</th>
-          <th className="px-3 py-2.5 w-32">{t('admin_nodes_column_traffic_rebuild')}</th>
+          <th className="px-3 py-2.5 w-16">{t('admin_nodes_column_traffic_rebuild')}</th>
         </tr>
       </thead>
       <tbody className="divide-y divide-(--theme-border-muted) dark:divide-(--theme-canvas-muted)">
@@ -77,6 +70,7 @@ const NodeAdvancedTable: React.FC<Props> = ({
           </tr>
         ) : (
           nodes.map((node) => {
+            const rebuilding = rebuildingTrafficNodeId === node.id;
             return (
               <tr
                 key={node.id}
@@ -85,8 +79,8 @@ const NodeAdvancedTable: React.FC<Props> = ({
                 <td className="px-3 py-2">
                   <div className="flex h-7 items-center">
                     <Checkbox
-                      checked={selectedNodeIds.has(node.id)}
-                      onChange={() => onToggleNode(node.id)}
+                      checked={selectedP95NodeIds.has(node.id)}
+                      onChange={() => onToggleP95Node(node.id)}
                       aria-label={t('admin_nodes_select_node', { name: node.name })}
                     />
                   </div>
@@ -99,38 +93,27 @@ const NodeAdvancedTable: React.FC<Props> = ({
                 <td className="px-3 py-2 text-xs font-mono w-32">
                   {node.ip || t('admin_nodes_unconfigured')}
                 </td>
-                <td className="px-3 py-2 text-xs w-36">
-                  <button
-                    type="button"
-                    disabled={savingCycleNodeIds.has(node.id)}
-                    onClick={() => onOpenCycleSettings(node)}
-                    className="inline-flex max-w-full items-center rounded-md border border-(--theme-border-subtle) bg-(--theme-bg-muted) px-2 py-1 text-xs font-semibold text-(--theme-fg-muted) hover:text-(--theme-fg-default) disabled:cursor-not-allowed disabled:opacity-60 dark:border-(--theme-border-default) dark:bg-(--theme-canvas-subtle)"
-                    aria-label={t('admin_node_cycle_settings_button', { name: node.name })}
-                  >
-                    <span className="truncate">{cycleLabel(node)}</span>
-                  </button>
-                </td>
-                <td className="px-3 py-2 text-xs w-20">
-                  <IOSSwitch
-                    size="sm"
-                    checked={node.trafficP95Enabled}
-                    disabled={savingNodeIds.has(node.id)}
-                    ariaLabel={t('admin_node_traffic_p95_toggle', { name: node.name })}
-                    onChange={() => onToggleTrafficP95(node)}
+                <td className="px-3 py-2 text-xs w-44">
+                  <TrafficSettingsButton
+                    node={node}
+                    disabled={savingTrafficSettingsNodeIds.has(node.id)}
+                    onOpen={onOpenTrafficSettings}
                   />
                 </td>
-                <td className="px-3 py-2 text-xs w-32">
-                  <Button
-                    variant="secondary"
-                    icon={RefreshCw}
-                    disabled={trafficRebuildActive}
-                    onClick={() => onRebuildTraffic(node)}
-                    aria-label={t('admin_node_traffic_rebuild_button', { name: node.name })}
-                  >
-                    {rebuildingTrafficNodeId === node.id
-                      ? t('admin_node_traffic_rebuilding')
-                      : t('admin_node_traffic_rebuild')}
-                  </Button>
+                <td className="px-3 py-2 text-xs w-20">
+                  <NodeP95Switch
+                    node={node}
+                    disabled={savingP95NodeIds.has(node.id)}
+                    onToggle={onToggleTrafficP95}
+                  />
+                </td>
+                <td className="px-3 py-2 text-xs w-16">
+                  <TrafficRebuildButton
+                    node={node}
+                    disabled={trafficRebuildBusy}
+                    rebuilding={rebuilding}
+                    onRebuild={onRebuildTraffic}
+                  />
                 </td>
               </tr>
             );

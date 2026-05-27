@@ -1,6 +1,6 @@
 import type { NodeVersion } from './api';
 import type { SiteBrand } from './site';
-import type { TrafficCycleMode } from './traffic';
+import type { NodeTrafficDirectionMode, TrafficCycleMode } from './traffic';
 
 export type DashboardTab = 'nodes' | 'groups' | 'alerts' | 'system';
 
@@ -74,6 +74,7 @@ export interface NodeRow {
   trafficBillingStartDay: number;
   trafficBillingAnchorDate: string;
   trafficBillingTimezone: string;
+  trafficDirectionMode: NodeTrafficDirectionMode;
   displayOrder: number;
 }
 

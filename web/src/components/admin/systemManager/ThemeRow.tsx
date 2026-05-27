@@ -124,7 +124,7 @@ export const ThemeRow: React.FC<{
               aria-label={t('common_delete')}
               title={t('common_delete')}
             >
-              <Trash2 size={16} />
+              <Trash2 size={18} />
             </Button>
           )}
         </div>

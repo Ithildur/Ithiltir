@@ -1,25 +1,8 @@
 import type { Group, ManagedNode } from '@app-types/api';
 import type { NodeRow } from '@app-types/admin';
+import type { TranslationKey } from '@i18n';
 
-export const reorderVisible = (
-  all: NodeRow[],
-  visible: NodeRow[],
-  sourceId: number,
-  targetId: number,
-): NodeRow[] => {
-  const sourceIdx = visible.findIndex((item) => item.id === sourceId);
-  const targetIdx = visible.findIndex((item) => item.id === targetId);
-  if (sourceIdx === -1 || targetIdx === -1 || sourceIdx === targetIdx) return all;
-
-  const reorderedVisible = [...visible];
-  const [moved] = reorderedVisible.splice(sourceIdx, 1);
-  reorderedVisible.splice(targetIdx, 0, moved);
-
-  const visibleQueue = reorderedVisible.slice();
-  const visibleIds = new Set(visibleQueue.map((item) => item.id));
-
-  return all.map((item) => (visibleIds.has(item.id) ? visibleQueue.shift()! : item));
-};
+type Translate = (key: TranslationKey, vars?: Record<string, string | number>) => string;
 
 export const buildGroupLookup = (groups: Group[]): Record<number, string> =>
   groups.reduce(
@@ -50,10 +33,11 @@ const nodeRowFromManaged = (node: ManagedNode, groupLookup: Record<number, strin
     },
     guestVisible: node.is_guest_visible,
     trafficP95Enabled: node.traffic_p95_enabled,
-    trafficCycleMode: node.traffic_cycle_mode || 'default',
-    trafficBillingStartDay: node.traffic_billing_start_day || 1,
-    trafficBillingAnchorDate: node.traffic_billing_anchor_date || '',
-    trafficBillingTimezone: node.traffic_billing_timezone || '',
+    trafficCycleMode: node.traffic_cycle_mode,
+    trafficBillingStartDay: node.traffic_billing_start_day,
+    trafficBillingAnchorDate: node.traffic_billing_anchor_date,
+    trafficBillingTimezone: node.traffic_billing_timezone,
+    trafficDirectionMode: node.traffic_direction_mode,
     displayOrder: node.display_order ?? 0,
   };
 };
@@ -61,8 +45,19 @@ const nodeRowFromManaged = (node: ManagedNode, groupLookup: Record<number, strin
 export const nodeRowsFromManaged = (
   nodes: ManagedNode[],
   groupLookup: Record<number, string>,
-): NodeRow[] =>
-  nodes
+): NodeRow[] => {
+  return nodes
     .slice()
     .sort((a, b) => (b.display_order ?? 0) - (a.display_order ?? 0))
     .map((node) => nodeRowFromManaged(node, groupLookup));
+};
+
+export const nodeTrafficSettingsLabel = (node: NodeRow, t: Translate): string => {
+  const cycle =
+    node.trafficCycleMode === 'default'
+      ? t('admin_node_cycle_mode_inherited')
+      : t(`traffic_cycle_${node.trafficCycleMode}` as TranslationKey);
+
+  if (node.trafficDirectionMode === 'default') return cycle;
+  return `${cycle} / ${t(`traffic_direction_${node.trafficDirectionMode}` as TranslationKey)}`;
+};

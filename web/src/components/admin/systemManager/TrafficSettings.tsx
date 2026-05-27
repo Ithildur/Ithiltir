@@ -1,6 +1,4 @@
 import React from 'react';
-import Check from 'lucide-react/dist/esm/icons/check';
-import ChevronDown from 'lucide-react/dist/esm/icons/chevron-down';
 import Network from 'lucide-react/dist/esm/icons/network';
 import Save from 'lucide-react/dist/esm/icons/save';
 import Button from '@components/ui/Button';
@@ -8,8 +6,24 @@ import ConfirmDialog from '@components/ui/ConfirmDialog';
 import Input from '@components/ui/Input';
 import IOSSwitch from '@components/ui/IOSSwitch';
 import Select from '@components/ui/Select';
+import TimezoneSelect from '@components/ui/TimezoneSelect';
 import SettingRow from '@components/admin/systemManager/SettingRow';
 import { useTopBanner } from '@components/ui/TopBannerStack';
+import {
+  billingDayFromAnchor,
+  clampBillingDay,
+  cycleNeedsAnchorDate,
+  cycleNeedsBillingStartDay,
+  cycleNeedsTimezone,
+  defaultTrafficSettings,
+  normalizeTrafficCycleFields,
+  trafficCycleModes,
+  trafficCycleChanged,
+  trafficCyclePatchFromFields,
+  trafficCycleValid,
+  trafficDirectionModes,
+  trafficSettingsWithCycleMode,
+} from '@lib/trafficSettingsModel';
 import type {
   TrafficCycleMode,
   TrafficDirectionMode,
@@ -20,207 +34,6 @@ import { useI18n, type TranslationKey } from '@i18n';
 import { fetchTrafficSettings, updateTrafficSettings } from '@lib/statisticsApi';
 import { useApiErrorHandler } from '@hooks/useApiErrorHandler';
 import { useConfirmDialog } from '@hooks/useConfirmDialog';
-
-const cycleModes: TrafficCycleMode[] = ['calendar_month', 'whmcs_compatible', 'clamp_to_month_end'];
-const directionModes: TrafficDirectionMode[] = ['out', 'both', 'max'];
-const fallbackTimeZones = [
-  'UTC',
-  'Asia/Shanghai',
-  'Asia/Hong_Kong',
-  'Asia/Taipei',
-  'Asia/Singapore',
-  'Asia/Tokyo',
-  'Europe/London',
-  'Europe/Berlin',
-  'America/New_York',
-  'America/Los_Angeles',
-];
-
-const defaultTrafficSettings: TrafficSettingsView = {
-  guest_access_mode: 'disabled',
-  usage_mode: 'lite',
-  cycle_mode: 'calendar_month',
-  billing_start_day: 1,
-  billing_anchor_date: '',
-  billing_timezone: '',
-  direction_mode: 'out',
-};
-
-const getTimeZones = (): string[] => {
-  const supportedValuesOf = (
-    Intl as typeof Intl & { supportedValuesOf?: (input: string) => string[] }
-  ).supportedValuesOf;
-  const supported = supportedValuesOf ? supportedValuesOf('timeZone') : fallbackTimeZones;
-  return Array.from(new Set([...fallbackTimeZones, ...supported]));
-};
-
-type TimezoneSelectProps = {
-  value: string;
-  disabled?: boolean;
-  ariaLabel: string;
-  placeholder: string;
-  systemLabel: string;
-  emptyLabel: string;
-  onChange: (value: string) => void;
-};
-
-const TimezoneSelect: React.FC<TimezoneSelectProps> = ({
-  value,
-  disabled,
-  ariaLabel,
-  placeholder,
-  systemLabel,
-  emptyLabel,
-  onChange,
-}) => {
-  const listboxId = React.useId();
-  const containerRef = React.useRef<HTMLDivElement>(null);
-  const [open, setOpen] = React.useState(false);
-  const [query, setQuery] = React.useState(value);
-
-  React.useEffect(() => {
-    if (!open) setQuery(value);
-  }, [open, value]);
-
-  const options = React.useMemo(() => {
-    const trimmed = value.trim();
-    const zones = getTimeZones();
-    if (trimmed && !zones.includes(trimmed)) return [trimmed, ...zones];
-    return zones;
-  }, [value]);
-
-  const normalizedQuery = query.trim().toLowerCase();
-  const systemMatched = !normalizedQuery || systemLabel.toLowerCase().includes(normalizedQuery);
-  const filteredOptions = React.useMemo(() => {
-    if (!normalizedQuery) return options.slice(0, 80);
-    return options
-      .filter((timeZone) => timeZone.toLowerCase().includes(normalizedQuery))
-      .slice(0, 80);
-  }, [normalizedQuery, options]);
-
-  const selectValue = React.useCallback(
-    (nextValue: string) => {
-      onChange(nextValue);
-      setQuery(nextValue);
-      setOpen(false);
-    },
-    [onChange],
-  );
-
-  return (
-    <div
-      ref={containerRef}
-      className="relative"
-      onBlur={(event) => {
-        const nextTarget = event.relatedTarget;
-        if (!(nextTarget instanceof Node) || !containerRef.current?.contains(nextTarget)) {
-          setOpen(false);
-        }
-      }}
-    >
-      <div className="relative">
-        <input
-          value={open ? query : value}
-          disabled={disabled}
-          aria-label={ariaLabel}
-          aria-autocomplete="list"
-          aria-controls={listboxId}
-          aria-expanded={open}
-          role="combobox"
-          placeholder={placeholder}
-          className="w-full rounded-md border border-(--theme-border-subtle) bg-(--theme-bg-default) px-3 py-1.25 pr-9 text-sm/5 text-(--theme-fg-default) outline-none transition-[background-color,border-color,box-shadow] placeholder:text-(--theme-fg-subtle) focus:border-(--theme-bg-accent-emphasis) focus:ring-1 focus:ring-(--theme-bg-accent-emphasis) disabled:cursor-not-allowed disabled:opacity-60 dark:border-(--theme-border-default) dark:bg-(--theme-bg-inset)"
-          onFocus={() => {
-            setQuery(value);
-            setOpen(true);
-          }}
-          onChange={(event) => {
-            setQuery(event.target.value);
-            setOpen(true);
-          }}
-          onKeyDown={(event) => {
-            if (event.key === 'Escape') {
-              setOpen(false);
-              return;
-            }
-            if (event.key === 'ArrowDown') {
-              event.preventDefault();
-              setOpen(true);
-              return;
-            }
-            if (event.key === 'Enter' && open) {
-              event.preventDefault();
-              const nextValue = systemMatched ? '' : filteredOptions[0];
-              if (nextValue !== undefined) selectValue(nextValue);
-            }
-          }}
-        />
-        <button
-          type="button"
-          tabIndex={-1}
-          disabled={disabled}
-          aria-hidden="true"
-          className="absolute inset-y-0 right-1.5 grid w-7 place-items-center rounded text-(--theme-fg-muted) transition-colors hover:text-(--theme-fg-default) disabled:pointer-events-none"
-          onMouseDown={(event) => event.preventDefault()}
-          onClick={() => setOpen((current) => !current)}
-        >
-          <ChevronDown className="size-4" aria-hidden="true" />
-        </button>
-      </div>
-
-      {open && !disabled ? (
-        <div
-          id={listboxId}
-          role="listbox"
-          className="absolute z-30 mt-1 max-h-64 w-full min-w-64 overflow-y-auto rounded-md border border-(--theme-border-subtle) bg-(--theme-bg-default) py-1 text-sm shadow-lg dark:border-(--theme-border-default) dark:bg-(--theme-bg-inset)"
-        >
-          {systemMatched ? (
-            <button
-              type="button"
-              role="option"
-              aria-selected={!value}
-              className="flex w-full items-center justify-between gap-3 px-3 py-2 text-left text-(--theme-fg-default) hover:bg-(--theme-surface-row-hover) dark:hover:bg-(--theme-canvas-subtle)"
-              onMouseDown={(event) => event.preventDefault()}
-              onClick={() => selectValue('')}
-            >
-              <span>{systemLabel}</span>
-              {!value ? (
-                <Check className="size-4 text-(--theme-bg-accent-emphasis)" aria-hidden="true" />
-              ) : null}
-            </button>
-          ) : null}
-          {filteredOptions.map((timeZone) => (
-            <button
-              key={timeZone}
-              type="button"
-              role="option"
-              aria-selected={value === timeZone}
-              className="flex w-full items-center justify-between gap-3 px-3 py-2 text-left text-(--theme-fg-default) hover:bg-(--theme-surface-row-hover) dark:hover:bg-(--theme-canvas-subtle)"
-              onMouseDown={(event) => event.preventDefault()}
-              onClick={() => selectValue(timeZone)}
-            >
-              <span className="truncate">{timeZone}</span>
-              {value === timeZone ? (
-                <Check
-                  className="size-4 shrink-0 text-(--theme-bg-accent-emphasis)"
-                  aria-hidden="true"
-                />
-              ) : null}
-            </button>
-          ))}
-          {!systemMatched && filteredOptions.length === 0 ? (
-            <div className="px-3 py-2 text-(--theme-fg-muted)">{emptyLabel}</div>
-          ) : null}
-        </div>
-      ) : null}
-    </div>
-  );
-};
-
-const cycleChanged = (draft: TrafficSettingsView, saved: TrafficSettingsView) =>
-  draft.cycle_mode !== saved.cycle_mode ||
-  draft.billing_start_day !== saved.billing_start_day ||
-  draft.billing_anchor_date !== saved.billing_anchor_date ||
-  draft.billing_timezone !== saved.billing_timezone;
 
 const TrafficSettings: React.FC = () => {
   const { t } = useI18n();
@@ -297,16 +110,12 @@ const TrafficSettings: React.FC = () => {
   );
 
   const saveTrafficSettings = React.useCallback(async () => {
-    if (savingSettings || !cycleChanged(draft, trafficSettings)) return;
+    if (savingSettings || !trafficCycleChanged(draft, trafficSettings) || !trafficCycleValid(draft))
+      return;
     setSavingSettings(true);
     try {
-      const next = {
-        cycle_mode: draft.cycle_mode,
-        billing_start_day: draft.billing_start_day,
-        billing_anchor_date: draft.billing_anchor_date,
-        billing_timezone: draft.billing_timezone,
-      };
-      await updateTrafficSettings(next);
+      const next = normalizeTrafficCycleFields(draft);
+      await updateTrafficSettings(trafficCyclePatchFromFields(draft));
       setTrafficSettings((current) => ({ ...current, ...next }));
       setDraft((current) => ({ ...current, ...next }));
       pushBanner(t('admin_traffic_settings_saved'), { tone: 'info' });
@@ -366,16 +175,14 @@ const TrafficSettings: React.FC = () => {
   );
 
   const setCycleMode = React.useCallback((mode: TrafficCycleMode) => {
-    setDraft((current) => ({
-      ...current,
-      cycle_mode: mode,
-      billing_start_day: mode === 'calendar_month' ? 1 : current.billing_start_day,
-      billing_anchor_date: mode === 'whmcs_compatible' ? current.billing_anchor_date : '',
-    }));
+    setDraft((current) => trafficSettingsWithCycleMode(current, mode));
   }, []);
 
-  const changed = cycleChanged(draft, trafficSettings);
-  const cycleLocked = draft.usage_mode === 'lite';
+  const changed = trafficCycleChanged(draft, trafficSettings);
+  const cycleValid = trafficCycleValid(draft);
+  const showBillingStartDay = cycleNeedsBillingStartDay(draft.cycle_mode);
+  const showAnchorDate = cycleNeedsAnchorDate(draft.cycle_mode);
+  const showTimezone = cycleNeedsTimezone(draft.cycle_mode);
 
   return (
     <section className="space-y-4">
@@ -422,7 +229,7 @@ const TrafficSettings: React.FC = () => {
             className="min-w-44"
             onChange={(event) => void saveDirectionMode(event.target.value as TrafficDirectionMode)}
           >
-            {directionModes.map((mode) => (
+            {trafficDirectionModes.map((mode) => (
               <option key={mode} value={mode}>
                 {t(`traffic_direction_${mode}` as TranslationKey)}
               </option>
@@ -430,11 +237,7 @@ const TrafficSettings: React.FC = () => {
           </Select>
         </SettingRow>
 
-        <div
-          className={`rounded-lg border border-(--theme-border-subtle) bg-(--theme-bg-default) p-5 shadow-sm transition-[border-color,background-color] hover:border-(--theme-border-hover) hover:bg-(--theme-surface-row-hover) dark:border-(--theme-border-default) dark:bg-(--theme-bg-default) dark:hover:bg-(--theme-canvas-subtle) ${
-            cycleLocked ? 'opacity-70' : ''
-          }`}
-        >
+        <div className="rounded-lg border border-(--theme-border-subtle) bg-(--theme-bg-default) p-5 shadow-sm transition-[border-color,background-color] hover:border-(--theme-border-hover) hover:bg-(--theme-surface-row-hover) dark:border-(--theme-border-default) dark:bg-(--theme-bg-default) dark:hover:bg-(--theme-canvas-subtle)">
           <div className="flex flex-wrap items-center justify-between gap-4">
             <div className="min-w-0">
               <div className="text-sm font-semibold text-(--theme-fg-default)">
@@ -447,7 +250,7 @@ const TrafficSettings: React.FC = () => {
             <Button
               type="button"
               icon={Save}
-              disabled={loading || savingSettings || cycleLocked || !changed}
+              disabled={loading || savingSettings || !changed || !cycleValid}
               onClick={() => void saveTrafficSettings()}
             >
               {savingSettings ? t('admin_system_settings_saving') : t('common_save_changes')}
@@ -461,11 +264,11 @@ const TrafficSettings: React.FC = () => {
               </span>
               <Select
                 value={draft.cycle_mode}
-                disabled={loading || savingSettings || cycleLocked}
+                disabled={loading || savingSettings}
                 aria-label={t('traffic_cycle_mode')}
                 onChange={(event) => setCycleMode(event.target.value as TrafficCycleMode)}
               >
-                {cycleModes.map((mode) => (
+                {trafficCycleModes.map((mode) => (
                   <option key={mode} value={mode}>
                     {t(`traffic_cycle_${mode}` as TranslationKey)}
                   </option>
@@ -473,76 +276,77 @@ const TrafficSettings: React.FC = () => {
               </Select>
             </label>
 
-            <label className="grid gap-1.5">
-              <span className="text-xs font-semibold uppercase tracking-wide text-(--theme-fg-muted)">
-                {t('traffic_billing_start_day')}
-              </span>
-              <Input
-                type="number"
-                min={1}
-                max={31}
-                disabled={
-                  loading || savingSettings || cycleLocked || draft.cycle_mode === 'calendar_month'
-                }
-                aria-label={t('traffic_billing_start_day')}
-                value={draft.billing_start_day}
-                onChange={(event) => {
-                  const next = Number(event.target.value);
-                  setDraft((current) => ({
-                    ...current,
-                    billing_start_day: Number.isFinite(next)
-                      ? Math.max(1, Math.min(31, Math.trunc(next)))
-                      : current.billing_start_day,
-                  }));
-                }}
-              />
-            </label>
+            {showBillingStartDay && (
+              <label className="grid gap-1.5">
+                <span className="text-xs font-semibold uppercase tracking-wide text-(--theme-fg-muted)">
+                  {t('traffic_billing_start_day')}
+                </span>
+                <Input
+                  type="number"
+                  min={1}
+                  max={31}
+                  disabled={loading || savingSettings}
+                  aria-label={t('traffic_billing_start_day')}
+                  value={draft.billing_start_day}
+                  onChange={(event) => {
+                    const next = Number(event.target.value);
+                    setDraft((current) => ({
+                      ...current,
+                      billing_start_day: Number.isFinite(next)
+                        ? clampBillingDay(next)
+                        : current.billing_start_day,
+                    }));
+                  }}
+                />
+              </label>
+            )}
 
-            <label className="grid gap-1.5">
-              <span className="text-xs font-semibold uppercase tracking-wide text-(--theme-fg-muted)">
-                {t('traffic_anchor_date')}
-              </span>
-              <Input
-                type="date"
-                disabled={
-                  loading ||
-                  savingSettings ||
-                  cycleLocked ||
-                  draft.cycle_mode !== 'whmcs_compatible'
-                }
-                aria-label={t('traffic_anchor_date')}
-                value={draft.billing_anchor_date}
-                onChange={(event) =>
-                  setDraft((current) => ({
-                    ...current,
-                    billing_anchor_date: event.target.value,
-                    billing_start_day: event.target.value
-                      ? Number(event.target.value.slice(-2))
-                      : current.billing_start_day,
-                  }))
-                }
-              />
-            </label>
+            {showAnchorDate && (
+              <label className="grid gap-1.5">
+                <span className="text-xs font-semibold uppercase tracking-wide text-(--theme-fg-muted)">
+                  {t('traffic_anchor_date')}
+                </span>
+                <Input
+                  type="date"
+                  required
+                  disabled={loading || savingSettings}
+                  aria-label={t('traffic_anchor_date')}
+                  value={draft.billing_anchor_date}
+                  onChange={(event) =>
+                    setDraft((current) => ({
+                      ...current,
+                      billing_anchor_date: event.target.value,
+                      billing_start_day: billingDayFromAnchor(
+                        event.target.value,
+                        current.billing_start_day,
+                      ),
+                    }))
+                  }
+                />
+              </label>
+            )}
 
-            <label className="grid gap-1.5">
-              <span className="text-xs font-semibold uppercase tracking-wide text-(--theme-fg-muted)">
-                {t('traffic_billing_timezone')}
-              </span>
-              <TimezoneSelect
-                value={draft.billing_timezone}
-                disabled={loading || savingSettings || cycleLocked}
-                ariaLabel={t('traffic_billing_timezone')}
-                placeholder={t('traffic_billing_timezone_placeholder')}
-                systemLabel={t('traffic_billing_timezone_system')}
-                emptyLabel={t('traffic_billing_timezone_empty')}
-                onChange={(value) =>
-                  setDraft((current) => ({
-                    ...current,
-                    billing_timezone: value,
-                  }))
-                }
-              />
-            </label>
+            {showTimezone && (
+              <label className="grid gap-1.5">
+                <span className="text-xs font-semibold uppercase tracking-wide text-(--theme-fg-muted)">
+                  {t('traffic_billing_timezone')}
+                </span>
+                <TimezoneSelect
+                  value={draft.billing_timezone}
+                  disabled={loading || savingSettings}
+                  ariaLabel={t('traffic_billing_timezone')}
+                  placeholder={t('traffic_billing_timezone_placeholder')}
+                  systemLabel={t('traffic_billing_timezone_system')}
+                  emptyLabel={t('traffic_billing_timezone_empty')}
+                  onChange={(value) =>
+                    setDraft((current) => ({
+                      ...current,
+                      billing_timezone: value,
+                    }))
+                  }
+                />
+              </label>
+            )}
           </div>
         </div>
       </div>

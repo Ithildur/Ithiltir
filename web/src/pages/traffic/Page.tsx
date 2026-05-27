@@ -1,9 +1,12 @@
 import React from 'react';
+import AlertTriangle from 'lucide-react/dist/esm/icons/alert-triangle';
 import ArrowLeft from 'lucide-react/dist/esm/icons/arrow-left';
 import CircleHelp from 'lucide-react/dist/esm/icons/circle-help';
 import Gauge from 'lucide-react/dist/esm/icons/gauge';
+import LoaderCircle from 'lucide-react/dist/esm/icons/loader-circle';
 import Network from 'lucide-react/dist/esm/icons/network';
 import RefreshCw from 'lucide-react/dist/esm/icons/refresh-cw';
+import Wrench from 'lucide-react/dist/esm/icons/wrench';
 import type { LucideIcon } from 'lucide-react';
 import { Link, useParams } from 'react-router-dom';
 import type {
@@ -14,13 +17,17 @@ import type {
   TrafficSummary,
 } from '@app-types/traffic';
 import Button from '@components/ui/Button';
+import ConfirmDialog from '@components/ui/ConfirmDialog';
 import Select from '@components/ui/Select';
 import ThemeToggle from '@components/ui/ThemeToggle';
 import { Tooltip } from '@components/ui/Tooltip';
+import { trafficCoverageWarningThreshold } from '@lib/trafficSettingsModel';
 import { useAuth } from '@context/AuthContext';
+import { useTrafficRebuildBanner } from '@hooks/useTrafficRebuildBanner';
+import { useTrafficRebuild } from '@hooks/useTrafficRebuild';
 import { useI18n, type TranslationKey } from '@i18n';
 import { useBootstrapAuth } from '@hooks/useBootstrapAuth';
-import { fetchTrafficRebuild } from '@lib/adminApi';
+import { useConfirmDialog } from '@hooks/useConfirmDialog';
 import {
   fetchTrafficDaily,
   fetchTrafficIfaces,
@@ -42,10 +49,7 @@ const chartHeight = 280;
 const chartBasePad = { left: 48, right: 28, top: 26, bottom: 44 };
 const chartAxisLabelGap = 10;
 const chartAxisLabelCharWidth = 7;
-const trafficCoverageWarningThreshold = 0.995;
 const monthlyHistoryMonths = 12;
-const rebuildActivePollMs = 3000;
-const rebuildIdlePollMs = 5000;
 
 type ChartMode = 'previous_daily' | 'current_daily' | 'monthly';
 
@@ -117,17 +121,23 @@ const HeroStat = ({
   detail,
   icon: Icon,
   tone = 'slate',
+  labelEmphasis = false,
 }: {
   label: string;
   value: string;
   detail?: string;
   icon: LucideIcon;
   tone?: StatTone;
+  labelEmphasis?: boolean;
 }) => (
   <div className="min-w-0 py-3 md:border-l md:border-(--theme-border-subtle) md:pl-8 first:md:border-l-0 first:md:pl-0 dark:md:border-(--theme-border-default)">
     <div className="flex min-w-0 items-center gap-2">
       <Icon size={15} className={statTone[tone]} />
-      <div className="truncate text-[11px] font-semibold uppercase tracking-[0.14em] text-(--theme-fg-muted)">
+      <div
+        className={`truncate font-semibold uppercase tracking-[0.14em] text-(--theme-fg-muted) ${
+          labelEmphasis ? 'text-[13px]' : 'text-[11px]'
+        }`}
+      >
         {label}
       </div>
     </div>
@@ -138,7 +148,14 @@ const HeroStat = ({
   </div>
 );
 
-type CurrentStatTone = 'default' | 'accent' | 'warning';
+const DirectionModeChip = ({ label }: { label: string }) => (
+  <span className="inline-flex items-center gap-1.5 rounded-md border border-(--theme-border-warning-muted) bg-(--theme-bg-warning-muted) px-2 py-1 text-xs font-semibold text-(--theme-fg-warning-strong) dark:border-(--theme-border-warning-soft) dark:bg-(--theme-bg-warning-soft) dark:text-(--theme-fg-warning-strong)">
+    <Gauge size={13} aria-hidden="true" />
+    <span>{label}</span>
+  </span>
+);
+
+type CurrentStatTone = 'default' | 'accent' | 'warning' | 'muted';
 
 type CurrentStatItem = {
   key: string;
@@ -178,6 +195,8 @@ const currentStatValueClass = (tone: CurrentStatTone = 'default') => {
       return 'font-mono font-semibold text-(--theme-fg-accent)';
     case 'warning':
       return 'font-mono font-semibold text-(--theme-fg-warning-strong)';
+    case 'muted':
+      return 'font-mono font-semibold text-(--theme-fg-muted)';
     default:
       return 'font-mono font-semibold text-(--theme-fg-default)';
   }
@@ -189,9 +208,28 @@ const currentStatDotClass = (tone: CurrentStatTone = 'default') => {
       return 'bg-(--theme-fg-accent)';
     case 'warning':
       return 'bg-(--theme-fg-warning-strong)';
+    case 'muted':
+      return 'bg-(--theme-fg-subtle)';
     default:
       return 'bg-(--theme-fg-muted)';
   }
+};
+
+const currentStatToneFor = (
+  directionMode: TrafficSummary['direction_mode'],
+  selectedDirection: TrafficStats['selected_bytes_direction'],
+  group: 'in' | 'out',
+): CurrentStatTone => {
+  if (directionMode === 'out') {
+    return group === 'out' ? 'warning' : 'muted';
+  }
+  if (directionMode === 'both') {
+    return group === 'out' ? 'warning' : 'accent';
+  }
+  if (selectedDirection === 'in' || selectedDirection === 'out') {
+    return group === selectedDirection ? (group === 'out' ? 'warning' : 'accent') : 'muted';
+  }
+  return group === 'out' ? 'warning' : 'accent';
 };
 
 const HealthChip = ({ label, value }: { label: string; value: string }) => (
@@ -201,95 +239,33 @@ const HealthChip = ({ label, value }: { label: string; value: string }) => (
   </span>
 );
 
-type RebuildWatch = {
-  active: boolean;
-  finishedKey: string | null;
-};
-
-const useNodeTrafficRebuild = (serverID: number, enabled: boolean): RebuildWatch => {
-  const [watch, setWatch] = React.useState<RebuildWatch>({
-    active: false,
-    finishedKey: null,
-  });
-  const activeRef = React.useRef(false);
-  const observedRunningRef = React.useRef(false);
-
-  React.useEffect(() => {
-    if (!enabled || !Number.isFinite(serverID) || serverID <= 0) {
-      activeRef.current = false;
-      observedRunningRef.current = false;
-      setWatch({ active: false, finishedKey: null });
-      return;
-    }
-
-    const controller = new AbortController();
-    let timer: number | undefined;
-
-    const applyWatch = (next: RebuildWatch) => {
-      setWatch((current) =>
-        current.active === next.active && current.finishedKey === next.finishedKey ? current : next,
-      );
-    };
-
-    const refresh = async () => {
-      let delay = activeRef.current ? rebuildActivePollMs : rebuildIdlePollMs;
-      try {
-        const status = await fetchTrafficRebuild(controller.signal);
-        if (controller.signal.aborted) return;
-
-        const wasObserved = observedRunningRef.current;
-        const runningThisNode = status.running && status.server_id === serverID;
-        let finishedKey: string | null = null;
-
-        if (runningThisNode) {
-          observedRunningRef.current = true;
-        } else if (wasObserved) {
-          observedRunningRef.current = false;
-          finishedKey =
-            status.server_id === serverID
-              ? `${status.status}:${status.finished_at ?? ''}`
-              : `replaced:${status.server_id}:${status.started_at ?? ''}`;
-        }
-
-        activeRef.current = runningThisNode;
-        applyWatch({ active: runningThisNode, finishedKey });
-        delay = runningThisNode ? rebuildActivePollMs : rebuildIdlePollMs;
-      } catch (error) {
-        if (isAbortError(error)) return;
-        delay = activeRef.current ? rebuildActivePollMs : rebuildIdlePollMs;
-      } finally {
-        if (!controller.signal.aborted) {
-          timer = window.setTimeout(() => void refresh(), delay);
-        }
-      }
-    };
-
-    void refresh();
-    return () => {
-      controller.abort();
-      if (timer !== undefined) {
-        window.clearTimeout(timer);
-      }
-    };
-  }, [enabled, serverID]);
-
-  return watch;
-};
-
 const TrafficRebuildOverlay = () => {
   const { t } = useI18n();
   return (
     <div
-      className="absolute inset-0 z-20 flex items-start justify-center bg-(--theme-page-bg)/85 px-4 py-12 backdrop-blur-[2px] sm:items-center dark:bg-(--theme-bg-default)/85"
+      className="absolute inset-0 z-20 grid min-h-72 place-items-center overflow-hidden bg-(--theme-page-bg)/92 px-6 py-12 backdrop-blur-sm dark:bg-(--theme-bg-default)/92"
       aria-live="polite"
+      role="status"
     >
-      <div className="inline-flex max-w-sm items-center gap-3 rounded-md border border-(--theme-border-subtle) bg-(--theme-bg-default) px-4 py-3 shadow-lg dark:border-(--theme-border-default) dark:bg-(--theme-bg-inset)">
-        <RefreshCw className="size-5 animate-spin text-(--theme-fg-accent)" aria-hidden="true" />
+      <div className="absolute inset-x-0 top-0 h-px bg-(--theme-border-subtle) dark:bg-(--theme-border-default)" />
+      <div className="absolute inset-x-0 bottom-0 h-px bg-(--theme-border-subtle) dark:bg-(--theme-border-default)" />
+      <div className="absolute inset-0 bg-[linear-gradient(135deg,var(--theme-fg-default)_1px,transparent_1px)] bg-size-[28px_28px] opacity-[0.06]" />
+
+      <div className="relative flex w-full max-w-4xl flex-col items-center justify-center gap-8 text-center sm:flex-row sm:text-left">
+        <div className="relative flex size-28 shrink-0 items-center justify-center sm:size-32">
+          <div className="absolute inset-0 rounded-full border border-(--theme-border-subtle) bg-(--theme-bg-default)/80 shadow-xl dark:border-(--theme-border-default) dark:bg-(--theme-bg-inset)/80" />
+          <div className="absolute inset-3 rounded-full border-2 border-(--theme-border-subtle) border-t-(--theme-fg-accent) animate-spin dark:border-(--theme-border-default) dark:border-t-(--theme-fg-accent)" />
+          <RefreshCw className="relative size-10 text-(--theme-fg-accent)" aria-hidden="true" />
+        </div>
+
         <div className="min-w-0">
-          <div className="text-sm font-semibold text-(--theme-fg-default)">
+          <div className="text-xs font-semibold uppercase tracking-[0.18em] text-(--theme-fg-accent)">
+            {t('traffic_current_cycle')}
+          </div>
+          <div className="mt-3 max-w-2xl text-2xl/8 font-semibold tracking-tight text-(--theme-fg-default) sm:text-3xl/9">
             {t('traffic_rebuild_overlay_title')}
           </div>
-          <div className="mt-1 text-xs text-(--theme-fg-muted)">
+          <div className="mt-3 max-w-xl text-sm/6 text-(--theme-fg-muted)">
             {t('traffic_rebuild_overlay_detail')}
           </div>
         </div>
@@ -496,13 +472,17 @@ const TrafficTrendChart = ({
 
         {points.map((item, index) => {
           const x = xFor(index);
+          const totalBytes = item.inBytes + item.outBytes;
           const inHeight = chartPad.top + innerHeight - yFor(item.inBytes);
           const outHeight = chartPad.top + innerHeight - yFor(item.outBytes);
           const baseY = chartPad.top + innerHeight;
           const showLabel = index === 0 || index === points.length - 1 || index % labelEvery === 0;
           return (
             <g key={item.key}>
-              <title>{`${item.title} · ${formatTrafficBytes(item.inBytes + item.outBytes)}`}</title>
+              <title>{`${item.title}
+${t('total_trans')}: ${formatTrafficBytes(totalBytes)}
+${t('traffic_tooltip_tx')}: ${formatTrafficBytes(item.outBytes)}
+${t('traffic_tooltip_rx')}: ${formatTrafficBytes(item.inBytes)}`}</title>
               <rect
                 x={x - barWidth - 2}
                 y={baseY - inHeight}
@@ -565,6 +545,7 @@ const Page = () => {
   useBootstrapAuth();
   const { t, lang } = useI18n();
   const { token } = useAuth();
+  const { dialogProps: confirmDialogProps, request: requestConfirm } = useConfirmDialog();
   const { serverId } = useParams();
   const numericServerId = serverId ? Number(serverId) : Number.NaN;
   const isValidServerId = Number.isFinite(numericServerId) && numericServerId > 0;
@@ -584,7 +565,16 @@ const Page = () => {
   const [loading, setLoading] = React.useState(false);
   const [errorKey, setErrorKey] = React.useState<TranslationKey | null>(null);
   const trafficRequestRef = React.useRef(0);
-  const trafficRebuild = useNodeTrafficRebuild(numericServerId, Boolean(token) && isValidServerId);
+  const {
+    busy: trafficRebuildBusy,
+    nodeRebuildActive: nodeTrafficRebuildActive,
+    actionBusy: trafficRebuildActionBusy,
+    finishedKey: trafficRebuildFinishedKey,
+    start: startTrafficRebuild,
+  } = useTrafficRebuild({
+    nodeId: isValidServerId ? numericServerId : null,
+  });
+  const showTrafficRebuildOutcome = useTrafficRebuildBanner();
 
   React.useEffect(() => {
     if (!isValidServerId) return;
@@ -676,11 +666,11 @@ const Page = () => {
   }, [loadTraffic]);
 
   React.useEffect(() => {
-    if (!trafficRebuild.finishedKey) return;
+    if (!trafficRebuildFinishedKey) return;
     const controller = new AbortController();
     void loadTraffic(controller.signal);
     return () => controller.abort();
-  }, [loadTraffic, trafficRebuild.finishedKey]);
+  }, [loadTraffic, trafficRebuildFinishedKey]);
 
   const serverLabel =
     summary?.server_name?.trim() || (isValidServerId ? `#${numericServerId}` : '');
@@ -689,10 +679,34 @@ const Page = () => {
   const summaryCoverageWarning = Boolean(
     summary && summary.stats.coverage_ratio < trafficCoverageWarningThreshold,
   );
+  const rebuildNodeTraffic = React.useCallback(async () => {
+    if (!token || !isValidServerId || trafficRebuildBusy) return;
+
+    const ok = await requestConfirm({
+      title: t('common_confirm'),
+      message: t('admin_confirm_rebuild_node_traffic', { name: serverLabel }),
+      confirmLabel: t('admin_node_traffic_rebuild'),
+      cancelLabel: t('common_cancel'),
+      tone: 'default',
+    });
+    if (!ok) return;
+
+    const outcome = await startTrafficRebuild(numericServerId);
+    showTrafficRebuildOutcome(outcome);
+  }, [
+    isValidServerId,
+    numericServerId,
+    requestConfirm,
+    serverLabel,
+    showTrafficRebuildOutcome,
+    startTrafficRebuild,
+    t,
+    token,
+    trafficRebuildBusy,
+  ]);
   const directionLabel = summary
     ? t(`traffic_direction_${summary.direction_mode}` as TranslationKey)
     : '';
-  const cycleLabel = summary ? t(`traffic_cycle_${summary.cycle.mode}` as TranslationKey) : '';
   const currentDailyPoints = React.useMemo(() => {
     const timezone = summary?.cycle.timezone || '';
     return currentDaily.items.map((item) => dailyPointFrom(item, locale, timezone));
@@ -742,6 +756,7 @@ const Page = () => {
         value: selectedTrafficText(stats),
         icon: Network,
         tone: 'accent' as const,
+        labelEmphasis: true,
       },
       ...(stats.p95_enabled
         ? [
@@ -751,6 +766,7 @@ const Page = () => {
               value: formatOptionalBandwidth(stats.selected_p95_bytes_per_sec),
               icon: Gauge,
               tone: 'warning' as const,
+              labelEmphasis: false,
             },
           ]
         : []),
@@ -760,6 +776,7 @@ const Page = () => {
         value: formatBandwidth(stats.selected_peak_bytes_per_sec),
         icon: Gauge,
         tone: 'slate' as const,
+        labelEmphasis: false,
       },
       ...(showCoverage
         ? [
@@ -769,6 +786,7 @@ const Page = () => {
               value: formatCoverage(stats.coverage_ratio),
               icon: RefreshCw,
               tone: summaryCoverageWarning ? ('red' as const) : ('slate' as const),
+              labelEmphasis: false,
             },
           ]
         : []),
@@ -782,7 +800,7 @@ const Page = () => {
       {
         key: 'out',
         label: t('traffic_outbound'),
-        tone: 'warning',
+        tone: currentStatToneFor(summary.direction_mode, stats.selected_bytes_direction, 'out'),
         items: [
           {
             key: 'out_total',
@@ -808,7 +826,7 @@ const Page = () => {
       {
         key: 'in',
         label: t('traffic_inbound'),
-        tone: 'accent',
+        tone: currentStatToneFor(summary.direction_mode, stats.selected_bytes_direction, 'in'),
         items: [
           {
             key: 'in_total',
@@ -848,6 +866,8 @@ const Page = () => {
 
   return (
     <div className="min-h-screen bg-(--theme-page-bg) text-(--theme-fg-default) dark:bg-(--theme-bg-default)">
+      <ConfirmDialog {...confirmDialogProps} />
+
       <header className="sticky top-0 z-40 border-b border-(--theme-border-subtle) bg-(--theme-surface-control) backdrop-blur-md dark:border-(--theme-border-default) dark:bg-(--theme-bg-inset)/90">
         <div className="mx-auto flex h-16 max-w-410 items-center justify-between px-4 sm:px-6 lg:px-8">
           <div className="flex min-w-0 items-center gap-3">
@@ -858,13 +878,6 @@ const Page = () => {
               <ArrowLeft size={14} />
               <span>{t('common_back_to_dashboard')}</span>
             </Link>
-            <div className="h-5 w-px bg-(--theme-border-subtle) dark:bg-(--theme-border-default)" />
-            <div className="min-w-0">
-              <div className="truncate text-sm font-semibold text-(--theme-fg-default)">
-                {t('traffic_title')}
-              </div>
-              <div className="truncate text-xs text-(--theme-fg-muted)">{serverLabel}</div>
-            </div>
           </div>
           <div className="hidden items-center gap-3 md:flex">
             <ThemeToggle size="sm" variant="soft" />
@@ -899,8 +912,7 @@ const Page = () => {
                     )}
                   </span>
                 )}
-                {summary && <span>{cycleLabel}</span>}
-                {summary && <span>{directionLabel}</span>}
+                {summary && <DirectionModeChip label={directionLabel} />}
               </div>
             </div>
 
@@ -926,7 +938,7 @@ const Page = () => {
                 variant="secondary"
                 icon={RefreshCw}
                 onClick={() => void loadTraffic()}
-                disabled={loading || trafficRebuild.active}
+                disabled={loading || nodeTrafficRebuildActive}
               >
                 {t('stats_refresh')}
               </Button>
@@ -938,18 +950,18 @@ const Page = () => {
         {loading && !summary && (
           <div className="text-sm text-(--theme-fg-muted)">{t('stats_loading')}</div>
         )}
-        {!loading && !errorKey && !summary && !trafficRebuild.active && (
+        {!loading && !errorKey && !summary && !nodeTrafficRebuildActive && (
           <div className="text-sm text-(--theme-fg-muted)">{t('traffic_no_data')}</div>
         )}
-        {!summary && trafficRebuild.active && (
-          <div className="relative min-h-40 overflow-hidden rounded-md border border-(--theme-border-subtle) dark:border-(--theme-border-default)">
+        {!summary && nodeTrafficRebuildActive && (
+          <div className="relative min-h-112 overflow-hidden border-y border-(--theme-border-subtle) dark:border-(--theme-border-default)">
             <TrafficRebuildOverlay />
           </div>
         )}
 
         {summary && (
-          <div className="relative" aria-busy={trafficRebuild.active}>
-            {trafficRebuild.active && <TrafficRebuildOverlay />}
+          <div className="relative" aria-busy={nodeTrafficRebuildActive}>
+            {nodeTrafficRebuildActive && <TrafficRebuildOverlay />}
             <section className="divide-y divide-(--theme-border-subtle) border-b border-(--theme-border-subtle) dark:divide-(--theme-border-default) dark:border-(--theme-border-default)">
               <div className="grid gap-x-8 gap-y-3 py-4 sm:grid-cols-2 lg:grid-cols-4">
                 {statItems.map((item, index) => (
@@ -966,6 +978,7 @@ const Page = () => {
                       value={item.value}
                       icon={item.icon}
                       tone={item.tone}
+                      labelEmphasis={item.labelEmphasis}
                     />
                   </div>
                 ))}
@@ -991,8 +1004,31 @@ const Page = () => {
                         value={formatCoverage(chartCoverageStats.coverageRatio)}
                       />
                       {chartCoverageWarning && (
-                        <span className="text-xs font-semibold text-(--theme-fg-warning-strong)">
-                          {t('traffic_coverage_low')}
+                        <span className="inline-flex flex-wrap items-center gap-2">
+                          <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-(--theme-fg-warning-strong)">
+                            <AlertTriangle className="size-3.5" aria-hidden="true" />
+                            {t('traffic_coverage_low')}
+                          </span>
+                          {token && (
+                            <Button
+                              type="button"
+                              variant="plain"
+                              size="none"
+                              className="rounded-md border border-(--theme-border-subtle) bg-transparent p-1.5 text-xs text-(--theme-fg-muted) transition-colors hover:border-(--theme-border-hover) hover:bg-(--theme-bg-muted) hover:text-(--theme-fg-default) dark:border-(--theme-border-default) dark:bg-(--theme-canvas-subtle) dark:text-(--theme-fg-muted) dark:hover:border-(--theme-fg-muted) dark:hover:bg-(--theme-canvas-muted) dark:hover:text-(--theme-fg-control-hover)"
+                              disabled={trafficRebuildBusy}
+                              onClick={() => void rebuildNodeTraffic()}
+                              aria-label={t('admin_node_traffic_rebuild_button', {
+                                name: serverLabel,
+                              })}
+                              title={t('admin_node_traffic_rebuild')}
+                            >
+                              {trafficRebuildActionBusy ? (
+                                <LoaderCircle className="size-4 animate-spin" aria-hidden="true" />
+                              ) : (
+                                <Wrench className="size-4" strokeWidth={2.25} aria-hidden="true" />
+                              )}
+                            </Button>
+                          )}
                         </span>
                       )}
                     </div>

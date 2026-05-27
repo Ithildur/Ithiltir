@@ -1,17 +1,14 @@
 import React from 'react';
 import Plus from 'lucide-react/dist/esm/icons/plus';
-import RefreshCw from 'lucide-react/dist/esm/icons/refresh-cw';
 import Search from 'lucide-react/dist/esm/icons/search';
 import Settings2 from 'lucide-react/dist/esm/icons/settings-2';
 import SlidersHorizontal from 'lucide-react/dist/esm/icons/sliders-horizontal';
 import Button from '@components/ui/Button';
 import Card from '@components/ui/Card';
-import Checkbox from '@components/ui/Checkbox';
 import ConfirmDialog from '@components/ui/ConfirmDialog';
 import Input from '@components/ui/Input';
-import IOSSwitch from '@components/ui/IOSSwitch';
 import { useTopBanner } from '@components/ui/TopBannerStack';
-import NodeCycleSettingsModal, { type NodeCycleSettingsInput } from './NodeCycleSettingsModal';
+import NodeTrafficSettingsModal from './NodeTrafficSettingsModal';
 import NodeSettingsModal from './NodeSettingsModal';
 import { useAuth } from '@context/AuthContext';
 import {
@@ -21,20 +18,22 @@ import {
   updateNode,
   updateNodesTrafficP95,
 } from '@lib/adminApi';
-import type { NodeDeployPlatform } from '@app-types/api';
+import type { NodeDeployPlatform, NodeTrafficPatch } from '@app-types/api';
 import type { NodeRow } from '@app-types/admin';
-import { useI18n, type TranslationKey } from '@i18n';
+import { useI18n } from '@i18n';
 import { copyTextToClipboardWithFeedback } from '@utils/clipboard';
 import { useApiErrorHandler } from '@hooks/useApiErrorHandler';
 import { useConfirmDialog } from '@hooks/useConfirmDialog';
 import { isVersionOlder } from '@utils/version';
+import MobileAdvancedNodeCard from '@components/admin/nodeManager/MobileAdvancedNodeCard';
 import MobileNodeCard from '@components/admin/nodeManager/MobileNodeCard';
 import NodeAdvancedTable from '@components/admin/nodeManager/NodeAdvancedTable';
 import NodeFilterMenu from '@components/admin/nodeManager/NodeFilterMenu';
 import NodeTable from '@components/admin/nodeManager/NodeTable';
 import { useNodes } from '@components/admin/nodeManager/useNodes';
 import { useReorder } from '@components/admin/nodeManager/useReorder';
-import { useTrafficRebuild } from '@components/admin/nodeManager/useTrafficRebuild';
+import { useTrafficRebuildBanner } from '@hooks/useTrafficRebuildBanner';
+import { useTrafficRebuild } from '@hooks/useTrafficRebuild';
 
 type SubTab = 'basic' | 'advanced';
 
@@ -68,20 +67,21 @@ const NodeManager: React.FC = () => {
   const [search, setSearch] = React.useState('');
   const [selectedGroupIds, setSelectedGroupIds] = React.useState<number[]>([]);
   const [updateableOnly, setUpdateableOnly] = React.useState(false);
-  const [settingsNode, setSettingsNode] = React.useState<NodeRow | null>(null);
-  const [cycleSettingsNode, setCycleSettingsNode] = React.useState<NodeRow | null>(null);
+  const [basicSettingsNode, setBasicSettingsNode] = React.useState<NodeRow | null>(null);
+  const [trafficSettingsNode, setTrafficSettingsNode] = React.useState<NodeRow | null>(null);
   const [isCreating, setIsCreating] = React.useState(false);
   const [savingP95NodeIds, setSavingP95NodeIds] = React.useState<Set<number>>(() => new Set());
-  const [savingCycleNodeIds, setSavingCycleNodeIds] = React.useState<Set<number>>(() => new Set());
+  const [savingTrafficSettingsNodeIds, setSavingTrafficSettingsNodeIds] = React.useState<
+    Set<number>
+  >(() => new Set());
   const [selectedP95NodeIds, setSelectedP95NodeIds] = React.useState<Set<number>>(() => new Set());
+
   const {
     rebuildingNodeId: rebuildingTrafficNodeId,
-    rebuildActive: trafficRebuildActive,
+    busy: trafficRebuildBusy,
     start: startTrafficRebuild,
-  } = useTrafficRebuild({
-    token,
-    sync: activeTab === 'advanced',
-  });
+  } = useTrafficRebuild();
+  const showTrafficRebuildOutcome = useTrafficRebuildBanner();
 
   const nodeHasNewerBundledVersion = React.useCallback(
     (node: NodeRow): boolean => {
@@ -145,6 +145,26 @@ const NodeManager: React.FC = () => {
     () => filteredNodes.map((node) => node.id),
     [filteredNodes],
   );
+
+  React.useEffect(() => {
+    setSelectedP95NodeIds((current) => {
+      if (current.size === 0) return current;
+
+      const nodeIds = new Set(nodes.map((node) => node.id));
+      let changed = false;
+      const next = new Set<number>();
+      for (const id of current) {
+        if (nodeIds.has(id)) {
+          next.add(id);
+        } else {
+          changed = true;
+        }
+      }
+
+      return changed ? next : current;
+    });
+  }, [nodes]);
+
   const selectedP95Ids = React.useMemo(() => Array.from(selectedP95NodeIds), [selectedP95NodeIds]);
   const allVisibleP95Selected =
     filteredNodeIds.length > 0 && filteredNodeIds.every((id) => selectedP95NodeIds.has(id));
@@ -154,24 +174,12 @@ const NodeManager: React.FC = () => {
     !isLoading &&
     !selectedP95Ids.some((id) => savingP95NodeIds.has(id));
 
-  const cycleModeLabel = React.useCallback(
-    (node: NodeRow) => {
-      if (node.trafficCycleMode === 'default') return t('admin_node_cycle_mode_inherited');
-      return t(`traffic_cycle_${node.trafficCycleMode}` as TranslationKey);
-    },
-    [t],
-  );
-
   const updatableNodeIds = React.useMemo(() => {
     return new Set(nodes.filter((node) => nodeCanRequestUpgrade(node)).map((node) => node.id));
   }, [nodeCanRequestUpgrade, nodes]);
   const manualUpdateNodeIds = React.useMemo(() => {
     return new Set(nodes.filter((node) => nodeNeedsManualUpdate(node)).map((node) => node.id));
   }, [nodeNeedsManualUpdate, nodes]);
-
-  const refreshNodesInBackground = React.useCallback(() => {
-    void refreshNodes();
-  }, [refreshNodes]);
 
   const copyToClipboard = React.useCallback(
     async (text: string, successMessage = t('admin_secret_copied')) => {
@@ -203,9 +211,15 @@ const NodeManager: React.FC = () => {
     try {
       await createNode();
       pushBanner(t('admin_node_created'), { tone: 'info' });
-      await refreshNodes();
     } catch (error) {
       apiError(error, t('admin_create_node_failed'));
+      setIsCreating(false);
+      return;
+    }
+    try {
+      await refreshNodes();
+    } catch (error) {
+      apiError(error, t('admin_fetch_nodes_failed'));
     } finally {
       setIsCreating(false);
     }
@@ -216,7 +230,7 @@ const NodeManager: React.FC = () => {
     nodes,
     setNodes,
     filteredNodeIds,
-    refreshNodes: refreshNodesInBackground,
+    refreshNodes,
   });
 
   const rename = React.useCallback(
@@ -356,39 +370,29 @@ const NodeManager: React.FC = () => {
     [apiError, nodes, pushBanner, selectedP95Ids.length, selectedP95NodeIds, setNodes, t, token],
   );
 
-  const saveCycleSettings = React.useCallback(
-    async (node: NodeRow, input: NodeCycleSettingsInput): Promise<boolean> => {
-      if (!token || savingCycleNodeIds.has(node.id)) return false;
-      setSavingCycleNodeIds((current) => new Set(current).add(node.id));
+  const saveNodeTrafficSettings = React.useCallback(
+    async (node: NodeRow, patch: NodeTrafficPatch): Promise<boolean> => {
+      if (!token || savingTrafficSettingsNodeIds.has(node.id)) return false;
+      setSavingTrafficSettingsNodeIds((current) => new Set(current).add(node.id));
+      let failureMessage = t('admin_node_traffic_settings_save_failed');
       try {
-        await updateNode(node.id, input);
-        setNodes((prev) =>
-          prev.map((item) =>
-            item.id === node.id
-              ? {
-                  ...item,
-                  trafficCycleMode: input.traffic_cycle_mode,
-                  trafficBillingStartDay: input.traffic_billing_start_day,
-                  trafficBillingAnchorDate: input.traffic_billing_anchor_date,
-                  trafficBillingTimezone: input.traffic_billing_timezone,
-                }
-              : item,
-          ),
-        );
-        pushBanner(t('admin_node_cycle_settings_saved'), { tone: 'info' });
+        await updateNode(node.id, patch);
+        failureMessage = t('admin_fetch_nodes_failed');
+        await refreshNodes();
+        pushBanner(t('admin_node_traffic_settings_saved'), { tone: 'info' });
         return true;
       } catch (error) {
-        apiError(error, t('admin_node_cycle_settings_save_failed'));
+        apiError(error, failureMessage);
         return false;
       } finally {
-        setSavingCycleNodeIds((current) => {
+        setSavingTrafficSettingsNodeIds((current) => {
           const next = new Set(current);
           next.delete(node.id);
           return next;
         });
       }
     },
-    [apiError, pushBanner, savingCycleNodeIds, setNodes, t, token],
+    [apiError, pushBanner, refreshNodes, savingTrafficSettingsNodeIds, t, token],
   );
 
   const confirmAndDelete = React.useCallback(
@@ -430,17 +434,22 @@ const NodeManager: React.FC = () => {
       try {
         await requestNodeUpgrade(node.id);
         pushBanner(t('admin_node_upgrade_requested'), { tone: 'info' });
-        await refreshNodes();
       } catch (error) {
         apiError(error, t('admin_request_node_upgrade_failed'));
+        return;
+      }
+      try {
+        await refreshNodes();
+      } catch (error) {
+        apiError(error, t('admin_fetch_nodes_failed'));
       }
     },
     [apiError, bundledNodeVersion, pushBanner, refreshNodes, requestConfirm, t, token],
   );
 
-  const rebuildTraffic = React.useCallback(
+  const rebuildNodeTraffic = React.useCallback(
     async (node: NodeRow) => {
-      if (!token || trafficRebuildActive) return;
+      if (!token || trafficRebuildBusy) return;
       const ok = await requestConfirm({
         title: t('common_confirm'),
         message: t('admin_confirm_rebuild_node_traffic', { name: node.name }),
@@ -449,10 +458,11 @@ const NodeManager: React.FC = () => {
         tone: 'default',
       });
       if (ok) {
-        await startTrafficRebuild(node.id);
+        const outcome = await startTrafficRebuild(node.id);
+        showTrafficRebuildOutcome(outcome);
       }
     },
-    [requestConfirm, startTrafficRebuild, t, token, trafficRebuildActive],
+    [requestConfirm, showTrafficRebuildOutcome, startTrafficRebuild, t, token, trafficRebuildBusy],
   );
 
   const saveSettings = React.useCallback(
@@ -586,7 +596,7 @@ const NodeManager: React.FC = () => {
             onCopySecret={(secret) => void copyToClipboard(secret)}
             onDeployCopy={copyDeploy}
             onRequestUpgrade={(node) => void confirmUpgrade(node)}
-            onOpenSettings={setSettingsNode}
+            onOpenSettings={setBasicSettingsNode}
             onDelete={(node) => void confirmAndDelete(node)}
             onDragStart={dragStart}
             onDragOver={dragOver}
@@ -598,18 +608,18 @@ const NodeManager: React.FC = () => {
         <Card className="hidden md:block overflow-hidden">
           <NodeAdvancedTable
             nodes={filteredNodes}
-            selectedNodeIds={selectedP95NodeIds}
-            allVisibleSelected={allVisibleP95Selected}
-            someVisibleSelected={someVisibleP95Selected}
-            savingNodeIds={savingP95NodeIds}
-            savingCycleNodeIds={savingCycleNodeIds}
+            selectedP95NodeIds={selectedP95NodeIds}
+            allVisibleP95Selected={allVisibleP95Selected}
+            someVisibleP95Selected={someVisibleP95Selected}
+            savingP95NodeIds={savingP95NodeIds}
+            savingTrafficSettingsNodeIds={savingTrafficSettingsNodeIds}
             rebuildingTrafficNodeId={rebuildingTrafficNodeId}
-            trafficRebuildActive={trafficRebuildActive}
+            trafficRebuildBusy={trafficRebuildBusy}
             onToggleVisibleNodes={toggleVisibleP95Nodes}
-            onToggleNode={toggleP95NodeSelection}
+            onToggleP95Node={toggleP95NodeSelection}
             onToggleTrafficP95={(node) => void toggleTrafficP95(node)}
-            onOpenCycleSettings={setCycleSettingsNode}
-            onRebuildTraffic={(node) => void rebuildTraffic(node)}
+            onOpenTrafficSettings={setTrafficSettingsNode}
+            onRebuildTraffic={(node) => void rebuildNodeTraffic(node)}
           />
           {selectedP95Ids.length > 0 && (
             <div className="flex flex-col gap-2 border-t border-(--theme-border-subtle) bg-(--theme-bg-muted) px-4 py-3 text-xs text-(--theme-fg-muted) sm:flex-row sm:items-center sm:justify-between dark:border-(--theme-border-default) dark:bg-(--theme-canvas-subtle) dark:text-(--theme-fg-muted)">
@@ -653,7 +663,7 @@ const NodeManager: React.FC = () => {
               bundledNodeVersion={bundledNodeVersion}
               canRequestUpgrade={updatableNodeIds.has(node.id)}
               needsManualUpdate={manualUpdateNodeIds.has(node.id)}
-              onOpenSettings={setSettingsNode}
+              onOpenSettings={setBasicSettingsNode}
               onToggleGuestVisible={(target) => void toggleGuestVisible(target)}
               onCopySecret={(secret) => void copyToClipboard(secret)}
               onDeployCopy={copyDeploy}
@@ -664,59 +674,19 @@ const NodeManager: React.FC = () => {
       ) : (
         <div className="md:hidden grid grid-cols-1 gap-3">
           {filteredNodes.map((node) => (
-            <Card key={node.id} className="p-4">
-              <div className="flex items-center justify-between gap-4">
-                <div className="flex min-w-0 items-center gap-3">
-                  <Checkbox
-                    checked={selectedP95NodeIds.has(node.id)}
-                    onChange={() => toggleP95NodeSelection(node.id)}
-                    aria-label={t('admin_nodes_select_node', { name: node.name })}
-                  />
-                  <div className="min-w-0">
-                    <div className="truncate text-sm font-semibold text-(--theme-fg-default)">
-                      {node.name}
-                    </div>
-                    <div className="mt-1 truncate font-mono text-xs text-(--theme-fg-muted)">
-                      {node.ip || `ID: ${node.id}`}
-                    </div>
-                  </div>
-                </div>
-                <IOSSwitch
-                  size="sm"
-                  checked={node.trafficP95Enabled}
-                  disabled={savingP95NodeIds.has(node.id)}
-                  ariaLabel={t('admin_node_traffic_p95_toggle', { name: node.name })}
-                  onChange={() => void toggleTrafficP95(node)}
-                />
-              </div>
-              <div className="mt-3 flex items-center justify-between gap-3">
-                <span className="text-[11px] font-semibold uppercase tracking-wide text-(--theme-fg-muted)">
-                  {t('admin_nodes_column_cycle_mode')}
-                </span>
-                <button
-                  type="button"
-                  disabled={savingCycleNodeIds.has(node.id)}
-                  onClick={() => setCycleSettingsNode(node)}
-                  className="inline-flex max-w-48 items-center rounded-md border border-(--theme-border-subtle) bg-(--theme-bg-muted) px-2 py-1 text-xs font-semibold text-(--theme-fg-muted) hover:text-(--theme-fg-default) disabled:cursor-not-allowed disabled:opacity-60 dark:border-(--theme-border-default) dark:bg-(--theme-canvas-subtle)"
-                  aria-label={t('admin_node_cycle_settings_button', { name: node.name })}
-                >
-                  <span className="truncate">{cycleModeLabel(node)}</span>
-                </button>
-              </div>
-              <div className="mt-3 flex justify-end">
-                <Button
-                  variant="secondary"
-                  icon={RefreshCw}
-                  disabled={trafficRebuildActive}
-                  onClick={() => void rebuildTraffic(node)}
-                  aria-label={t('admin_node_traffic_rebuild_button', { name: node.name })}
-                >
-                  {rebuildingTrafficNodeId === node.id
-                    ? t('admin_node_traffic_rebuilding')
-                    : t('admin_node_traffic_rebuild')}
-                </Button>
-              </div>
-            </Card>
+            <MobileAdvancedNodeCard
+              key={node.id}
+              node={node}
+              p95Selected={selectedP95NodeIds.has(node.id)}
+              savingP95={savingP95NodeIds.has(node.id)}
+              savingTrafficSettings={savingTrafficSettingsNodeIds.has(node.id)}
+              rebuilding={rebuildingTrafficNodeId === node.id}
+              trafficRebuildBusy={trafficRebuildBusy}
+              onToggleP95Node={toggleP95NodeSelection}
+              onToggleTrafficP95={(target) => void toggleTrafficP95(target)}
+              onOpenTrafficSettings={setTrafficSettingsNode}
+              onRebuildTraffic={(target) => void rebuildNodeTraffic(target)}
+            />
           ))}
           {selectedP95Ids.length > 0 && (
             <Card className="p-3">
@@ -757,25 +727,25 @@ const NodeManager: React.FC = () => {
         </Card>
       )}
 
-      {settingsNode && (
+      {basicSettingsNode && (
         <NodeSettingsModal
-          isOpen={!!settingsNode}
-          node={settingsNode}
+          isOpen={!!basicSettingsNode}
+          node={basicSettingsNode}
           groups={groups}
           deploy={deploy}
-          onClose={() => setSettingsNode(null)}
-          onSave={(input) => void saveSettings(settingsNode.id, input)}
+          onClose={() => setBasicSettingsNode(null)}
+          onSave={(input) => void saveSettings(basicSettingsNode.id, input)}
         />
       )}
 
-      {cycleSettingsNode && (
-        <NodeCycleSettingsModal
-          isOpen={!!cycleSettingsNode}
-          node={cycleSettingsNode}
+      {trafficSettingsNode && (
+        <NodeTrafficSettingsModal
+          isOpen={!!trafficSettingsNode}
+          node={trafficSettingsNode}
           globalSettings={trafficSettings}
-          saving={savingCycleNodeIds.has(cycleSettingsNode.id)}
-          onClose={() => setCycleSettingsNode(null)}
-          onSave={(input) => saveCycleSettings(cycleSettingsNode, input)}
+          saving={savingTrafficSettingsNodeIds.has(trafficSettingsNode.id)}
+          onClose={() => setTrafficSettingsNode(null)}
+          onSave={(patch) => saveNodeTrafficSettings(trafficSettingsNode, patch)}
         />
       )}
     </div>

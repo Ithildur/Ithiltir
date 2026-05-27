@@ -41,9 +41,9 @@ const tabComponents = {
 } satisfies Record<DashboardTab, React.ElementType>;
 
 const AdminConsolePage: React.FC = () => {
-  const [activeTab, setActiveTab] = React.useState<DashboardTab>('nodes');
-  const [isMobileMenuOpen, setIsMobileMenuOpen] = React.useState(false);
   const [dashVersion, setDashVersion] = React.useState('');
+  const [activeTab, setActiveTab] = React.useState<DashboardTab>('nodes');
+  const [mobileMenuOpen, setMobileMenuOpen] = React.useState(false);
   const { t } = useI18n();
   const { brand } = useSiteBrand();
   const {
@@ -54,7 +54,7 @@ const AdminConsolePage: React.FC = () => {
     if (!visibleTabs.some((tab) => tab.key === activeTab)) {
       setActiveTab(visibleTabs[0]?.key ?? 'nodes');
     }
-  }, [activeTab]);
+  }, [activeTab, setActiveTab]);
 
   const activeTabMeta = tabs.find((tab) => tab.key === activeTab) ?? visibleTabs[0] ?? tabs[0];
   const ActiveTabComponent = tabComponents[activeTab] ?? NodeManager;
@@ -101,11 +101,11 @@ const AdminConsolePage: React.FC = () => {
       )}
 
       <AdminMobileMenu
-        isOpen={isMobileMenuOpen}
+        isOpen={mobileMenuOpen}
         tabs={tabs}
         activeTab={activeTab}
         onTabChange={setActiveTab}
-        onClose={() => setIsMobileMenuOpen(false)}
+        onClose={() => setMobileMenuOpen(false)}
       />
 
       <div className="flex-1 flex flex-col min-w-0 h-screen overflow-hidden relative z-10">
@@ -121,7 +121,7 @@ const AdminConsolePage: React.FC = () => {
         <header className="md:hidden h-16 bg-(--theme-surface-overlay) dark:bg-(--theme-bg-inset)/90 backdrop-blur-md border-b border-(--theme-border-subtle) dark:border-(--theme-border-default) flex items-center justify-between px-4 z-10 shrink-0">
           <div className="flex min-w-0 items-center gap-3">
             <button
-              onClick={() => setIsMobileMenuOpen(true)}
+              onClick={() => setMobileMenuOpen(true)}
               className="p-1 text-(--theme-fg-muted) dark:text-(--theme-fg-control-hover)"
               type="button"
               aria-label={t('admin_menu')}

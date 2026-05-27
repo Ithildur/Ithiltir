@@ -11,20 +11,60 @@ export const Tooltip: React.FC<Props> = ({ content, children, className }) => {
   const [isVisible, setIsVisible] = useState(false);
   const [coords, setCoords] = useState({ top: 0, left: 0 });
   const triggerRef = useRef<HTMLDivElement>(null);
+  const frameRef = useRef<number | null>(null);
   const tooltipId = React.useId();
 
-  const show = () => {
-    if (triggerRef.current) {
-      const rect = triggerRef.current.getBoundingClientRect();
-      setCoords({
-        top: rect.top - 8,
-        left: rect.left + rect.width / 2,
-      });
-      setIsVisible(true);
+  React.useEffect(
+    () => () => {
+      if (frameRef.current !== null) {
+        window.cancelAnimationFrame(frameRef.current);
+      }
+    },
+    [],
+  );
+
+  const positionFromRect = () => {
+    if (frameRef.current !== null) {
+      window.cancelAnimationFrame(frameRef.current);
+      frameRef.current = null;
     }
+    const rect = triggerRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    setCoords({
+      top: rect.top - 8,
+      left: rect.left + rect.width / 2,
+    });
+  };
+
+  const positionFromPointer = (event: React.PointerEvent<HTMLDivElement>) => {
+    const next = {
+      top: event.clientY - 10,
+      left: event.clientX,
+    };
+    if (frameRef.current !== null) {
+      window.cancelAnimationFrame(frameRef.current);
+    }
+    frameRef.current = window.requestAnimationFrame(() => {
+      frameRef.current = null;
+      setCoords(next);
+    });
+  };
+
+  const show = (event?: React.PointerEvent<HTMLDivElement>) => {
+    if (!content) return;
+    if (event) {
+      positionFromPointer(event);
+    } else {
+      positionFromRect();
+    }
+    setIsVisible(true);
   };
 
   const hide = () => {
+    if (frameRef.current !== null) {
+      window.cancelAnimationFrame(frameRef.current);
+      frameRef.current = null;
+    }
     setIsVisible(false);
   };
 
@@ -33,8 +73,13 @@ export const Tooltip: React.FC<Props> = ({ content, children, className }) => {
       <div
         ref={triggerRef}
         className={className}
-        onMouseEnter={show}
-        onMouseLeave={hide}
+        onPointerEnter={(event) => show(event)}
+        onPointerMove={(event) => {
+          if (isVisible) positionFromPointer(event);
+        }}
+        onPointerLeave={hide}
+        onFocus={() => show()}
+        onBlur={hide}
         aria-describedby={isVisible && content ? tooltipId : undefined}
       >
         {children}

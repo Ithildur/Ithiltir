@@ -12,6 +12,7 @@ import { AuthProvider } from '@context/AuthContext';
 import { SiteBrandProvider } from '@context/SiteBrandContext';
 import { ThemeProvider } from '@context/ThemeContext';
 import { I18nProvider } from '@i18n';
+import { TrafficRebuildProvider } from './providers/TrafficRebuildProvider';
 
 const root = document.getElementById('root');
 
@@ -26,9 +27,11 @@ const renderApp = () => {
         <TopBannerProvider>
           <SiteBrandProvider>
             <AuthProvider>
-              <ThemeProvider>
-                <App />
-              </ThemeProvider>
+              <TrafficRebuildProvider>
+                <ThemeProvider>
+                  <App />
+                </ThemeProvider>
+              </TrafficRebuildProvider>
             </AuthProvider>
           </SiteBrandProvider>
         </TopBannerProvider>

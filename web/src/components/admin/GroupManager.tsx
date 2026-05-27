@@ -179,7 +179,7 @@ const GroupManager: React.FC = () => {
                   title={t('admin_groups_edit')}
                   aria-label={t('admin_groups_edit')}
                 >
-                  <Edit2 size={16} />
+                  <Edit2 size={18} />
                 </button>
                 {group.id !== 1 && (
                   <button
@@ -189,7 +189,7 @@ const GroupManager: React.FC = () => {
                     title={t('admin_groups_delete')}
                     aria-label={t('admin_groups_delete')}
                   >
-                    <Trash2 size={16} />
+                    <Trash2 size={18} />
                   </button>
                 )}
               </div>

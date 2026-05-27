@@ -104,7 +104,7 @@ const MobileNodeCard: React.FC<Props> = ({
             onClick={() => onCopySecret(node.secret)}
             title={t('admin_nodes_copy_secret')}
           >
-            <Copy size={14} />
+            <Copy size={18} />
           </button>
         </div>
         <div className="flex min-w-0 items-center gap-1.5">
