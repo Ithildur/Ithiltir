@@ -5,7 +5,6 @@ import {
   rebuildNodeTraffic,
   type NodeTrafficRebuildStatus,
 } from '@lib/adminApi';
-import { actionBusy, actionNoop, actionStale } from '@utils/actionOutcome';
 import { isAbortError } from '@utils/errors';
 import { createSeqGate } from '@utils/seqGate';
 
@@ -38,6 +37,10 @@ export type TrafficRebuildStartOutcome =
   | { status: 'sync_failed'; error: unknown }
   | { status: 'failed'; error: unknown }
   | { status: 'busy' | 'stale' | 'noop' };
+
+const trafficRebuildBusy = { status: 'busy' } satisfies TrafficRebuildStartOutcome;
+const trafficRebuildStale = { status: 'stale' } satisfies TrafficRebuildStartOutcome;
+const trafficRebuildNoop = { status: 'noop' } satisfies TrafficRebuildStartOutcome;
 
 type StartClaim =
   | { status: 'claimed'; seq: number; lastStatus: NodeTrafficRebuildStatus }
@@ -142,7 +145,7 @@ const startOutcomeFromStatus = (
   id: number,
   state: NodeTrafficRebuildStatus,
 ): TrafficRebuildStartOutcome => {
-  if (!state.running) return actionNoop;
+  if (!state.running) return trafficRebuildNoop;
   if (state.server_id === id) return { status: 'started', state };
   return { status: 'running_other', state };
 };
@@ -177,7 +180,7 @@ const claimStart = (id: number): StartClaim => {
     }
     return { status: 'running_other', state: currentStatus };
   }
-  if (current.local.phase !== 'idle') return actionBusy;
+  if (current.local.phase !== 'idle') return trafficRebuildBusy;
 
   const lastStatus = currentStatus;
   const seq = startSeq + 1;
@@ -232,13 +235,13 @@ const syncStartStatus = async (
 ): Promise<TrafficRebuildStartOutcome> => {
   try {
     const next = await fetchTrafficRebuild();
-    if (!finishStart(seq, next)) return actionStale;
+    if (!finishStart(seq, next)) return trafficRebuildStale;
     const result = startOutcomeFromStatus(id, next);
     if (result.status !== 'noop') return result;
-    if (isRebuildRunningError(error) || isFinishedStatus(id, next)) return actionNoop;
+    if (isRebuildRunningError(error) || isFinishedStatus(id, next)) return trafficRebuildNoop;
     return { status: 'failed', error };
   } catch (syncError) {
-    if (!rollbackStart(seq, lastStatus, true)) return actionStale;
+    if (!rollbackStart(seq, lastStatus, true)) return trafficRebuildStale;
     return { status: 'sync_failed', error: syncError };
   }
 };
@@ -274,17 +277,17 @@ export const startTrafficRebuild = async (id: number): Promise<TrafficRebuildSta
 
   try {
     const started = await rebuildNodeTrafficWithTimeout(id);
-    if (!finishStart(claim.seq, started)) return actionStale;
+    if (!finishStart(claim.seq, started)) return trafficRebuildStale;
     return startOutcomeFromStatus(id, started);
   } catch (error) {
     if (isApiAuthStaleError(error)) {
-      if (!rollbackStart(claim.seq, claim.lastStatus, false)) return actionStale;
-      return actionStale;
+      if (!rollbackStart(claim.seq, claim.lastStatus, false)) return trafficRebuildStale;
+      return trafficRebuildStale;
     }
     if (isRebuildRunningError(error) || isAbortError(error)) {
       return syncStartStatus(id, claim.seq, claim.lastStatus, error);
     }
-    if (!rollbackStart(claim.seq, claim.lastStatus, false)) return actionStale;
+    if (!rollbackStart(claim.seq, claim.lastStatus, false)) return trafficRebuildStale;
     return { status: 'failed', error };
   }
 };

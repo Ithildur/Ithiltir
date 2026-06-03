@@ -60,7 +60,7 @@ export const useTrafficRebuild = (options: UseTrafficRebuildOptions = {}) => {
   const nodeRebuildActive = nodeId !== null && status.running && status.server_id === nodeId;
   const nodeRebuildBusy =
     nodeId !== null && (nodeRebuildActive || startingNodeId === nodeId || watchedNodeId === nodeId);
-  const actionBusy = nodeId === null ? busy : nodeRebuildBusy;
+  const startBusy = nodeId === null ? busy : nodeRebuildBusy;
 
   return {
     rebuildingNodeId,
@@ -70,7 +70,7 @@ export const useTrafficRebuild = (options: UseTrafficRebuildOptions = {}) => {
     busy,
     nodeRebuildActive,
     nodeRebuildBusy,
-    actionBusy,
+    startBusy,
     finishedKey,
     start: startTrafficRebuild,
   };

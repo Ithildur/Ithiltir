@@ -3,7 +3,6 @@ import { useI18n } from '@i18n';
 import { pushTopBanner } from '@runtime/topBannerRuntime';
 import { useApiErrorHandler } from '@hooks/useApiErrorHandler';
 import { loadAlertMounts, setAlertMounts, useAlertMountsStore } from '@stores/alertMountsStore';
-import { isActionOk } from '@utils/actionOutcome';
 import { isCanceledRequestError } from '@utils/errors';
 
 export const useAlertMounts = ({ enabled }: { enabled: boolean }) => {
@@ -37,8 +36,8 @@ export const useAlertMounts = ({ enabled }: { enabled: boolean }) => {
   const setMounts = React.useCallback(
     async (ruleIds: number[], serverIds: number[], mounted: boolean) => {
       try {
-        const updated = await setAlertMounts(ruleIds, serverIds, mounted);
-        if (!isActionOk(updated)) return false;
+        const didUpdate = await setAlertMounts(ruleIds, serverIds, mounted);
+        if (!didUpdate) return false;
         pushTopBanner(
           mounted
             ? t('admin_alerts_mounts_apply_success')

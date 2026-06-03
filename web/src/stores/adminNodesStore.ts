@@ -13,13 +13,6 @@ import {
 } from '@lib/adminApi';
 import { buildGroupLookup, nodeRowsFromManaged } from '@lib/adminNodeModel';
 import { fetchAppVersion } from '@lib/versionApi';
-import {
-  actionBusy,
-  actionNoop,
-  actionOk,
-  actionStale,
-  type ActionOutcome,
-} from '@utils/actionOutcome';
 import { pendingIds } from '@utils/pendingIds';
 import { createSeqGate, runLatestLoad } from '@utils/seqGate';
 import { getAdminGroups, loadAdminGroups } from './adminGroupsStore';
@@ -63,8 +56,6 @@ export const resetAdminNodesStore = (): void => {
   versionGate.invalidate();
   useAdminNodesStore.setState(initialAdminNodesState);
 };
-
-export type AdminNodeMutationOutcome = ActionOutcome;
 
 const nodesGate = createSeqGate();
 const overviewGate = createSeqGate();
@@ -112,12 +103,11 @@ const nodesInOrder = (nodes: NodeRow[], orderedIds: readonly number[]): NodeRow[
   return next;
 };
 
-const syncAdminNodes = async (): Promise<AdminNodeMutationOutcome> => {
+const syncAdminNodes = async (): Promise<void> => {
   const seq = nodesGate.next();
   const nodes = await fetchAdminNodeRows();
-  if (!nodesGate.isCurrent(seq)) return actionStale;
+  if (!nodesGate.isCurrent(seq)) return;
   replaceAdminNodes(nodes);
-  return actionOk();
 };
 
 export const loadAdminNodeOverview = async (
@@ -236,51 +226,45 @@ export type AdminNodeSettingsInput = {
   tags?: string[];
 };
 
-export const addAdminNode = async (): Promise<AdminNodeMutationOutcome> => {
-  if (getAdminNodesState().creating) return actionBusy;
+export const addAdminNode = async (): Promise<boolean> => {
+  if (getAdminNodesState().creating) return false;
   useAdminNodesStore.setState({ creating: true });
   try {
     await createNode();
-    return await syncAdminNodes();
+    await syncAdminNodes();
+    return true;
   } finally {
     useAdminNodesStore.setState({ creating: false });
   }
 };
 
-export const renameAdminNode = async (
-  id: number,
-  name: string,
-): Promise<AdminNodeMutationOutcome> => {
+export const renameAdminNode = async (id: number, name: string): Promise<boolean> => {
   await updateNode(id, { name });
   invalidateAdminNodeRowsLoad();
   patchNode(id, { name });
-  return actionOk();
+  return true;
 };
 
 export const setAdminNodeGuestVisible = async (
   id: number,
   guestVisible: boolean,
-): Promise<AdminNodeMutationOutcome> => {
-  if (isSavingGuestVisible(id)) return actionBusy;
+): Promise<boolean> => {
+  if (isSavingGuestVisible(id)) return false;
 
   setNodeSavingGuestVisible(id, true);
   try {
     await updateNode(id, { is_guest_visible: guestVisible });
     invalidateAdminNodeRowsLoad();
     patchNode(id, { guestVisible });
-    return actionOk();
+    return true;
   } finally {
     setNodeSavingGuestVisible(id, false);
   }
 };
 
-export const setAdminNodeTrafficP95 = async (
-  id: number,
-  enabled: boolean,
-): Promise<AdminNodeMutationOutcome> => {
+export const setAdminNodeTrafficP95 = async (id: number, enabled: boolean): Promise<boolean> => {
   const node = getNode(id);
-  if (!node) return actionNoop;
-  if (isSavingP95(id)) return actionBusy;
+  if (!node || isSavingP95(id)) return false;
 
   setNodeSavingP95(id, true);
   invalidateAdminNodeRowsLoad();
@@ -289,7 +273,7 @@ export const setAdminNodeTrafficP95 = async (
     await updateNode(id, { traffic_p95_enabled: enabled });
     invalidateAdminNodeRowsLoad();
     patchNode(id, { trafficP95Enabled: enabled });
-    return actionOk();
+    return true;
   } catch (error) {
     invalidateAdminNodeRowsLoad();
     patchNode(id, { trafficP95Enabled: node.trafficP95Enabled });
@@ -302,10 +286,9 @@ export const setAdminNodeTrafficP95 = async (
 export const setAdminNodesTrafficP95 = async (
   ids: number[],
   enabled: boolean,
-): Promise<AdminNodeMutationOutcome> => {
+): Promise<boolean> => {
   const targetIds = [...new Set(ids)];
-  if (targetIds.length === 0) return actionNoop;
-  if (targetIds.some(isSavingP95)) return actionBusy;
+  if (targetIds.length === 0 || targetIds.some(isSavingP95)) return false;
 
   const idSet = new Set(targetIds);
   const previous = new Map(
@@ -313,10 +296,9 @@ export const setAdminNodesTrafficP95 = async (
       .nodes.filter((node) => idSet.has(node.id))
       .map((node) => [node.id, node.trafficP95Enabled]),
   );
-  if (previous.size === 0) return actionNoop;
-
   const appliedIds = [...previous.keys()];
-  for (const id of previous.keys()) setNodeSavingP95(id, true);
+  if (appliedIds.length === 0) return false;
+  for (const id of appliedIds) setNodeSavingP95(id, true);
   invalidateAdminNodeRowsLoad();
   setAdminNodes((nodes) =>
     nodes.map((node) => (previous.has(node.id) ? { ...node, trafficP95Enabled: enabled } : node)),
@@ -327,7 +309,7 @@ export const setAdminNodesTrafficP95 = async (
     setAdminNodes((nodes) =>
       nodes.map((node) => (previous.has(node.id) ? { ...node, trafficP95Enabled: enabled } : node)),
     );
-    return actionOk();
+    return true;
   } catch (error) {
     invalidateAdminNodeRowsLoad();
     setAdminNodes((nodes) =>
@@ -339,39 +321,41 @@ export const setAdminNodesTrafficP95 = async (
     );
     throw error;
   } finally {
-    for (const id of previous.keys()) setNodeSavingP95(id, false);
+    for (const id of appliedIds) setNodeSavingP95(id, false);
   }
 };
 
 export const saveAdminNodeTrafficSettings = async (
   id: number,
   patch: NodeTrafficPatch,
-): Promise<AdminNodeMutationOutcome> => {
-  if (isSavingTrafficSettings(id)) return actionBusy;
+): Promise<boolean> => {
+  if (isSavingTrafficSettings(id)) return false;
 
   setNodeSavingTrafficSettings(id, true);
   try {
     await updateNode(id, patch);
-    return await syncAdminNodes();
+    await syncAdminNodes();
+    return true;
   } finally {
     setNodeSavingTrafficSettings(id, false);
   }
 };
 
-export const removeAdminNode = async (id: number): Promise<AdminNodeMutationOutcome> => {
+export const removeAdminNode = async (id: number): Promise<boolean> => {
   await deleteNode(id);
   invalidateAdminNodeRowsLoad();
   setAdminNodes((nodes) => nodes.filter((node) => node.id !== id));
-  return actionOk();
+  return true;
 };
 
-export const requestAdminNodeUpgrade = async (id: number): Promise<AdminNodeMutationOutcome> => {
-  if (isUpgradingNode(id)) return actionBusy;
+export const requestAdminNodeUpgrade = async (id: number): Promise<boolean> => {
+  if (isUpgradingNode(id)) return false;
 
   setNodeUpgrading(id, true);
   try {
     await requestNodeUpgrade(id);
-    return await syncAdminNodes();
+    await syncAdminNodes();
+    return true;
   } finally {
     setNodeUpgrading(id, false);
   }
@@ -380,8 +364,8 @@ export const requestAdminNodeUpgrade = async (id: number): Promise<AdminNodeMuta
 export const saveAdminNodeSettings = async (
   id: number,
   input: AdminNodeSettingsInput,
-): Promise<AdminNodeMutationOutcome> => {
-  if (isSavingSettings(id)) return actionBusy;
+): Promise<boolean> => {
+  if (isSavingSettings(id)) return false;
 
   setNodeSavingSettings(id, true);
   try {
@@ -392,7 +376,8 @@ export const saveAdminNodeSettings = async (
       group_ids: input.groupIds,
       ...(input.tags !== undefined ? { tags: input.tags } : {}),
     });
-    return await syncAdminNodes();
+    await syncAdminNodes();
+    return true;
   } finally {
     setNodeSavingSettings(id, false);
   }

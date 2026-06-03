@@ -48,7 +48,7 @@ export const useTrafficPage = () => {
   const {
     busy: trafficRebuildBusy,
     nodeRebuildActive: nodeTrafficRebuildActive,
-    actionBusy: trafficRebuildActionBusy,
+    startBusy: trafficRebuildStartBusy,
     finishedKey: trafficRebuildFinishedKey,
     start: startTrafficRebuild,
   } = useTrafficRebuild({
@@ -115,9 +115,7 @@ export const useTrafficPage = () => {
   );
   const dailyAvailable = summary?.usage_mode === 'billing';
   const chartMode =
-    summary && !dailyAvailable && preferredChartMode !== 'monthly'
-      ? 'monthly'
-      : preferredChartMode;
+    summary && !dailyAvailable && preferredChartMode !== 'monthly' ? 'monthly' : preferredChartMode;
   const chartPoints =
     chartMode === 'current_daily'
       ? currentDailyPoints
@@ -172,7 +170,7 @@ export const useTrafficPage = () => {
     loading,
     errorKey,
     trafficRebuildBusy,
-    trafficRebuildActionBusy,
+    trafficRebuildStartBusy,
     nodeTrafficRebuildActive,
     serverLabel,
     directionLabel,

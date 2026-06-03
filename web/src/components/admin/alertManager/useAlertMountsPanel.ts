@@ -196,8 +196,8 @@ export const useAlertMountsPanel = ({
 
   const submitBatch = React.useCallback(async () => {
     if (!batchMode || !canSubmitBatch) return;
-    const saved = await onSetMounts(batchRuleIds, selectedNodeIds, batchMode === 'mount');
-    if (saved) {
+    const didSet = await onSetMounts(batchRuleIds, selectedNodeIds, batchMode === 'mount');
+    if (didSet) {
       resetBatch();
     }
   }, [batchMode, batchRuleIds, canSubmitBatch, onSetMounts, resetBatch, selectedNodeIds]);

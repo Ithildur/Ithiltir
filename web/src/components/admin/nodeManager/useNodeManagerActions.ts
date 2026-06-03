@@ -18,7 +18,6 @@ import {
   type AdminNodeSettingsInput,
 } from '@stores/adminNodesStore';
 import type { TrafficRebuildStartOutcome } from '@stores/trafficRebuildStore';
-import { isActionOk } from '@utils/actionOutcome';
 import { copyTextToClipboardWithFeedback } from '@utils/clipboard';
 
 export const useNodeManagerActions = ({
@@ -72,8 +71,8 @@ export const useNodeManagerActions = ({
   const addNode = React.useCallback(async () => {
     if (!token) return;
     try {
-      const created = await addAdminNode();
-      if (!isActionOk(created)) return;
+      const didCreate = await addAdminNode();
+      if (!didCreate) return;
       pushTopBanner(t('admin_node_created'), { tone: 'info' });
     } catch (error) {
       apiError(error, t('admin_create_node_failed'));
@@ -94,8 +93,8 @@ export const useNodeManagerActions = ({
       if (!ok) return;
 
       try {
-        const renamed = await renameAdminNode(node.id, trimmed);
-        if (!isActionOk(renamed)) return;
+        const didRename = await renameAdminNode(node.id, trimmed);
+        if (!didRename) return;
         pushTopBanner(t('admin_node_name_updated'), { tone: 'info' });
       } catch (error) {
         apiError(error, t('admin_update_node_name_failed'));
@@ -108,8 +107,8 @@ export const useNodeManagerActions = ({
     async (node: NodeRow) => {
       if (!token) return;
       try {
-        const saved = await setAdminNodeGuestVisible(node.id, !node.guestVisible);
-        if (!isActionOk(saved)) return;
+        const didSave = await setAdminNodeGuestVisible(node.id, !node.guestVisible);
+        if (!didSave) return;
         pushTopBanner(t('admin_guest_visible_updated'), { tone: 'info' });
       } catch (error) {
         apiError(error, t('admin_update_guest_visible_failed'));
@@ -122,8 +121,8 @@ export const useNodeManagerActions = ({
     async (node: NodeRow) => {
       if (!token) return;
       try {
-        const saved = await setAdminNodeTrafficP95(node.id, !node.trafficP95Enabled);
-        if (!isActionOk(saved)) return;
+        const didSave = await setAdminNodeTrafficP95(node.id, !node.trafficP95Enabled);
+        if (!didSave) return;
         pushTopBanner(t('admin_traffic_p95_updated'), { tone: 'info' });
       } catch (error) {
         apiError(error, t('admin_traffic_p95_update_failed'));
@@ -141,8 +140,8 @@ export const useNodeManagerActions = ({
       if (selectedIds.length === 0) return;
 
       try {
-        const saved = await setAdminNodesTrafficP95(selectedIds, enabled);
-        if (!isActionOk(saved)) return;
+        const didSave = await setAdminNodesTrafficP95(selectedIds, enabled);
+        if (!didSave) return;
         pushTopBanner(
           t(enabled ? 'admin_traffic_p95_batch_enabled' : 'admin_traffic_p95_batch_disabled'),
           { tone: 'info' },
@@ -158,8 +157,8 @@ export const useNodeManagerActions = ({
     async (nodeId: number, patch: NodeTrafficPatch): Promise<boolean> => {
       if (!token) return false;
       try {
-        const saved = await saveAdminNodeTrafficSettings(nodeId, patch);
-        if (!isActionOk(saved)) return false;
+        const didSave = await saveAdminNodeTrafficSettings(nodeId, patch);
+        if (!didSave) return false;
         pushTopBanner(t('admin_node_traffic_settings_saved'), { tone: 'info' });
         return true;
       } catch (error) {
@@ -181,8 +180,8 @@ export const useNodeManagerActions = ({
       });
       if (!ok || !token) return;
       try {
-        const removed = await removeAdminNode(node.id);
-        if (!isActionOk(removed)) return;
+        const didRemove = await removeAdminNode(node.id);
+        if (!didRemove) return;
         pushTopBanner(t('admin_node_deleted'), { tone: 'info' });
       } catch (error) {
         apiError(error, t('admin_delete_node_failed'));
@@ -207,8 +206,8 @@ export const useNodeManagerActions = ({
       if (!ok) return;
 
       try {
-        const requested = await requestAdminNodeUpgrade(node.id);
-        if (!isActionOk(requested)) return;
+        const didRequest = await requestAdminNodeUpgrade(node.id);
+        if (!didRequest) return;
         pushTopBanner(t('admin_node_upgrade_requested'), { tone: 'info' });
       } catch (error) {
         apiError(error, t('admin_request_node_upgrade_failed'));
@@ -239,8 +238,8 @@ export const useNodeManagerActions = ({
     async (nodeId: number, input: AdminNodeSettingsInput): Promise<boolean> => {
       if (!token) return false;
       try {
-        const saved = await saveAdminNodeSettings(nodeId, input);
-        if (!isActionOk(saved)) return false;
+        const didSave = await saveAdminNodeSettings(nodeId, input);
+        if (!didSave) return false;
         pushTopBanner(t('admin_node_settings_updated'), { tone: 'info' });
         return true;
       } catch (error) {

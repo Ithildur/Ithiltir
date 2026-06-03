@@ -1,7 +1,6 @@
 import { create } from 'zustand';
 import type { AlertMounts } from '@app-types/admin';
 import * as adminApi from '@lib/adminApi';
-import { actionBusy, actionNoop, type ActionOutcome } from '@utils/actionOutcome';
 import { createSeqGate, reloadLatestLoad, runLatestLoad } from '@utils/seqGate';
 
 const emptyMounts: AlertMounts = { rules: [], nodes: [] };
@@ -40,7 +39,7 @@ const setAlertMountsLoading = (loading: boolean): void => {
   useAlertMountsStore.setState({ loading });
 };
 
-const reloadAlertMounts = async (): Promise<ActionOutcome<AlertMounts>> => {
+const reloadAlertMounts = async (): Promise<void> => {
   return reloadLatestLoad(loadGate, fetchAlertMounts, replaceAlertMounts, setAlertMountsLoading);
 };
 
@@ -59,10 +58,9 @@ export const setAlertMounts = async (
   ruleIds: number[],
   serverIds: number[],
   mounted: boolean,
-): Promise<ActionOutcome<AlertMounts>> => {
+): Promise<boolean> => {
   const state = getAlertMountsState();
-  if (state.saving) return actionBusy;
-  if (ruleIds.length === 0 || serverIds.length === 0) return actionNoop;
+  if (state.saving || ruleIds.length === 0 || serverIds.length === 0) return false;
 
   useAlertMountsStore.setState({ saving: true });
   try {
@@ -71,7 +69,8 @@ export const setAlertMounts = async (
       server_ids: serverIds,
       mounted,
     });
-    return await reloadAlertMounts();
+    await reloadAlertMounts();
+    return true;
   } finally {
     useAlertMountsStore.setState({ saving: false });
   }

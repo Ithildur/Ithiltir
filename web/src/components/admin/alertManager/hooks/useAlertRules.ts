@@ -12,7 +12,6 @@ import {
   toggleAlertRuleEnabled,
   useAlertRulesStore,
 } from '@stores/alertRulesStore';
-import { isActionOk } from '@utils/actionOutcome';
 import { isCanceledRequestError } from '@utils/errors';
 
 export const useAlertRules = ({
@@ -88,8 +87,8 @@ export const useAlertRules = ({
   const saveRule = React.useCallback(
     async (id: number | null, input: AlertRuleInput): Promise<boolean> => {
       try {
-        const saved = await saveAlertRule(id, input);
-        if (!isActionOk(saved)) return false;
+        const didSave = await saveAlertRule(id, input);
+        if (!didSave) return false;
         pushTopBanner(t('admin_alerts_toast_saved'), { tone: 'info' });
         return true;
       } catch (error) {
@@ -113,8 +112,8 @@ export const useAlertRules = ({
       });
       if (!ok) return;
       try {
-        const updated = await toggleAlertRuleEnabled(rule.id, !rule.enabled);
-        if (!isActionOk(updated)) return;
+        const didUpdate = await toggleAlertRuleEnabled(rule.id, !rule.enabled);
+        if (!didUpdate) return;
         pushTopBanner(
           !rule.enabled
             ? t('admin_alerts_toast_enabled', { name: rule.name })
@@ -139,8 +138,8 @@ export const useAlertRules = ({
       });
       if (!ok) return;
       try {
-        const updated = await renameAlertRule(rule.id, nextName);
-        if (!isActionOk(updated)) return;
+        const didRename = await renameAlertRule(rule.id, nextName);
+        if (!didRename) return;
         pushTopBanner(t('admin_alerts_toast_renamed', { name: nextName }), { tone: 'info' });
       } catch (error) {
         apiError(error, t('admin_alerts_toast_rename_failed', { name: rule.name }));
@@ -162,8 +161,8 @@ export const useAlertRules = ({
         },
         async () => {
           try {
-            const deleted = await deleteAlertRule(id);
-            if (!isActionOk(deleted)) return;
+            const didDelete = await deleteAlertRule(id);
+            if (!didDelete) return;
             pushTopBanner(t('admin_alerts_toast_deleted', { name: deletedName }), { tone: 'info' });
           } catch (error) {
             apiError(error, t('admin_alerts_toast_delete_failed', { name: deletedName }));

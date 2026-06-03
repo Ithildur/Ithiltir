@@ -1,7 +1,6 @@
 import { create } from 'zustand';
 import type { StatisticsAccess } from '@app-types/traffic';
 import { fetchStatisticsAccess } from '@lib/statisticsApi';
-import { actionNoop, actionOk, type ActionOutcome } from '@utils/actionOutcome';
 import { isCanceledRequestError } from '@utils/errors';
 
 export type StatisticsAccessLoad =
@@ -102,28 +101,26 @@ const cancelStatisticsAccessLoad = (requestId: number): void => {
   useStatisticsAccessStore.setState({ load: cachedLoad(current) });
 };
 
-const updateStatisticsAccessCache = (
-  patch: Partial<StatisticsAccess>,
-): ActionOutcome<StatisticsAccess> => {
+const updateStatisticsAccessCache = (patch: Partial<StatisticsAccess>): StatisticsAccess | null => {
   const access = getStatisticsAccessState().load.access;
-  if (!access) return actionNoop;
+  if (!access) return null;
   const nextAccess = { ...access, ...patch };
   useStatisticsAccessStore.setState({
     load: readyLoad(nextAccess, Date.now()),
   });
-  return actionOk(nextAccess);
+  return nextAccess;
 };
 
 export const cacheHistoryGuestAccess = (
   mode: StatisticsAccess['history_guest_access_mode'],
-): ActionOutcome<StatisticsAccess> =>
+): StatisticsAccess | null =>
   updateStatisticsAccessCache({
     history_guest_access_mode: mode,
   });
 
 export const cacheTrafficGuestAccess = (
   mode: StatisticsAccess['traffic_guest_access_mode'],
-): ActionOutcome<StatisticsAccess> =>
+): StatisticsAccess | null =>
   updateStatisticsAccessCache({
     traffic_guest_access_mode: mode,
   });

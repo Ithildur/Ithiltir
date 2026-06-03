@@ -121,7 +121,7 @@ const Page = () => {
     loading,
     errorKey,
     trafficRebuildBusy,
-    trafficRebuildActionBusy,
+    trafficRebuildStartBusy,
     nodeTrafficRebuildActive,
     serverLabel,
     directionLabel,
@@ -307,7 +307,7 @@ const Page = () => {
                               })}
                               title={t('admin_node_traffic_rebuild')}
                             >
-                              {trafficRebuildActionBusy ? (
+                              {trafficRebuildStartBusy ? (
                                 <LoaderCircle className="size-4 animate-spin" aria-hidden="true" />
                               ) : (
                                 <Wrench className="size-4" strokeWidth={2.25} aria-hidden="true" />

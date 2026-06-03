@@ -2,7 +2,6 @@ import { create } from 'zustand';
 import type { AlertChannel } from '@app-types/admin';
 import * as adminApi from '@lib/adminApi';
 import { pendingIds } from '@utils/pendingIds';
-import { actionBusy, actionOk, type ActionOutcome } from '@utils/actionOutcome';
 import { createSeqGate, reloadLatestLoad, runLatestLoad } from '@utils/seqGate';
 
 export interface AlertChannelsState {
@@ -46,7 +45,7 @@ const setAlertChannelsLoading = (loading: boolean): void => {
   useAlertChannelsStore.setState({ loading });
 };
 
-const reloadAlertChannels = async (): Promise<ActionOutcome<AlertChannel[]>> => {
+const reloadAlertChannels = async (): Promise<void> => {
   return reloadLatestLoad(
     loadGate,
     fetchAlertChannels,
@@ -86,28 +85,25 @@ const setAlertChannelToggling = (id: number, toggling: boolean): void => {
   }));
 };
 
-export const updateAlertChannelEnabled = async (
-  id: number,
-  enabled: boolean,
-): Promise<ActionOutcome> => {
-  if (getAlertChannelsState().togglingIds.includes(id)) return actionBusy;
+export const updateAlertChannelEnabled = async (id: number, enabled: boolean): Promise<boolean> => {
+  if (getAlertChannelsState().togglingIds.includes(id)) return false;
   setAlertChannelToggling(id, true);
   try {
     await adminApi.updateAlertChannelEnabled(id, { enabled });
     loadGate.invalidate();
     patchAlertChannelEnabled(id, enabled);
-    return actionOk();
+    return true;
   } finally {
     setAlertChannelToggling(id, false);
   }
 };
 
-export const testAlertChannel = async (id: number): Promise<ActionOutcome> => {
-  if (getAlertChannelsState().testingIds.includes(id)) return actionBusy;
+export const testAlertChannel = async (id: number): Promise<boolean> => {
+  if (getAlertChannelsState().testingIds.includes(id)) return false;
   setAlertChannelTesting(id, true);
   try {
     await adminApi.testAlertChannel(id);
-    return actionOk();
+    return true;
   } finally {
     setAlertChannelTesting(id, false);
   }
@@ -116,8 +112,8 @@ export const testAlertChannel = async (id: number): Promise<ActionOutcome> => {
 export const saveAlertChannel = async (
   id: number | null,
   input: adminApi.AlertChannelInput,
-): Promise<ActionOutcome<AlertChannel[]>> => {
-  if (getAlertChannelsState().saving) return actionBusy;
+): Promise<boolean> => {
+  if (getAlertChannelsState().saving) return false;
   useAlertChannelsStore.setState({ saving: true });
   try {
     if (id === null) {
@@ -125,13 +121,15 @@ export const saveAlertChannel = async (
     } else {
       await adminApi.updateAlertChannel(id, input);
     }
-    return await reloadAlertChannels();
+    await reloadAlertChannels();
+    return true;
   } finally {
     useAlertChannelsStore.setState({ saving: false });
   }
 };
 
-export const deleteAlertChannel = async (id: number): Promise<ActionOutcome<AlertChannel[]>> => {
+export const deleteAlertChannel = async (id: number): Promise<boolean> => {
   await adminApi.deleteAlertChannel(id);
-  return await reloadAlertChannels();
+  await reloadAlertChannels();
+  return true;
 };

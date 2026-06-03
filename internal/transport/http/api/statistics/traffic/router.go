@@ -19,9 +19,6 @@ type handler struct {
 }
 
 func Router(st *store.Stores, auth *authjwt.Manager, loc *time.Location, bearer routes.Middleware) *routes.Blueprint {
-	if loc == nil {
-		loc = time.Local
-	}
 	h := &handler{traffic: st.Traffic, front: st.Front, auth: auth, location: loc, bearer: bearer}
 
 	r := routes.NewBlueprint(routes.DefaultTags("statistics", "traffic"))

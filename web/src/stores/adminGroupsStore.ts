@@ -1,7 +1,6 @@
 import { create } from 'zustand';
 import type { Group } from '@app-types/api';
 import { createGroup, deleteGroup, fetchGroupList, updateGroup } from '@lib/adminApi';
-import { actionBusy, type ActionOutcome } from '@utils/actionOutcome';
 import { createSeqGate, reloadLatestLoad, runLatestLoad } from '@utils/seqGate';
 
 export type AdminGroupInput = { name: string; remark?: string };
@@ -44,7 +43,7 @@ const setAdminGroupsLoading = (loading: boolean): void => {
   useAdminGroupsStore.setState({ loading });
 };
 
-const reloadAdminGroups = async (): Promise<ActionOutcome<Group[]>> => {
+const reloadAdminGroups = async (): Promise<void> => {
   return reloadLatestLoad(loadGate, fetchAdminGroups, replaceAdminGroups, setAdminGroupsLoading);
 };
 
@@ -60,8 +59,8 @@ export const loadAdminGroups = async (params: { signal?: AbortSignal } = {}): Pr
 export const saveAdminGroup = async (
   id: number | null,
   input: AdminGroupInput,
-): Promise<ActionOutcome<Group[]>> => {
-  if (getAdminGroupsState().saving) return actionBusy;
+): Promise<boolean> => {
+  if (getAdminGroupsState().saving) return false;
   useAdminGroupsStore.setState({ saving: true });
   try {
     if (id === null) {
@@ -69,18 +68,20 @@ export const saveAdminGroup = async (
     } else {
       await updateGroup(id, input);
     }
-    return await reloadAdminGroups();
+    await reloadAdminGroups();
+    return true;
   } finally {
     useAdminGroupsStore.setState({ saving: false });
   }
 };
 
-export const removeAdminGroup = async (id: number): Promise<ActionOutcome<Group[]>> => {
-  if (getAdminGroupsState().deleting) return actionBusy;
+export const removeAdminGroup = async (id: number): Promise<boolean> => {
+  if (getAdminGroupsState().deleting) return false;
   useAdminGroupsStore.setState({ deleting: true });
   try {
     await deleteGroup(id);
-    return await reloadAdminGroups();
+    await reloadAdminGroups();
+    return true;
   } finally {
     useAdminGroupsStore.setState({ deleting: false });
   }

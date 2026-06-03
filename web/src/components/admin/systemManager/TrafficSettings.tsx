@@ -37,7 +37,6 @@ import {
   patchTrafficSettings,
   useTrafficSettingsStore,
 } from '@stores/trafficSettingsStore';
-import { isActionOk } from '@utils/actionOutcome';
 import { isCanceledRequestError } from '@utils/errors';
 
 type TrafficDraftState = {
@@ -134,8 +133,8 @@ const TrafficSettings: React.FC = () => {
       if (!ok) return;
 
       try {
-        const saved = await patchTrafficSettings({ usage_mode: mode }, { kind: 'usageMode' });
-        if (!isActionOk(saved)) return;
+        const didSave = await patchTrafficSettings({ usage_mode: mode }, { kind: 'usageMode' });
+        if (!didSave) return;
         pushTopBanner(t('admin_system_settings_saved'), { tone: 'info' });
       } catch (error) {
         apiError(error, t('admin_system_settings_save_failed'));
@@ -149,11 +148,14 @@ const TrafficSettings: React.FC = () => {
       return;
     try {
       const next = normalizeTrafficCycleFields(draft);
-      const saved = await patchTrafficSettings(trafficCyclePatchFromFields(draft, trafficSettings), {
-        kind: 'cycle',
-        commit: next,
-      });
-      if (!isActionOk(saved)) return;
+      const didSave = await patchTrafficSettings(
+        trafficCyclePatchFromFields(draft, trafficSettings),
+        {
+          kind: 'cycle',
+          commit: next,
+        },
+      );
+      if (!didSave) return;
       setDraftState({ value: { ...draft, ...next }, dirty: false });
       pushTopBanner(t('admin_traffic_settings_saved'), { tone: 'info' });
     } catch (error) {
@@ -165,11 +167,11 @@ const TrafficSettings: React.FC = () => {
     if (loading || savingGuestAccess) return;
     const nextMode = draft.guest_access_mode === 'by_node' ? 'disabled' : 'by_node';
     try {
-      const saved = await patchTrafficSettings(
+      const didSave = await patchTrafficSettings(
         { guest_access_mode: nextMode },
         { kind: 'guestAccess' },
       );
-      if (!isActionOk(saved)) return;
+      if (!didSave) return;
       pushTopBanner(t('admin_traffic_settings_saved'), { tone: 'info' });
     } catch (error) {
       apiError(error, { key: 'traffic_settings_save_failed' });
@@ -180,8 +182,8 @@ const TrafficSettings: React.FC = () => {
     async (mode: TrafficSettingsView['direction_mode']) => {
       if (loading || savingDirection || mode === trafficSettings.direction_mode) return;
       try {
-        const saved = await patchTrafficSettings({ direction_mode: mode }, { kind: 'direction' });
-        if (!isActionOk(saved)) return;
+        const didSave = await patchTrafficSettings({ direction_mode: mode }, { kind: 'direction' });
+        if (!didSave) return;
         pushTopBanner(t('admin_traffic_settings_saved'), { tone: 'info' });
       } catch (error) {
         apiError(error, { key: 'traffic_settings_save_failed' });

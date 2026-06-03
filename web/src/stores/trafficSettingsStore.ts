@@ -3,7 +3,6 @@ import type { TrafficSettings } from '@app-types/traffic';
 import { fetchTrafficSettings, updateTrafficSettings } from '@lib/statisticsApi';
 import { defaultTrafficSettings } from '@lib/trafficSettingsModel';
 import { cacheTrafficGuestAccess } from './statisticsAccessStore';
-import { actionBusy, actionOk, type ActionOutcome } from '@utils/actionOutcome';
 import { createSeqGate, runLatestLoad } from '@utils/seqGate';
 
 export type TrafficSettingsSaveKind = 'cycle' | 'usageMode' | 'guestAccess' | 'direction';
@@ -86,12 +85,12 @@ const setSaving = (kind: TrafficSettingsSaveKind, saving: boolean): void => {
   }
 };
 
-const beginSave = (kind: TrafficSettingsSaveKind): ActionOutcome => {
-  if (isSaving(kind)) return actionBusy;
+const beginSave = (kind: TrafficSettingsSaveKind): boolean => {
+  if (isSaving(kind)) return false;
   loadGate.invalidate();
   setTrafficSettingsLoading(false);
   setSaving(kind, true);
-  return actionOk();
+  return true;
 };
 
 export const loadTrafficSettings = async (
@@ -111,9 +110,8 @@ export const patchTrafficSettings = async (
     kind: TrafficSettingsSaveKind;
     commit?: Partial<TrafficSettings>;
   },
-): Promise<ActionOutcome<TrafficSettings>> => {
-  const begin = beginSave(params.kind);
-  if (begin.status !== 'ok') return begin;
+): Promise<boolean> => {
+  if (!beginSave(params.kind)) return false;
   try {
     await updateTrafficSettings(patch);
     const commit = params.commit ?? patch;
@@ -121,7 +119,7 @@ export const patchTrafficSettings = async (
     if (commit.guest_access_mode !== undefined) {
       cacheTrafficGuestAccess(commit.guest_access_mode);
     }
-    return actionOk(getTrafficSettingsState().settings);
+    return true;
   } finally {
     setSaving(params.kind, false);
   }

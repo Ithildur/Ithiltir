@@ -1,5 +1,3 @@
-import { actionOk, actionStale, type ActionOutcome } from './actionOutcome';
-
 export class StaleLoadError extends Error {
   constructor() {
     super('stale load');
@@ -61,15 +59,14 @@ export const reloadLatestLoad = async <T>(
   load: () => Promise<T>,
   apply: (value: T) => void,
   setLoading?: LoadingSetter,
-): Promise<ActionOutcome<T>> => {
+): Promise<void> => {
   const seq = invalidateLatestLoad(gate, setLoading);
   try {
     const value = await load();
-    if (!gate.isCurrent(seq)) return actionStale;
+    if (!gate.isCurrent(seq)) return;
     apply(value);
-    return actionOk(value);
   } catch (error) {
-    if (!gate.isCurrent(seq)) return actionStale;
+    if (!gate.isCurrent(seq)) return;
     throw error;
   }
 };

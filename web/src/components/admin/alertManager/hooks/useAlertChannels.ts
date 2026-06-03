@@ -18,7 +18,6 @@ import {
   type AlertChannelForm,
   type AlertChannelFormIssue,
 } from '@components/admin/alertManager/alertChannelForm';
-import { isActionOk } from '@utils/actionOutcome';
 import { isCanceledRequestError } from '@utils/errors';
 
 const formIssueKeys = {
@@ -96,8 +95,8 @@ export const useAlertChannels = ({
     async (channel: AlertChannel) => {
       const nextEnabled = !channel.enabled;
       try {
-        const updated = await updateAlertChannelEnabled(channel.id, nextEnabled);
-        if (!isActionOk(updated)) return;
+        const didUpdate = await updateAlertChannelEnabled(channel.id, nextEnabled);
+        if (!didUpdate) return;
       } catch (error) {
         apiError(error, t('admin_alerts_channels_toggle_failed', { name: channel.name }));
       }
@@ -108,8 +107,8 @@ export const useAlertChannels = ({
   const testChannel = React.useCallback(
     async (channel: AlertChannel) => {
       try {
-        const tested = await testAlertChannel(channel.id);
-        if (!isActionOk(tested)) return;
+        const didTest = await testAlertChannel(channel.id);
+        if (!didTest) return;
         pushTopBanner(t('admin_alerts_channels_test_success'), { tone: 'info' });
       } catch (error) {
         apiError(error, t('admin_alerts_channels_test_failed'));
@@ -129,8 +128,8 @@ export const useAlertChannels = ({
       }
 
       try {
-        const saved = await saveAlertChannel(editingChannelId, result.input);
-        if (!isActionOk(saved)) return;
+        const didSave = await saveAlertChannel(editingChannelId, result.input);
+        if (!didSave) return;
         pushTopBanner(
           editingChannelId !== null
             ? t('admin_alerts_channels_update_success')
@@ -162,8 +161,8 @@ export const useAlertChannels = ({
         },
         async () => {
           try {
-            const deleted = await deleteAlertChannel(channel.id);
-            if (!isActionOk(deleted)) return;
+            const didDelete = await deleteAlertChannel(channel.id);
+            if (!didDelete) return;
             pushTopBanner(t('admin_alerts_channels_delete_success'), { tone: 'info' });
           } catch (error) {
             apiError(error, t('admin_alerts_channels_delete_failed'));

@@ -10,7 +10,6 @@ import {
   verifyAlertMtprotoCode,
 } from '@lib/adminApi';
 import { testAlertChannel } from '@stores/alertChannelsStore';
-import { isActionOk } from '@utils/actionOutcome';
 
 type ConnectionStatus = 'unknown' | 'valid' | 'invalid';
 type LoginScope = {
@@ -224,9 +223,9 @@ export const useTelegramMtprotoLogin = ({
           pushTopBanner(t('admin_alerts_channels_test_failed'), { tone: 'error' });
         }
       } else {
-        const result = await testAlertChannel(id);
+        const didTest = await testAlertChannel(id);
         if (!isCurrentScope(scope)) return;
-        if (!isActionOk(result)) return;
+        if (!didTest) return;
         pushTopBanner(t('admin_alerts_channels_test_success'), { tone: 'info' });
       }
     } catch (error) {

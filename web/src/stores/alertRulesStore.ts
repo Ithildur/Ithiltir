@@ -2,7 +2,6 @@ import { create } from 'zustand';
 import type { AlertRule } from '@app-types/admin';
 import * as adminApi from '@lib/adminApi';
 import { pendingIds } from '@utils/pendingIds';
-import { actionBusy, type ActionOutcome } from '@utils/actionOutcome';
 import { createSeqGate, reloadLatestLoad, runLatestLoad } from '@utils/seqGate';
 
 export interface AlertRulesState {
@@ -45,7 +44,7 @@ const setAlertRulesLoading = (loading: boolean): void => {
   useAlertRulesStore.setState({ loading });
 };
 
-const reloadAlertRules = async (): Promise<ActionOutcome<AlertRule[]>> => {
+const reloadAlertRules = async (): Promise<void> => {
   return reloadLatestLoad(loadGate, fetchAlertRules, replaceAlertRules, setAlertRulesLoading);
 };
 
@@ -72,29 +71,25 @@ const setAlertRuleRenaming = (id: number, renaming: boolean): void => {
   }));
 };
 
-export const toggleAlertRuleEnabled = async (
-  id: number,
-  enabled: boolean,
-): Promise<ActionOutcome<AlertRule[]>> => {
-  if (getAlertRulesState().togglingIds.includes(id)) return actionBusy;
+export const toggleAlertRuleEnabled = async (id: number, enabled: boolean): Promise<boolean> => {
+  if (getAlertRulesState().togglingIds.includes(id)) return false;
   setAlertRuleToggling(id, true);
   try {
     await adminApi.updateAlertRule(id, { enabled });
-    return await reloadAlertRules();
+    await reloadAlertRules();
+    return true;
   } finally {
     setAlertRuleToggling(id, false);
   }
 };
 
-export const renameAlertRule = async (
-  id: number,
-  name: string,
-): Promise<ActionOutcome<AlertRule[]>> => {
-  if (getAlertRulesState().renamingIds.includes(id)) return actionBusy;
+export const renameAlertRule = async (id: number, name: string): Promise<boolean> => {
+  if (getAlertRulesState().renamingIds.includes(id)) return false;
   setAlertRuleRenaming(id, true);
   try {
     await adminApi.updateAlertRule(id, { name });
-    return await reloadAlertRules();
+    await reloadAlertRules();
+    return true;
   } finally {
     setAlertRuleRenaming(id, false);
   }
@@ -103,8 +98,8 @@ export const renameAlertRule = async (
 export const saveAlertRule = async (
   id: number | null,
   input: adminApi.CreateAlertRuleInput,
-): Promise<ActionOutcome<AlertRule[]>> => {
-  if (getAlertRulesState().saving) return actionBusy;
+): Promise<boolean> => {
+  if (getAlertRulesState().saving) return false;
   useAlertRulesStore.setState({ saving: true });
   try {
     if (id === null) {
@@ -112,13 +107,15 @@ export const saveAlertRule = async (
     } else {
       await adminApi.updateAlertRule(id, input);
     }
-    return await reloadAlertRules();
+    await reloadAlertRules();
+    return true;
   } finally {
     useAlertRulesStore.setState({ saving: false });
   }
 };
 
-export const deleteAlertRule = async (id: number): Promise<ActionOutcome<AlertRule[]>> => {
+export const deleteAlertRule = async (id: number): Promise<boolean> => {
   await adminApi.deleteAlertRule(id);
-  return await reloadAlertRules();
+  await reloadAlertRules();
+  return true;
 };

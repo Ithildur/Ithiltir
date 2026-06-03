@@ -10,7 +10,6 @@ import {
   useAdminGroupsStore,
 } from '@stores/adminGroupsStore';
 import { useAuthStore } from '@stores/authStore';
-import { isActionOk } from '@utils/actionOutcome';
 import { isCanceledRequestError } from '@utils/errors';
 
 type GroupDraft = {
@@ -128,11 +127,11 @@ export const useGroupManager = () => {
       if (!token) return;
 
       try {
-        const saved = await saveAdminGroup(editingGroupId, {
+        const didSave = await saveAdminGroup(editingGroupId, {
           name,
           remark: draft.remark.trim() || undefined,
         });
-        if (!isActionOk(saved)) return;
+        if (!didSave) return;
         pushTopBanner(
           editingGroupId !== null ? t('admin_group_updated') : t('admin_group_created'),
           { tone: 'info' },
@@ -159,8 +158,8 @@ export const useGroupManager = () => {
   const confirmDelete = React.useCallback(async () => {
     if (deleteGroupId === null || !token) return;
     try {
-      const removed = await removeAdminGroup(deleteGroupId);
-      if (!isActionOk(removed)) return;
+      const didRemove = await removeAdminGroup(deleteGroupId);
+      if (!didRemove) return;
       pushTopBanner(t('admin_group_deleted'), { tone: 'info' });
       setDeleteGroupId(null);
     } catch (error) {
