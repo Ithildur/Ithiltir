@@ -20,10 +20,11 @@ type AppConfig struct {
 	NodeOfflineThreshold string `yaml:"node_offline_threshold"`
 
 	// Derived fields (compiled in config.Load). Not part of YAML.
-	PublicURLScheme         string        `yaml:"-"`
-	PublicURLHost           string        `yaml:"-"`
-	PublicURLBasePath       string        `yaml:"-"`
-	NodeOfflineThresholdDur time.Duration `yaml:"-"`
+	PublicURLScheme         string         `yaml:"-"`
+	PublicURLHost           string         `yaml:"-"`
+	PublicURLBasePath       string         `yaml:"-"`
+	NodeOfflineThresholdDur time.Duration  `yaml:"-"`
+	Location                *time.Location `yaml:"-"`
 }
 
 // DatabaseConfig holds database settings.

@@ -18,9 +18,8 @@ type handler struct {
 	bearer   routes.Middleware
 }
 
-func Router(st *store.Stores, auth *authjwt.Manager, timezone string, bearer routes.Middleware) *routes.Blueprint {
-	loc, err := time.LoadLocation(timezone)
-	if err != nil {
+func Router(st *store.Stores, auth *authjwt.Manager, loc *time.Location, bearer routes.Middleware) *routes.Blueprint {
+	if loc == nil {
 		loc = time.Local
 	}
 	h := &handler{traffic: st.Traffic, front: st.Front, auth: auth, location: loc, bearer: bearer}

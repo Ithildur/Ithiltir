@@ -43,6 +43,7 @@ Node IP is an observation from authenticated agent requests: Dash reads the firs
 ## State And Retention
 
 - Default startup needs PostgreSQL and Redis; with `--no-redis`, Redis-backed runtime state moves to process memory.
+- `app.timezone` is compiled during startup. Empty uses the local timezone; non-empty values must be valid IANA timezone names, otherwise config loading fails with the configured value in the error.
 - Node auth and pending agent update requests use process memory, not Redis.
 - SMART and thermal metrics are runtime state. SMART cache freshness, helper availability, and device health are kept in a separate hot cache and are not written to PostgreSQL metrics snapshots. SMART temperature for confirmed physical disks is reduced into `disk_physical_metrics.temp_c` for per-device history; virtual disks and RAID devices are ignored. The same backend decision produces `disk.temperature_devices` for frontend history navigation. Thermal data is stored with metrics snapshots, reduced into `cpu_temp_c`, and split into a separate frontend field cache; both runtime fields are composed into the frontend node JSON on read.
 - Alert evaluation reads hot snapshots. Built-in offline, RAID, SMART health, and NVMe critical warning rules are derived from snapshot freshness and reported disk state.

@@ -171,10 +171,11 @@ func main() {
 			err,
 			slog.Bool("signing_key_set", cfg.Auth.JWTSigningKey != ""))
 	}
+	appLocation := cfg.App.EffectiveLocation()
 	trafficRuntime := trafficservice.NewRuntime(
 		ctx,
 		st.Traffic,
-		cfg.App.EffectiveLocation(),
+		appLocation,
 		cfg.Database.EffectiveTrafficRetentionDays(),
 	)
 	deps := httpapi.Dependencies{
@@ -190,7 +191,7 @@ func main() {
 	}
 	alertService := alert.NewService(st.Alert, st.Front, alert.WithMessageConfig(alert.MessageConfig{
 		Language: cfg.App.EffectiveLanguage(),
-		Location: cfg.App.EffectiveLocation(),
+		Location: appLocation,
 	}))
 
 	group, groupCtx := errgroup.WithContext(ctx)

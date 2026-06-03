@@ -58,6 +58,8 @@ go run ./cmd/dash -debug
 
 管理员登录密码只从环境变量 `monitor_dash_pwd` 读取，不写入配置文件。
 
+`app.timezone` 可选。空值使用本地时区；非空值必须是有效的 IANA 时区名，例如 `Asia/Shanghai` 或 `UTC`，否则启动会因配置错误停止。
+
 配置查找顺序：
 
 - `config.local.yaml`

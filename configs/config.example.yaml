@@ -5,7 +5,7 @@ app:
   listen: "__APP_LISTEN__"
   grpc_port: ":9090"
   public_url: "__APP_PUBLIC_URL__" # Root URL only. Path prefixes such as /dash are not supported.
-  timezone: "Asia/Shanghai"
+  timezone: "Asia/Shanghai" # Must be a valid IANA timezone name. Invalid values stop startup.
   language: "__APP_LANGUAGE__"
   log_level: "info" # Log level: debug/info/warn/error. HTTP access logs are emitted only in debug mode or with --debug.
   log_format: "text" # Log format: text (human-readable) or json (structured). This only changes output formatting.

@@ -102,7 +102,7 @@ func buildRoutes(cfg *config.Config, deps Dependencies, setup routeSetup) *route
 	r.Include("/node", nodeapi.Router(deps.Stores, setup.serverID, setup.staleAfterSec, setup.trustedProxies), routes.IncludeAuth(nodeSecretAuth))
 	r.Include("/front", frontapi.Router(deps.Stores, setup.offlineThreshold, deps.Auth))
 	r.Include("/metrics", metricsapi.Router(deps.Stores, deps.Auth))
-	r.Include("/statistics", statisticsapi.Router(deps.Stores, deps.Auth, cfg.App.Timezone, setup.bearer))
+	r.Include("/statistics", statisticsapi.Router(deps.Stores, deps.Auth, cfg.App.EffectiveLocation(), setup.bearer))
 	return r
 }
 

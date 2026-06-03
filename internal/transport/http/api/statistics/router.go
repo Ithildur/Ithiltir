@@ -1,6 +1,8 @@
 package statistics
 
 import (
+	"time"
+
 	"dash/internal/store"
 	trafficapi "dash/internal/transport/http/api/statistics/traffic"
 	authjwt "github.com/Ithildur/EiluneKit/auth/jwt"
@@ -12,11 +14,11 @@ type handler struct {
 	auth  *authjwt.Manager
 }
 
-func Router(st *store.Stores, auth *authjwt.Manager, timezone string, bearer routes.Middleware) *routes.Blueprint {
+func Router(st *store.Stores, auth *authjwt.Manager, loc *time.Location, bearer routes.Middleware) *routes.Blueprint {
 	h := &handler{store: st, auth: auth}
 
 	r := routes.NewBlueprint()
 	h.accessRoute(r)
-	r.Include("/traffic", trafficapi.Router(st, auth, timezone, bearer))
+	r.Include("/traffic", trafficapi.Router(st, auth, loc, bearer))
 	return r
 }

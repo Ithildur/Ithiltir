@@ -58,6 +58,8 @@ Minimum config fields:
 
 The admin login password is read only from the `monitor_dash_pwd` environment variable.
 
+`app.timezone` is optional. Empty uses the local timezone; a non-empty value must be a valid IANA timezone name such as `Asia/Shanghai` or `UTC`, otherwise startup stops with a config error.
+
 Config lookup order:
 
 - `config.local.yaml`

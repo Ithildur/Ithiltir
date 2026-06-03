@@ -62,6 +62,9 @@ func LoadWithWarnings(path string) (*Config, []Warning, error) {
 	warns := warningCollector{}
 	overrideFromEnv(&cfg, &warns)
 	compileLanguage(&cfg)
+	if err := compileLocation(&cfg); err != nil {
+		return nil, nil, err
+	}
 
 	if err := compileDurations(&cfg, &warns); err != nil {
 		return nil, nil, err

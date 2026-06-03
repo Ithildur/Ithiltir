@@ -43,6 +43,7 @@ Ithiltir Dash 是单实例应用。根入口只启动一个 HTTP 进程，该进
 ## 状态和保留策略
 
 - 默认启动依赖 PostgreSQL 和 Redis；传 `--no-redis` 时，Redis 承载的运行时状态改用进程内内存。
+- `app.timezone` 在启动时编译。空值使用本地时区；非空值必须是有效 IANA 时区名，否则配置加载失败，错误中会包含配置值。
 - 节点鉴权和待下发 Agent 更新请求使用进程内内存，不走 Redis。
 - SMART 和 thermal 指标属于运行时状态。SMART 缓存新鲜度、helper 可用性和设备健康结果保存在独立热点缓存，不写入 PostgreSQL 指标快照。确认是物理盘的 SMART 温度会归约写入 `disk_physical_metrics.temp_c`，用于按设备查询历史；虚拟盘和 RAID 设备会被忽略。同一套后端判定会生成 `disk.temperature_devices`，供前端进入硬盘温度历史。thermal 随指标快照保存，并归约写入 `cpu_temp_c`，同时在前台缓存中拆成独立字段缓存；读取前台节点视图时再组合进 JSON。
 - 告警评估读取热点快照。内置离线、RAID、SMART 健康失败和 NVMe 关键告警规则来自快照新鲜度和上报磁盘状态。
