@@ -47,6 +47,3 @@ export const formatCycleRange = (
   if (Number.isNaN(startDate.getTime()) || Number.isNaN(endDate.getTime())) return '-';
   return `${fmt.format(startDate)} - ${fmt.format(endDate)}`;
 };
-
-export const isAbortError = (error: unknown): boolean =>
-  error instanceof DOMException && error.name === 'AbortError';

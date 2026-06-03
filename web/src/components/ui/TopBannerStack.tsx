@@ -5,44 +5,10 @@ import InfoIcon from 'lucide-react/dist/esm/icons/info';
 import X from 'lucide-react/dist/esm/icons/x';
 import XCircle from 'lucide-react/dist/esm/icons/x-circle';
 import type { LucideIcon } from 'lucide-react';
-import type { TranslationKey } from '@i18n';
 import { useI18n } from '@i18n';
-import { API_WARNING_EVENT } from '@lib/api';
+import type { BannerItem, BannerTone } from '@app-types/topBanner';
 
-export type BannerTone = 'info' | 'warning' | 'error';
-
-interface BannerItem {
-  id: number;
-  message: string;
-  tone: BannerTone;
-  closing: boolean;
-  durationMs: number | null;
-}
-
-export interface BannerOptions {
-  tone?: BannerTone;
-  durationMs?: number | null;
-}
-
-export type PushBanner = (message: string, options?: BannerOptions) => number;
-export type PushBannerWithControls = PushBanner & { close: (id: number) => void };
-
-const TopBannerContext = React.createContext<PushBannerWithControls | null>(null);
-
-const warningKeyByCode: Partial<Record<string, TranslationKey>> = {
-  alert_reconcile_delayed: 'warning_alert_reconcile_delayed',
-  redis_cache_error: 'warning_redis_cache_error',
-  theme_active_broken: 'warning_theme_active_broken',
-  theme_active_missing: 'warning_theme_active_missing',
-};
-
-export const useTopBanner = (): PushBannerWithControls => {
-  const ctx = React.useContext(TopBannerContext);
-  if (!ctx) {
-    throw new Error('useTopBanner must be used within TopBannerProvider');
-  }
-  return ctx;
-};
+export type { BannerItem, BannerTone } from '@app-types/topBanner';
 
 const toneStyles: Record<
   BannerTone,
@@ -118,7 +84,7 @@ interface TopBannerStackProps {
   onClose: (id: number) => void;
 }
 
-const TopBannerStack: React.FC<TopBannerStackProps> = ({ banners, onClose }) => {
+export const TopBannerStack: React.FC<TopBannerStackProps> = ({ banners, onClose }) => {
   if (banners.length === 0 || typeof document === 'undefined') {
     return null;
   }
@@ -136,119 +102,6 @@ const TopBannerStack: React.FC<TopBannerStackProps> = ({ banners, onClose }) => 
       </div>
     </div>,
     document.body,
-  );
-};
-
-export const TopBannerProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const { t } = useI18n();
-  const [banners, setBanners] = React.useState<BannerItem[]>([]);
-  const timersRef = React.useRef<Map<number, number>>(new Map());
-  const idRef = React.useRef(0);
-  const prevBannerIdsRef = React.useRef<Set<number>>(new Set());
-
-  const clearTimer = React.useCallback((id: number) => {
-    const timer = timersRef.current.get(id);
-    if (timer) {
-      window.clearTimeout(timer);
-      timersRef.current.delete(id);
-    }
-  }, []);
-
-  const finalizeRemoval = React.useCallback(
-    (id: number) => {
-      setBanners((prev) => prev.filter((item) => item.id !== id));
-      clearTimer(id);
-    },
-    [clearTimer],
-  );
-
-  const startClose = React.useCallback(
-    (id: number) => {
-      clearTimer(id);
-      setBanners((prev) =>
-        prev.map((item) => (item.id === id ? { ...item, closing: true } : item)),
-      );
-      window.setTimeout(() => finalizeRemoval(id), 240);
-    },
-    [clearTimer, finalizeRemoval],
-  );
-
-  const pushBanner = React.useCallback<PushBanner>(
-    (message, options) => {
-      const id = ++idRef.current;
-      const durationMs = options?.durationMs ?? 3000;
-
-      setBanners((prev) => {
-        const next = [
-          ...prev,
-          { id, message, tone: options?.tone ?? 'info', closing: false, durationMs },
-        ];
-        if (next.length > 4) {
-          const removalIndex = next.findIndex((item) => item.durationMs !== null);
-          const index = removalIndex === -1 ? 0 : removalIndex;
-          return next.filter((_, i) => i !== index);
-        }
-        return next;
-      });
-
-      if (durationMs !== null) {
-        const timer = window.setTimeout(() => startClose(id), durationMs);
-        timersRef.current.set(id, timer);
-      }
-
-      return id;
-    },
-    [startClose],
-  );
-
-  const pushBannerWithControls = React.useMemo<PushBannerWithControls>(() => {
-    const fn = ((message: string, options?: BannerOptions) =>
-      pushBanner(message, options)) as PushBannerWithControls;
-    fn.close = startClose;
-    return fn;
-  }, [pushBanner, startClose]);
-
-  React.useEffect(
-    () => () => {
-      timersRef.current.forEach((timeoutId) => window.clearTimeout(timeoutId));
-      timersRef.current.clear();
-    },
-    [],
-  );
-
-  React.useEffect(() => {
-    if (typeof window === 'undefined') return;
-
-    const onWarning = (event: Event) => {
-      const detail = (event as CustomEvent<{ code?: string }>).detail;
-      const code = typeof detail?.code === 'string' ? detail.code.trim() : '';
-      if (!code) return;
-
-      const key = warningKeyByCode[code] ?? 'warning_redis_cache_error';
-      pushBannerWithControls(t(key), { tone: 'warning', durationMs: 4500 });
-    };
-
-    window.addEventListener(API_WARNING_EVENT, onWarning as EventListener);
-    return () => {
-      window.removeEventListener(API_WARNING_EVENT, onWarning as EventListener);
-    };
-  }, [pushBannerWithControls, t]);
-
-  React.useEffect(() => {
-    const currentIds = new Set(banners.map((banner) => banner.id));
-    prevBannerIdsRef.current.forEach((id) => {
-      if (!currentIds.has(id)) {
-        clearTimer(id);
-      }
-    });
-    prevBannerIdsRef.current = currentIds;
-  }, [banners, clearTimer]);
-
-  return (
-    <TopBannerContext.Provider value={pushBannerWithControls}>
-      {children}
-      <TopBannerStack banners={banners} onClose={startClose} />
-    </TopBannerContext.Provider>
   );
 };
 

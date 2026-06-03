@@ -7,12 +7,14 @@ import '@fontsource/space-grotesk/600.css';
 
 import App from './App';
 import './index.css';
-import { TopBannerProvider } from '@components/ui/TopBannerStack';
-import { AuthProvider } from '@context/AuthContext';
-import { SiteBrandProvider } from '@context/SiteBrandContext';
-import { ThemeProvider } from '@context/ThemeContext';
-import { I18nProvider } from '@i18n';
-import { TrafficRebuildProvider } from './providers/TrafficRebuildProvider';
+import { I18nRuntime } from '@runtime/I18nRuntime';
+import { AuthRuntime } from '@runtime/AuthRuntime';
+import { SiteBrandRuntime } from '@runtime/SiteBrandRuntime';
+import { ThemeRuntime } from '@runtime/ThemeRuntime';
+import { TopBannerHost } from '@runtime/TopBannerHost';
+import { TrafficRebuildRuntime } from '@runtime/TrafficRebuildRuntime';
+import { SearchShortcutRuntime } from '@runtime/SearchShortcutRuntime';
+import { installBrowserRuntime } from '@runtime/bootstrap';
 
 const root = document.getElementById('root');
 
@@ -20,22 +22,19 @@ if (!root) {
   throw new Error('Root element not found');
 }
 
+installBrowserRuntime();
+
 const renderApp = () => {
   createRoot(root).render(
     <StrictMode>
-      <I18nProvider>
-        <TopBannerProvider>
-          <SiteBrandProvider>
-            <AuthProvider>
-              <TrafficRebuildProvider>
-                <ThemeProvider>
-                  <App />
-                </ThemeProvider>
-              </TrafficRebuildProvider>
-            </AuthProvider>
-          </SiteBrandProvider>
-        </TopBannerProvider>
-      </I18nProvider>
+      <I18nRuntime />
+      <TopBannerHost />
+      <SiteBrandRuntime />
+      <AuthRuntime />
+      <TrafficRebuildRuntime />
+      <ThemeRuntime />
+      <SearchShortcutRuntime />
+      <App />
     </StrictMode>,
   );
 };

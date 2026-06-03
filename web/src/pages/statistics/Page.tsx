@@ -2,7 +2,6 @@ import React from 'react';
 import { useParams } from 'react-router-dom';
 import Card from '@components/ui/Card';
 import { useI18n } from '@i18n';
-import { useBootstrapAuth } from '@hooks/useBootstrapAuth';
 import { ratioToPercent } from '@pages/dashboard/viewModel';
 import { buildMetricSections } from './config';
 import { useStatisticsDetail } from './hooks/useStatisticsDetail';
@@ -15,7 +14,6 @@ import {
 } from './PageParts';
 
 const Page = () => {
-  useBootstrapAuth();
   const { t } = useI18n();
   const { serverId } = useParams();
 

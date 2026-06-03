@@ -10,6 +10,7 @@ export interface Props {
   p95Selected: boolean;
   savingP95: boolean;
   savingTrafficSettings: boolean;
+  trafficSettingsDisabled: boolean;
   rebuilding: boolean;
   trafficRebuildBusy: boolean;
   onToggleP95Node: (id: number) => void;
@@ -23,6 +24,7 @@ const MobileAdvancedNodeCard: React.FC<Props> = ({
   p95Selected,
   savingP95,
   savingTrafficSettings,
+  trafficSettingsDisabled,
   rebuilding,
   trafficRebuildBusy,
   onToggleP95Node,
@@ -58,7 +60,7 @@ const MobileAdvancedNodeCard: React.FC<Props> = ({
         </span>
         <TrafficSettingsButton
           node={node}
-          disabled={savingTrafficSettings}
+          disabled={trafficSettingsDisabled || savingTrafficSettings}
           className="max-w-48"
           onOpen={onOpenTrafficSettings}
         />

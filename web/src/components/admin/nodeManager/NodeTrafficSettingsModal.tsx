@@ -14,16 +14,20 @@ import {
   nodeTrafficDraftValid,
   nodeTrafficCycleModes,
   nodeTrafficDirectionModes,
+  nodeTrafficCycleLabelKey,
   nodeTrafficDraftChanged,
   nodeTrafficDraftFromPolicy,
   nodeTrafficDraftWithCycleMode,
+  nodeTrafficDirectionLabelKey,
   nodeTrafficPatchFromDraft,
+  parseNodeTrafficCycleMode,
+  parseNodeTrafficDirectionMode,
   type NodeTrafficDraft,
   type NodeTrafficPatch,
 } from '@lib/trafficSettingsModel';
 import type { NodeRow } from '@app-types/admin';
 import type { TrafficSettings } from '@app-types/traffic';
-import { useI18n, type TranslationKey } from '@i18n';
+import { useI18n } from '@i18n';
 
 interface Props {
   isOpen: boolean;
@@ -95,15 +99,14 @@ const NodeTrafficSettingsModal: React.FC<Props> = ({
               id={`${titleId}-cycle-mode`}
               value={draft.cycleMode}
               disabled={saving}
-              onChange={(event) =>
-                setCycleMode(event.target.value as NodeTrafficDraft['cycleMode'])
-              }
+              onChange={(event) => {
+                const mode = parseNodeTrafficCycleMode(event.target.value);
+                if (mode) setCycleMode(mode);
+              }}
             >
               {nodeTrafficCycleModes.map((mode) => (
                 <option key={mode} value={mode}>
-                  {mode === 'default'
-                    ? t('admin_node_cycle_mode_default')
-                    : t(`traffic_cycle_${mode}` as TranslationKey)}
+                  {t(nodeTrafficCycleLabelKey[mode])}
                 </option>
               ))}
             </Select>
@@ -120,18 +123,18 @@ const NodeTrafficSettingsModal: React.FC<Props> = ({
               id={`${titleId}-direction-mode`}
               value={draft.directionMode}
               disabled={saving}
-              onChange={(event) =>
+              onChange={(event) => {
+                const mode = parseNodeTrafficDirectionMode(event.target.value);
+                if (!mode) return;
                 setDraft((current) => ({
                   ...current,
-                  directionMode: event.target.value as NodeTrafficDraft['directionMode'],
-                }))
-              }
+                  directionMode: mode,
+                }));
+              }}
             >
               {nodeTrafficDirectionModes.map((mode) => (
                 <option key={mode} value={mode}>
-                  {mode === 'default'
-                    ? t('admin_node_direction_mode_default')
-                    : t(`traffic_direction_${mode}` as TranslationKey)}
+                  {t(nodeTrafficDirectionLabelKey[mode])}
                 </option>
               ))}
             </Select>

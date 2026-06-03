@@ -16,6 +16,8 @@ export interface Props {
   nodes: NodeRow[];
   updatableNodeIds: Set<number>;
   manualUpdateNodeIds: Set<number>;
+  savingGuestVisibleNodeIds: Set<number>;
+  upgradingNodeIds: Set<number>;
   bundledNodeVersion: string;
   draggingId: number | null;
   dragOverId: number | null;
@@ -36,6 +38,8 @@ const NodeTable: React.FC<Props> = ({
   nodes,
   updatableNodeIds,
   manualUpdateNodeIds,
+  savingGuestVisibleNodeIds,
+  upgradingNodeIds,
   bundledNodeVersion,
   draggingId,
   dragOverId,
@@ -178,6 +182,7 @@ const NodeTable: React.FC<Props> = ({
               <IOSSwitch
                 size="sm"
                 checked={node.guestVisible}
+                disabled={savingGuestVisibleNodeIds.has(node.id)}
                 onChange={() => onToggleGuestVisible(node)}
               />
             </td>
@@ -258,8 +263,9 @@ const NodeTable: React.FC<Props> = ({
                   </span>
                   <button
                     type="button"
-                    className="inline-flex size-5 shrink-0 items-center justify-center rounded-md border border-(--theme-border-warning-muted) bg-(--theme-bg-warning-muted) p-1 text-(--theme-fg-warning-strong) dark:border-(--theme-border-warning-soft) dark:bg-(--theme-bg-warning-soft) dark:text-(--theme-fg-warning-strong)"
+                    className="inline-flex size-5 shrink-0 items-center justify-center rounded-md border border-(--theme-border-warning-muted) bg-(--theme-bg-warning-muted) p-1 text-(--theme-fg-warning-strong) disabled:cursor-not-allowed disabled:opacity-50 dark:border-(--theme-border-warning-soft) dark:bg-(--theme-bg-warning-soft) dark:text-(--theme-fg-warning-strong)"
                     onClick={() => onRequestUpgrade(node)}
+                    disabled={upgradingNodeIds.has(node.id)}
                     title={t('admin_nodes_version_update_target', {
                       target: bundledNodeVersion,
                     })}

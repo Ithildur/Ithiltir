@@ -1,4 +1,11 @@
-import type { ThemeManifest, ThemeSpec } from '@app-types/admin';
+import type {
+  ThemeDensity,
+  ThemeFrame,
+  ThemeManifest,
+  ThemeShell,
+  ThemeSpec,
+  ThemeSummary,
+} from '@app-types/admin';
 
 export const themeRefreshEvent = 'dash:theme-refresh';
 
@@ -22,39 +29,118 @@ export const defaultThemeManifest: ThemeManifest = {
   skin: defaultThemeSpec,
 };
 
-export const normalizeThemeManifest = (
-  input: Partial<ThemeManifest> | null | undefined,
-): ThemeManifest => ({
-  id: input?.id?.trim() || defaultThemeManifest.id,
-  name: input?.name?.trim() || defaultThemeManifest.name,
-  version: input?.version?.trim() || defaultThemeManifest.version,
-  author: input?.author?.trim() || defaultThemeManifest.author,
-  description: input?.description?.trim() || defaultThemeManifest.description,
-  skin: {
-    admin: {
-      shell: input?.skin?.admin?.shell === 'topbar' ? 'topbar' : 'sidebar',
-      frame: input?.skin?.admin?.frame === 'flat' ? 'flat' : 'layered',
-    },
-    dashboard: {
-      summary: input?.skin?.dashboard?.summary === 'strip' ? 'strip' : 'cards',
-      density: input?.skin?.dashboard?.density === 'compact' ? 'compact' : 'comfortable',
-    },
-  },
-});
+const themeIdPattern = /^[a-z0-9][a-z0-9_-]{0,63}$/;
+const themeShells = ['sidebar', 'topbar'] as const satisfies readonly ThemeShell[];
+const themeFrames = ['layered', 'flat'] as const satisfies readonly ThemeFrame[];
+const themeSummaries = ['cards', 'strip'] as const satisfies readonly ThemeSummary[];
+const themeDensities = ['comfortable', 'compact'] as const satisfies readonly ThemeDensity[];
 
-const getThemePackageRuntime = () => globalThis.window?.__themePackage;
+const isObject = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value);
 
-const readThemeManifest = (): ThemeManifest | null => {
-  const manifest = getThemePackageRuntime()?.manifest;
-  return manifest ? normalizeThemeManifest(manifest) : null;
+const invalidThemeManifest = (path: string, reason: string): Error =>
+  new Error(`invalid theme manifest: ${path} ${reason}`);
+
+const readObject = (source: Record<string, unknown>, key: string): Record<string, unknown> => {
+  const value = source[key];
+  if (!isObject(value)) throw invalidThemeManifest(key, 'must be an object');
+  return value;
 };
 
-const saveThemeManifest = (input: Partial<ThemeManifest> | null | undefined): ThemeManifest => {
-  const manifest = normalizeThemeManifest(input);
-  const runtime = getThemePackageRuntime();
-  if (runtime) {
-    runtime.manifest = manifest;
+const readRequiredText = (source: Record<string, unknown>, key: string): string => {
+  const value = source[key];
+  if (typeof value !== 'string') throw invalidThemeManifest(key, 'must be a string');
+
+  const text = value.trim();
+  if (!text) throw invalidThemeManifest(key, 'must not be empty');
+  return text;
+};
+
+const readText = (source: Record<string, unknown>, key: string): string => {
+  const value = source[key];
+  if (value === undefined || value === null) return '';
+  if (typeof value !== 'string') throw invalidThemeManifest(key, 'must be a string');
+  return value.trim();
+};
+
+const readThemeChoice = <T extends string>(
+  source: Record<string, unknown>,
+  key: string,
+  values: readonly T[],
+  fallback: T,
+): T => {
+  const value = source[key];
+  if (value === undefined || value === null) return fallback;
+  if (typeof value !== 'string') throw invalidThemeManifest(key, 'must be a string');
+
+  const text = value.trim();
+  if (!text) return fallback;
+  if (!values.includes(text as T)) {
+    throw invalidThemeManifest(key, `must be one of ${values.join(', ')}`);
   }
+  return text as T;
+};
+
+export const parseThemeManifest = (input: unknown): ThemeManifest => {
+  if (!isObject(input)) throw invalidThemeManifest('root', 'must be an object');
+
+  const id = readRequiredText(input, 'id');
+  if (!themeIdPattern.test(id)) {
+    throw invalidThemeManifest('id', 'must match [a-z0-9][a-z0-9_-]{0,63}');
+  }
+
+  const skin = readObject(input, 'skin');
+  const admin = readObject(skin, 'admin');
+  const dashboard = readObject(skin, 'dashboard');
+
+  return {
+    id,
+    name: readRequiredText(input, 'name'),
+    version: readRequiredText(input, 'version'),
+    author: readText(input, 'author'),
+    description: readText(input, 'description'),
+    skin: {
+      admin: {
+        shell: readThemeChoice(admin, 'shell', themeShells, defaultThemeSpec.admin.shell),
+        frame: readThemeChoice(admin, 'frame', themeFrames, defaultThemeSpec.admin.frame),
+      },
+      dashboard: {
+        summary: readThemeChoice(
+          dashboard,
+          'summary',
+          themeSummaries,
+          defaultThemeSpec.dashboard.summary,
+        ),
+        density: readThemeChoice(
+          dashboard,
+          'density',
+          themeDensities,
+          defaultThemeSpec.dashboard.density,
+        ),
+      },
+    },
+  };
+};
+
+const themePackageRuntime = (): NonNullable<Window['__themePackage']> => {
+  if (!window.__themePackage) {
+    throw new Error('Theme package runtime is not installed');
+  }
+  return window.__themePackage;
+};
+
+export const ensureThemePackageRuntime = (): void => {
+  themePackageRuntime();
+};
+
+const readThemeManifest = (): ThemeManifest | null => {
+  const manifest = themePackageRuntime().manifest;
+  if (!manifest) return null;
+  return parseThemeManifest(manifest);
+};
+
+const saveThemeManifest = (manifest: ThemeManifest): ThemeManifest => {
+  themePackageRuntime().manifest = manifest;
   return manifest;
 };
 
@@ -72,21 +158,18 @@ const fetchActiveThemeManifest = async (signal?: AbortSignal): Promise<ThemeMani
   if (!response.ok) {
     throw new Error(`failed to fetch active theme: ${response.status}`);
   }
-  return normalizeThemeManifest((await response.json()) as Partial<ThemeManifest>);
+  return parseThemeManifest(await response.json());
 };
 
 export const resolveThemeManifest = async (signal?: AbortSignal): Promise<ThemeManifest> => {
   const cached = readThemeManifest();
   if (cached) return cached;
 
-  const pending = getThemePackageRuntime()?.manifestPromise;
-  if (pending) {
-    try {
-      const manifest = await pending;
-      if (manifest) return saveThemeManifest(manifest);
-    } catch {
-      // Ignore bootstrap prefetch failure and fallback to active.json fetch below.
-    }
+  try {
+    const manifest = await themePackageRuntime().manifestPromise;
+    if (manifest) return saveThemeManifest(parseThemeManifest(manifest));
+  } catch {
+    // Ignore bootstrap prefetch failure and fetch active.json below.
   }
 
   return saveThemeManifest(await fetchActiveThemeManifest(signal));
@@ -96,6 +179,6 @@ export const refreshThemeManifest = async (signal?: AbortSignal): Promise<ThemeM
   saveThemeManifest(await fetchActiveThemeManifest(signal));
 
 export const refreshActiveThemeStyles = (): void => {
-  getThemePackageRuntime()?.refresh?.();
-  globalThis.window?.dispatchEvent(new Event(themeRefreshEvent));
+  themePackageRuntime().refresh();
+  window.dispatchEvent(new Event(themeRefreshEvent));
 };

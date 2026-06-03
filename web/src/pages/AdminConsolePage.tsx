@@ -8,17 +8,18 @@ import Settings2 from 'lucide-react/dist/esm/icons/settings-2';
 import { Link } from 'react-router-dom';
 import AdminMobileMenu from '@components/admin/AdminMobileMenu';
 import AdminSidebar from '@components/admin/AdminSidebar';
-import type { AdminNavItem } from '@components/admin/AdminSidebar';
+import type { AdminNavItem } from '@components/admin/adminNav';
 import AdminTopbar from '@components/admin/AdminTopbar';
 import NodeManager from '@components/admin/nodeManager/NodeManager';
 import ServerTimeCard from '@components/admin/ServerTimeCard';
 import FullScreenLoader from '@components/ui/FullScreenLoader';
 import ThemeToggle from '@components/ui/ThemeToggle';
-import type { DashboardTab } from '@app-types/admin';
-import { useSiteBrand } from '@context/SiteBrandContext';
-import { useTheme } from '@context/ThemeContext';
+import type { AdminConsoleTab } from '@app-types/admin';
+import { useSiteBrandStore } from '@stores/siteBrandStore';
+import { useThemeStore } from '@stores/themeStore';
 import { useI18n } from '@i18n';
 import { fetchAppVersion } from '@lib/versionApi';
+import { isCanceledRequestError } from '@utils/errors';
 
 const GroupManager = React.lazy(() => import('@components/admin/GroupManager'));
 const AlertManager = React.lazy(() => import('@components/admin/alertManager/AlertManager'));
@@ -38,17 +39,15 @@ const tabComponents = {
   groups: GroupManager,
   alerts: AlertManager,
   system: SystemSettings,
-} satisfies Record<DashboardTab, React.ElementType>;
+} satisfies Record<AdminConsoleTab, React.ElementType>;
 
 const AdminConsolePage: React.FC = () => {
   const [dashVersion, setDashVersion] = React.useState('');
-  const [activeTab, setActiveTab] = React.useState<DashboardTab>('nodes');
+  const [activeTab, setActiveTab] = React.useState<AdminConsoleTab>('nodes');
   const [mobileMenuOpen, setMobileMenuOpen] = React.useState(false);
   const { t } = useI18n();
-  const { brand } = useSiteBrand();
-  const {
-    manifest: { skin: theme },
-  } = useTheme();
+  const brand = useSiteBrandStore((state) => state.brand);
+  const theme = useThemeStore((state) => state.themeManifest.skin);
 
   React.useEffect(() => {
     if (!visibleTabs.some((tab) => tab.key === activeTab)) {
@@ -67,7 +66,7 @@ const AdminConsolePage: React.FC = () => {
     fetchAppVersion({ signal: controller.signal })
       .then((res) => setDashVersion(res.version?.trim() ?? ''))
       .catch((error) => {
-        if (error instanceof DOMException && error.name === 'AbortError') return;
+        if (isCanceledRequestError(error)) return;
         setDashVersion('');
       });
     return () => {

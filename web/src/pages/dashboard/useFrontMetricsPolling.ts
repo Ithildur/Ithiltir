@@ -1,22 +1,24 @@
 import React from 'react';
-import { useAuth } from '@context/AuthContext';
+import { useAuthStore } from '@stores/authStore';
 import { useI18n } from '@i18n';
 import { ApiError } from '@lib/api';
 import { fetchFrontMetrics } from '@lib/frontApi';
 import type { NodeView } from '@app-types/frontMetrics';
-import { useTopBanner } from '@components/ui/TopBannerStack';
+import { closeTopBanner, pushTopBanner } from '@runtime/topBannerRuntime';
 import { normalizeNodeViews } from './viewModel';
 import { DASHBOARD_POLL_INTERVAL_MS, DASHBOARD_REQUEST_TIMEOUT_MS } from '@config/dashboard';
+import { isAbortError, isCanceledRequestError } from '@utils/errors';
 
 export const useFrontMetricsPolling = (): {
   nodes: NodeView[];
   isLoading: boolean;
 } => {
-  const [nodes, setNodes] = React.useState<NodeView[]>([]);
+  const [rawNodes, setRawNodes] = React.useState<NodeView[]>([]);
   const [isLoading, setIsLoading] = React.useState(true);
   const { t } = useI18n();
-  const pushBanner = useTopBanner();
-  const { bootstrap, status } = useAuth();
+  const status = useAuthStore((state) => state.status);
+  const loadedRef = React.useRef(false);
+  const previousStatusRef = React.useRef(status);
 
   const connectionRef = React.useRef<{ disconnected: boolean; bannerId: number | null }>({
     disconnected: false,
@@ -33,10 +35,10 @@ export const useFrontMetricsPolling = (): {
           ? `${t('dashboard_disconnected')}: ${error.message}`
           : t('dashboard_disconnected');
 
-      const bannerId = pushBanner(message, { tone: 'error', durationMs: null });
+      const bannerId = pushTopBanner(message, { tone: 'error', durationMs: null });
       connectionRef.current.bannerId = bannerId;
     },
-    [pushBanner, t],
+    [t],
   );
 
   const closeDisconnectedBanner = React.useCallback(() => {
@@ -45,44 +47,61 @@ export const useFrontMetricsPolling = (): {
     const bannerId = connectionRef.current.bannerId;
     connectionRef.current.bannerId = null;
     if (bannerId != null) {
-      pushBanner.close(bannerId);
+      closeTopBanner(bannerId);
     }
-  }, [pushBanner]);
+  }, []);
 
   const markRecovered = React.useCallback(() => {
     if (!connectionRef.current.disconnected) return;
     closeDisconnectedBanner();
-    pushBanner(t('dashboard_recovered'), { tone: 'info' });
-  }, [closeDisconnectedBanner, pushBanner, t]);
+    pushTopBanner(t('dashboard_recovered'), { tone: 'info' });
+  }, [closeDisconnectedBanner, t]);
 
   React.useEffect(() => {
+    const previousStatus = previousStatusRef.current;
+    previousStatusRef.current = status;
+    if (previousStatus !== 'authenticated' || status === 'authenticated') return;
+
+    loadedRef.current = false;
+    setRawNodes([]);
+    setIsLoading(true);
+    closeDisconnectedBanner();
+  }, [closeDisconnectedBanner, status]);
+
+  React.useEffect(() => {
+    if (status === 'unknown' || status === 'bootstrapping') return;
+
     let isMounted = true;
     const abortRef: { current: AbortController | null } = { current: null };
     let timerId: number | null = null;
     let loopId: number | null = null;
-
-    const ensureAuthReady = async (): Promise<void> => {
-      if (status === 'authenticated' || status === 'guest') return;
-      await bootstrap();
-    };
 
     const loadOnce = async () => {
       abortRef.current?.abort();
       const controller = new AbortController();
       abortRef.current = controller;
 
-      const timeoutId = window.setTimeout(() => controller.abort(), DASHBOARD_REQUEST_TIMEOUT_MS);
+      let timedOut = false;
+      const timeoutId = window.setTimeout(() => {
+        timedOut = true;
+        controller.abort();
+      }, DASHBOARD_REQUEST_TIMEOUT_MS);
+      if (!loadedRef.current) {
+        setIsLoading(true);
+      }
       try {
-        await ensureAuthReady();
-        const data = await fetchFrontMetrics({ signal: controller.signal });
+        const nodes = await fetchFrontMetrics({ signal: controller.signal });
         if (!isMounted) return;
-        setNodes(normalizeNodeViews(data));
+        loadedRef.current = true;
+        setRawNodes(nodes);
         setIsLoading(false);
         markRecovered();
       } catch (error) {
         if (!isMounted) return;
-        markDisconnected(error);
+        loadedRef.current = true;
         setIsLoading(false);
+        if (isCanceledRequestError(error) && !(timedOut && isAbortError(error))) return;
+        markDisconnected(error);
       } finally {
         window.clearTimeout(timeoutId);
       }
@@ -102,7 +121,8 @@ export const useFrontMetricsPolling = (): {
       abortRef.current?.abort();
       closeDisconnectedBanner();
     };
-  }, [bootstrap, closeDisconnectedBanner, markDisconnected, markRecovered, status]);
+  }, [closeDisconnectedBanner, markDisconnected, markRecovered, status]);
 
+  const nodes = React.useMemo(() => normalizeNodeViews(rawNodes), [rawNodes]);
   return { nodes, isLoading };
 };

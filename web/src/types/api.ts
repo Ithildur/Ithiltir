@@ -34,7 +34,7 @@ export interface ManagedNode {
   tags: string[];
   display_order: number;
   group_ids: number[];
-  version?: NodeVersion | null;
+  version: NodeVersion;
 }
 
 export interface UpdateNodeInput {

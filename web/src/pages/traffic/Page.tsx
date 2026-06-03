@@ -1,110 +1,26 @@
-import React from 'react';
 import AlertTriangle from 'lucide-react/dist/esm/icons/alert-triangle';
 import ArrowLeft from 'lucide-react/dist/esm/icons/arrow-left';
-import CircleHelp from 'lucide-react/dist/esm/icons/circle-help';
 import Gauge from 'lucide-react/dist/esm/icons/gauge';
 import LoaderCircle from 'lucide-react/dist/esm/icons/loader-circle';
-import Network from 'lucide-react/dist/esm/icons/network';
 import RefreshCw from 'lucide-react/dist/esm/icons/refresh-cw';
 import Wrench from 'lucide-react/dist/esm/icons/wrench';
 import type { LucideIcon } from 'lucide-react';
-import { Link, useParams } from 'react-router-dom';
-import type {
-  TrafficDaily,
-  TrafficDailyItem,
-  TrafficMonthly,
-  TrafficStats,
-  TrafficSummary,
-} from '@app-types/traffic';
+import { Link } from 'react-router-dom';
 import Button from '@components/ui/Button';
 import ConfirmDialog from '@components/ui/ConfirmDialog';
 import Select from '@components/ui/Select';
 import ThemeToggle from '@components/ui/ThemeToggle';
-import { Tooltip } from '@components/ui/Tooltip';
-import { trafficCoverageWarningThreshold } from '@lib/trafficSettingsModel';
-import { useAuth } from '@context/AuthContext';
-import { useTrafficRebuildBanner } from '@hooks/useTrafficRebuildBanner';
-import { useTrafficRebuild } from '@hooks/useTrafficRebuild';
-import { useI18n, type TranslationKey } from '@i18n';
-import { useBootstrapAuth } from '@hooks/useBootstrapAuth';
-import { useConfirmDialog } from '@hooks/useConfirmDialog';
-import {
-  fetchTrafficDaily,
-  fetchTrafficIfaces,
-  fetchTrafficMonthly,
-  fetchTrafficSummary,
-} from '@lib/statisticsApi';
 import {
   formatBandwidth,
   formatCoverage,
   formatCycleRange,
   formatOptionalBandwidth,
   formatTrafficBytes,
-  isAbortError,
-  selectedTrafficText,
 } from './viewModel';
-
-const chartWidth = 760;
-const chartHeight = 280;
-const chartBasePad = { left: 48, right: 28, top: 26, bottom: 44 };
-const chartAxisLabelGap = 10;
-const chartAxisLabelCharWidth = 7;
-const monthlyHistoryMonths = 12;
-
-type ChartMode = 'previous_daily' | 'current_daily' | 'monthly';
-
-type ChartPoint = {
-  key: string;
-  label: string;
-  title: string;
-  inBytes: number;
-  outBytes: number;
-};
-
-const chartModeOptions: { mode: ChartMode; label: TranslationKey; daily: boolean }[] = [
-  { mode: 'previous_daily', label: 'traffic_chart_previous_daily', daily: true },
-  { mode: 'current_daily', label: 'traffic_chart_current_daily', daily: true },
-  { mode: 'monthly', label: 'traffic_chart_monthly', daily: false },
-];
-
-const isDailyChartMode = (mode: ChartMode) => mode !== 'monthly';
-
-const localeFor = (lang: string) => (lang === 'zh' ? 'zh-CN' : 'en-US');
-
-const formatCycleLabel = (start: string, locale: string, timezone: string): string => {
-  const date = new Date(start);
-  if (Number.isNaN(date.getTime())) return '-';
-  return new Intl.DateTimeFormat(locale, {
-    month: '2-digit',
-    day: '2-digit',
-    timeZone: timezone || undefined,
-  }).format(date);
-};
-
-const monthName = (start: string, locale: string, timezone: string): string => {
-  const date = new Date(start);
-  if (Number.isNaN(date.getTime())) return '-';
-  return new Intl.DateTimeFormat(locale, {
-    month: 'short',
-    timeZone: timezone || undefined,
-  }).format(date);
-};
-
-const dailyPointFrom = (item: TrafficDailyItem, locale: string, timezone: string): ChartPoint => ({
-  key: `${item.start}-${item.iface}`,
-  label: formatCycleLabel(item.start, locale, timezone),
-  title: formatCycleRange(item.start, item.end, locale, timezone),
-  inBytes: item.stats.in_bytes,
-  outBytes: item.stats.out_bytes,
-});
-
-const monthlyPointFrom = (item: TrafficSummary, locale: string): ChartPoint => ({
-  key: `${item.cycle.start}-${item.iface}`,
-  label: monthName(item.cycle.start, locale, item.cycle.timezone),
-  title: formatCycleRange(item.cycle.start, item.cycle.end, locale, item.cycle.timezone),
-  inBytes: item.stats.in_bytes,
-  outBytes: item.stats.out_bytes,
-});
+import { TrafficTrendChart } from './TrafficTrendChart';
+import { TrafficRebuildOverlay } from './TrafficRebuildOverlay';
+import { type CurrentStatTone, type TrafficHeroStatTone } from './pageModel';
+import { useTrafficPage } from './useTrafficPage';
 
 const statTone = {
   accent: 'text-(--theme-fg-accent)',
@@ -113,7 +29,7 @@ const statTone = {
   red: 'text-(--theme-bg-danger-emphasis)',
 } as const;
 
-type StatTone = keyof typeof statTone;
+type StatTone = TrafficHeroStatTone;
 
 const HeroStat = ({
   label,
@@ -155,40 +71,6 @@ const DirectionModeChip = ({ label }: { label: string }) => (
   </span>
 );
 
-type CurrentStatTone = 'default' | 'accent' | 'warning' | 'muted';
-
-type CurrentStatItem = {
-  key: string;
-  label: string;
-  value: string;
-};
-
-type CurrentStatGroup = {
-  key: string;
-  label: string;
-  tone: CurrentStatTone;
-  items: CurrentStatItem[];
-};
-
-type CoverageStats = {
-  sampleCount: number;
-  expectedSampleCount: number;
-  coverageRatio: number;
-};
-
-const coverageStatsFrom = (stats: TrafficStats[]): CoverageStats | null => {
-  if (stats.length === 0) return null;
-  const sampleCount = stats.reduce((total, item) => total + item.sample_count, 0);
-  const expectedSampleCount = stats.reduce((total, item) => total + item.expected_sample_count, 0);
-  const coverageRatio =
-    expectedSampleCount <= 0 ? 1 : Math.min(1, sampleCount / expectedSampleCount);
-  return {
-    sampleCount,
-    expectedSampleCount,
-    coverageRatio,
-  };
-};
-
 const currentStatValueClass = (tone: CurrentStatTone = 'default') => {
   switch (tone) {
     case 'accent':
@@ -215,23 +97,6 @@ const currentStatDotClass = (tone: CurrentStatTone = 'default') => {
   }
 };
 
-const currentStatToneFor = (
-  directionMode: TrafficSummary['direction_mode'],
-  selectedDirection: TrafficStats['selected_bytes_direction'],
-  group: 'in' | 'out',
-): CurrentStatTone => {
-  if (directionMode === 'out') {
-    return group === 'out' ? 'warning' : 'muted';
-  }
-  if (directionMode === 'both') {
-    return group === 'out' ? 'warning' : 'accent';
-  }
-  if (selectedDirection === 'in' || selectedDirection === 'out') {
-    return group === selectedDirection ? (group === 'out' ? 'warning' : 'accent') : 'muted';
-  }
-  return group === 'out' ? 'warning' : 'accent';
-};
-
 const HealthChip = ({ label, value }: { label: string; value: string }) => (
   <span className="inline-flex items-center gap-1.5 text-xs font-medium text-(--theme-fg-muted)">
     <span>{label}</span>
@@ -239,618 +104,38 @@ const HealthChip = ({ label, value }: { label: string; value: string }) => (
   </span>
 );
 
-const TrafficRebuildOverlay = () => {
-  const { t } = useI18n();
-  return (
-    <div
-      className="absolute inset-0 z-20 grid min-h-72 place-items-center overflow-hidden bg-(--theme-page-bg)/92 px-6 py-12 backdrop-blur-sm dark:bg-(--theme-bg-default)/92"
-      aria-live="polite"
-      role="status"
-    >
-      <div className="absolute inset-x-0 top-0 h-px bg-(--theme-border-subtle) dark:bg-(--theme-border-default)" />
-      <div className="absolute inset-x-0 bottom-0 h-px bg-(--theme-border-subtle) dark:bg-(--theme-border-default)" />
-      <div className="absolute inset-0 bg-[linear-gradient(135deg,var(--theme-fg-default)_1px,transparent_1px)] bg-size-[28px_28px] opacity-[0.06]" />
-
-      <div className="relative flex w-full max-w-4xl flex-col items-center justify-center gap-8 text-center sm:flex-row sm:text-left">
-        <div className="relative flex size-28 shrink-0 items-center justify-center sm:size-32">
-          <div className="absolute inset-0 rounded-full border border-(--theme-border-subtle) bg-(--theme-bg-default)/80 shadow-xl dark:border-(--theme-border-default) dark:bg-(--theme-bg-inset)/80" />
-          <div className="absolute inset-3 rounded-full border-2 border-(--theme-border-subtle) border-t-(--theme-fg-accent) animate-spin dark:border-(--theme-border-default) dark:border-t-(--theme-fg-accent)" />
-          <RefreshCw className="relative size-10 text-(--theme-fg-accent)" aria-hidden="true" />
-        </div>
-
-        <div className="min-w-0">
-          <div className="text-xs font-semibold uppercase tracking-[0.18em] text-(--theme-fg-accent)">
-            {t('traffic_current_cycle')}
-          </div>
-          <div className="mt-3 max-w-2xl text-2xl/8 font-semibold tracking-tight text-(--theme-fg-default) sm:text-3xl/9">
-            {t('traffic_rebuild_overlay_title')}
-          </div>
-          <div className="mt-3 max-w-xl text-sm/6 text-(--theme-fg-muted)">
-            {t('traffic_rebuild_overlay_detail')}
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-};
-
-const TrafficTrendChart = ({
-  points,
-  mode,
-  dailyAvailable,
-  onModeChange,
-}: {
-  points: ChartPoint[];
-  mode: ChartMode;
-  dailyAvailable: boolean;
-  onModeChange: (mode: ChartMode) => void;
-}) => {
-  const { t } = useI18n();
-  const dailyUnavailable = isDailyChartMode(mode) && !dailyAvailable;
-  const maxValue = Math.max(
-    1,
-    ...points.flatMap((item) => [item.inBytes, item.outBytes, item.inBytes + item.outBytes]),
-  );
-  const axisValues = [maxValue, maxValue / 2, 0];
-  const axisLabels = axisValues.map((value) => (dailyUnavailable ? '' : formatTrafficBytes(value)));
-  const axisLabelWidth =
-    Math.max(0, ...axisLabels.map((label) => label.length)) * chartAxisLabelCharWidth;
-  const chartPad = {
-    ...chartBasePad,
-    left: Math.max(chartBasePad.left, Math.ceil(axisLabelWidth + chartAxisLabelGap + 2)),
-  };
-  const innerWidth = chartWidth - chartPad.left - chartPad.right;
-  const innerHeight = chartHeight - chartPad.top - chartPad.bottom;
-  const barStep = points.length > 0 ? innerWidth / points.length : innerWidth;
-  const barWidth = Math.min(18, Math.max(3, barStep / 4));
-  const pointInset = Math.max(6, barWidth + 4);
-  const usableWidth = Math.max(1, innerWidth - pointInset * 2);
-  const step = points.length > 1 ? usableWidth / (points.length - 1) : usableWidth;
-  const yFor = (value: number) => chartPad.top + innerHeight - (value / maxValue) * innerHeight;
-  const xFor = (index: number) =>
-    points.length > 1 ? chartPad.left + pointInset + index * step : chartPad.left + innerWidth / 2;
-  const linePoints = points.map((item, index) => ({
-    x: xFor(index),
-    y: yFor(item.inBytes + item.outBytes),
-  }));
-  const linePath = linePoints
-    .map((point, index) => `${index === 0 ? 'M' : 'L'} ${point.x.toFixed(1)} ${point.y.toFixed(1)}`)
-    .join(' ');
-  const areaPath =
-    linePoints.length > 0
-      ? `${linePath} L ${linePoints[linePoints.length - 1].x.toFixed(1)} ${chartPad.top + innerHeight} L ${linePoints[0].x.toFixed(1)} ${chartPad.top + innerHeight} Z`
-      : '';
-  const gradientId = React.useId().replace(/:/g, '');
-  const labelEvery = Math.max(1, Math.ceil(points.length / 8));
-  const dailyUnavailableText = t('traffic_daily_billing_only');
-  const placeholderBars = [0.42, 0.58, 0.36, 0.68, 0.5, 0.74, 0.46, 0.62];
-
-  return (
-    <div>
-      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-        <div className="flex min-w-0 flex-wrap items-center gap-3">
-          <div className="text-sm font-semibold text-(--theme-fg-default)">
-            {t('traffic_trend_chart')}
-          </div>
-          <div className="inline-flex rounded-md border border-(--theme-border-subtle) bg-(--theme-bg-default) p-0.5 dark:border-(--theme-border-default)">
-            {chartModeOptions.map((option) => {
-              const selected = mode === option.mode;
-              const unavailable = option.daily && !dailyAvailable;
-              const button = (
-                <button
-                  type="button"
-                  className={`rounded px-2.5 py-1 text-xs font-semibold transition-colors disabled:cursor-not-allowed ${
-                    selected
-                      ? unavailable
-                        ? 'bg-(--theme-bg-muted) text-(--theme-fg-muted)'
-                        : 'bg-(--theme-bg-accent-emphasis) text-(--theme-fg-on-emphasis)'
-                      : unavailable
-                        ? 'text-(--theme-fg-muted) opacity-60'
-                        : 'text-(--theme-fg-muted) hover:text-(--theme-fg-default)'
-                  }`}
-                  disabled={unavailable}
-                  onClick={() => onModeChange(option.mode)}
-                >
-                  {t(option.label)}
-                </button>
-              );
-              return option.daily ? (
-                <Tooltip
-                  key={option.mode}
-                  content={dailyAvailable ? null : dailyUnavailableText}
-                  className="inline-flex"
-                >
-                  {button}
-                </Tooltip>
-              ) : (
-                <React.Fragment key={option.mode}>{button}</React.Fragment>
-              );
-            })}
-          </div>
-          {dailyUnavailable && (
-            <Tooltip content={dailyUnavailableText} className="inline-flex">
-              <span className="inline-flex size-5 cursor-help items-center justify-center text-(--theme-fg-muted)">
-                <CircleHelp size={14} />
-              </span>
-            </Tooltip>
-          )}
-        </div>
-        <div className="flex flex-wrap items-center gap-3 text-xs text-(--theme-fg-muted)">
-          <span className="inline-flex items-center gap-1.5">
-            <span className="size-2 rounded-full bg-(--theme-fg-accent)" />
-            {t('traffic_in_total')}
-          </span>
-          <span className="inline-flex items-center gap-1.5">
-            <span className="size-2 rounded-full bg-(--theme-fg-warning-strong)" />
-            {t('traffic_out_total')}
-          </span>
-          <span className="inline-flex items-center gap-1.5">
-            <span className="h-0.5 w-4 rounded-full bg-(--theme-fg-default)" />
-            {t('traffic_total_trend')}
-          </span>
-        </div>
-      </div>
-
-      <svg
-        className={`block h-auto w-full ${dailyUnavailable ? 'opacity-60 saturate-0' : ''}`}
-        viewBox={`0 0 ${chartWidth} ${chartHeight}`}
-        role="img"
-        aria-label={t('traffic_trend_chart')}
-      >
-        <defs>
-          <linearGradient id={`${gradientId}-area`} x1="0" x2="0" y1="0" y2="1">
-            <stop offset="0%" stopColor="var(--theme-fg-accent)" stopOpacity="0.2" />
-            <stop offset="100%" stopColor="var(--theme-fg-accent)" stopOpacity="0" />
-          </linearGradient>
-        </defs>
-
-        {axisValues.map((value, index) => {
-          const y = yFor(value);
-          return (
-            <g key={value}>
-              <line
-                x1={chartPad.left}
-                x2={chartWidth - chartPad.right}
-                y1={y}
-                y2={y}
-                stroke="var(--theme-border-subtle)"
-                strokeDasharray="4 6"
-              />
-              <text
-                x={chartPad.left - chartAxisLabelGap}
-                y={y + 4}
-                textAnchor="end"
-                className="fill-(--theme-fg-muted) text-[11px] font-medium"
-              >
-                {axisLabels[index]}
-              </text>
-            </g>
-          );
-        })}
-
-        {areaPath && <path d={areaPath} fill={`url(#${gradientId}-area)`} />}
-
-        {dailyUnavailable && (
-          <g opacity="0.55">
-            {placeholderBars.map((height, index) => {
-              const x = chartPad.left + (innerWidth / placeholderBars.length) * index + 10;
-              const width = Math.max(8, innerWidth / placeholderBars.length - 22);
-              const y = chartPad.top + innerHeight - innerHeight * height;
-              return (
-                <rect
-                  key={index}
-                  x={x}
-                  y={y}
-                  width={width}
-                  height={innerHeight * height}
-                  rx="3"
-                  fill="var(--theme-fg-muted)"
-                  opacity="0.25"
-                />
-              );
-            })}
-            <path
-              d={`M ${chartPad.left + 12} ${chartPad.top + innerHeight * 0.64} C ${chartPad.left + innerWidth * 0.24} ${chartPad.top + innerHeight * 0.5}, ${chartPad.left + innerWidth * 0.38} ${chartPad.top + innerHeight * 0.72}, ${chartPad.left + innerWidth * 0.56} ${chartPad.top + innerHeight * 0.42} S ${chartPad.left + innerWidth * 0.86} ${chartPad.top + innerHeight * 0.34}, ${chartPad.left + innerWidth - 12} ${chartPad.top + innerHeight * 0.48}`}
-              fill="none"
-              stroke="var(--theme-fg-muted)"
-              strokeLinecap="round"
-              strokeWidth="2.25"
-            />
-          </g>
-        )}
-
-        {points.length === 0 && (
-          <text
-            x={chartPad.left + innerWidth / 2}
-            y={chartPad.top + innerHeight / 2}
-            textAnchor="middle"
-            className="fill-(--theme-fg-muted) text-sm font-semibold"
-          >
-            {dailyUnavailable ? dailyUnavailableText : t('traffic_no_data')}
-          </text>
-        )}
-
-        {points.map((item, index) => {
-          const x = xFor(index);
-          const totalBytes = item.inBytes + item.outBytes;
-          const inHeight = chartPad.top + innerHeight - yFor(item.inBytes);
-          const outHeight = chartPad.top + innerHeight - yFor(item.outBytes);
-          const baseY = chartPad.top + innerHeight;
-          const showLabel = index === 0 || index === points.length - 1 || index % labelEvery === 0;
-          return (
-            <g key={item.key}>
-              <title>{`${item.title}
-${t('total_trans')}: ${formatTrafficBytes(totalBytes)}
-${t('traffic_tooltip_tx')}: ${formatTrafficBytes(item.outBytes)}
-${t('traffic_tooltip_rx')}: ${formatTrafficBytes(item.inBytes)}`}</title>
-              <rect
-                x={x - barWidth - 2}
-                y={baseY - inHeight}
-                width={barWidth}
-                height={Math.max(1, inHeight)}
-                rx="3"
-                fill="var(--theme-fg-accent)"
-                opacity="0.7"
-              />
-              <rect
-                x={x + 2}
-                y={baseY - outHeight}
-                width={barWidth}
-                height={Math.max(1, outHeight)}
-                rx="3"
-                fill="var(--theme-fg-warning-strong)"
-                opacity="0.72"
-              />
-              {showLabel && (
-                <text
-                  x={x}
-                  y={chartHeight - 16}
-                  textAnchor="middle"
-                  className="fill-(--theme-fg-muted) text-[11px] font-semibold"
-                >
-                  {item.label}
-                </text>
-              )}
-            </g>
-          );
-        })}
-
-        {linePath && (
-          <path
-            d={linePath}
-            fill="none"
-            stroke="var(--theme-fg-default)"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            strokeWidth="2.25"
-          />
-        )}
-        {linePoints.map((point) => (
-          <circle
-            key={`${point.x}-${point.y}`}
-            cx={point.x}
-            cy={point.y}
-            r="3"
-            fill="var(--theme-bg-default)"
-            stroke="var(--theme-fg-default)"
-            strokeWidth="1.75"
-          />
-        ))}
-      </svg>
-    </div>
-  );
-};
-
 const Page = () => {
-  useBootstrapAuth();
-  const { t, lang } = useI18n();
-  const { token } = useAuth();
-  const { dialogProps: confirmDialogProps, request: requestConfirm } = useConfirmDialog();
-  const { serverId } = useParams();
-  const numericServerId = serverId ? Number(serverId) : Number.NaN;
-  const isValidServerId = Number.isFinite(numericServerId) && numericServerId > 0;
-  const locale = localeFor(lang);
-
-  const [ifaces, setIfaces] = React.useState<string[]>([]);
-  const [iface, setIface] = React.useState('');
-  const [summary, setSummary] = React.useState<TrafficSummary | null>(null);
-  const [currentDaily, setCurrentDaily] = React.useState<TrafficDaily>({ items: [] });
-  const [previousDaily, setPreviousDaily] = React.useState<TrafficDaily>({ items: [] });
-  const [monthly, setMonthly] = React.useState<TrafficMonthly>({
-    includes_current: true,
-    items: [],
-  });
-  const [ifaceServerId, setIfaceServerId] = React.useState<number | null>(null);
-  const [chartMode, setChartMode] = React.useState<ChartMode>('current_daily');
-  const [loading, setLoading] = React.useState(false);
-  const [errorKey, setErrorKey] = React.useState<TranslationKey | null>(null);
-  const trafficRequestRef = React.useRef(0);
   const {
-    busy: trafficRebuildBusy,
-    nodeRebuildActive: nodeTrafficRebuildActive,
-    actionBusy: trafficRebuildActionBusy,
-    finishedKey: trafficRebuildFinishedKey,
-    start: startTrafficRebuild,
-  } = useTrafficRebuild({
-    nodeId: isValidServerId ? numericServerId : null,
-  });
-  const showTrafficRebuildOutcome = useTrafficRebuildBanner();
-
-  React.useEffect(() => {
-    if (!isValidServerId) return;
-    const controller = new AbortController();
-    setIfaces([]);
-    setIface('');
-    setIfaceServerId(null);
-    fetchTrafficIfaces({ serverId: numericServerId, signal: controller.signal })
-      .then((items) => {
-        const names = items
-          .map((item) => item.name.trim())
-          .filter((name) => name && name.toLowerCase() !== 'all');
-        setIfaces(names);
-        setIfaceServerId(numericServerId);
-        setIface((current) => (current && names.includes(current) ? current : (names[0] ?? '')));
-      })
-      .catch((error) => {
-        if (isAbortError(error)) return;
-        setErrorKey('traffic_error');
-      });
-    return () => controller.abort();
-  }, [isValidServerId, numericServerId]);
-
-  const loadTraffic = React.useCallback(
-    async (signal?: AbortSignal) => {
-      if (!isValidServerId) {
-        trafficRequestRef.current += 1;
-        setLoading(false);
-        return;
-      }
-      if (!iface || ifaceServerId !== numericServerId) {
-        trafficRequestRef.current += 1;
-        setLoading(false);
-        setSummary(null);
-        setCurrentDaily({ items: [] });
-        setPreviousDaily({ items: [] });
-        setMonthly({ includes_current: true, items: [] });
-        return;
-      }
-
-      const requestID = ++trafficRequestRef.current;
-      const isCurrentRequest = () => trafficRequestRef.current === requestID && !signal?.aborted;
-
-      setLoading(true);
-      setErrorKey(null);
-      try {
-        const params = {
-          serverId: numericServerId,
-          iface,
-          signal,
-        };
-        const [nextSummary, nextMonthly] = await Promise.all([
-          fetchTrafficSummary(params),
-          fetchTrafficMonthly({ ...params, months: monthlyHistoryMonths }),
-        ]);
-        let nextCurrentDaily: TrafficDaily = { items: [] };
-        let nextPreviousDaily: TrafficDaily = { items: [] };
-        if (nextSummary.usage_mode === 'billing') {
-          [nextCurrentDaily, nextPreviousDaily] = await Promise.all([
-            fetchTrafficDaily({ ...params, period: 'current' }),
-            fetchTrafficDaily({ ...params, period: 'previous' }),
-          ]);
-        }
-        if (!isCurrentRequest()) return;
-        setSummary(nextSummary);
-        setCurrentDaily(nextCurrentDaily);
-        setPreviousDaily(nextPreviousDaily);
-        setMonthly(nextMonthly);
-      } catch (error) {
-        if (isAbortError(error) || !isCurrentRequest()) return;
-        setSummary(null);
-        setCurrentDaily({ items: [] });
-        setPreviousDaily({ items: [] });
-        setMonthly({ includes_current: true, items: [] });
-        setErrorKey('traffic_error');
-      } finally {
-        if (isCurrentRequest()) {
-          setLoading(false);
-        }
-      }
-    },
-    [iface, ifaceServerId, isValidServerId, numericServerId],
-  );
-
-  React.useEffect(() => {
-    const controller = new AbortController();
-    void loadTraffic(controller.signal);
-    return () => controller.abort();
-  }, [loadTraffic]);
-
-  React.useEffect(() => {
-    if (!trafficRebuildFinishedKey) return;
-    const controller = new AbortController();
-    void loadTraffic(controller.signal);
-    return () => controller.abort();
-  }, [loadTraffic, trafficRebuildFinishedKey]);
-
-  const serverLabel =
-    summary?.server_name?.trim() || (isValidServerId ? `#${numericServerId}` : '');
-  const showP95 = Boolean(summary?.stats.p95_enabled);
-  const showCoverage = summary?.usage_mode === 'billing';
-  const summaryCoverageWarning = Boolean(
-    summary && summary.stats.coverage_ratio < trafficCoverageWarningThreshold,
-  );
-  const rebuildNodeTraffic = React.useCallback(async () => {
-    if (!token || !isValidServerId || trafficRebuildBusy) return;
-
-    const ok = await requestConfirm({
-      title: t('common_confirm'),
-      message: t('admin_confirm_rebuild_node_traffic', { name: serverLabel }),
-      confirmLabel: t('admin_node_traffic_rebuild'),
-      cancelLabel: t('common_cancel'),
-      tone: 'default',
-    });
-    if (!ok) return;
-
-    const outcome = await startTrafficRebuild(numericServerId);
-    showTrafficRebuildOutcome(outcome);
-  }, [
-    isValidServerId,
-    numericServerId,
-    requestConfirm,
-    serverLabel,
-    showTrafficRebuildOutcome,
-    startTrafficRebuild,
     t,
     token,
+    confirmDialogProps,
+    isValidServerId,
+    locale,
+    ifaces,
+    iface,
+    summary,
+    monthly,
+    chartMode,
+    setChartMode,
+    setIface,
+    loading,
+    errorKey,
     trafficRebuildBusy,
-  ]);
-  const directionLabel = summary
-    ? t(`traffic_direction_${summary.direction_mode}` as TranslationKey)
-    : '';
-  const currentDailyPoints = React.useMemo(() => {
-    const timezone = summary?.cycle.timezone || '';
-    return currentDaily.items.map((item) => dailyPointFrom(item, locale, timezone));
-  }, [currentDaily.items, locale, summary?.cycle.timezone]);
-  const previousDailyPoints = React.useMemo(() => {
-    const timezone = summary?.cycle.timezone || '';
-    return previousDaily.items.map((item) => dailyPointFrom(item, locale, timezone));
-  }, [locale, previousDaily.items, summary?.cycle.timezone]);
-  const monthlyPoints = React.useMemo(
-    () =>
-      monthly.items
-        .slice(0, monthlyHistoryMonths)
-        .reverse()
-        .map((item) => monthlyPointFrom(item, locale)),
-    [locale, monthly.items],
-  );
-  const dailyAvailable = summary?.usage_mode === 'billing';
-  const chartPoints =
-    chartMode === 'current_daily'
-      ? currentDailyPoints
-      : chartMode === 'previous_daily'
-        ? previousDailyPoints
-        : monthlyPoints;
-  const chartCoverageStats = React.useMemo(() => {
-    if (!showCoverage) return null;
-    if (chartMode === 'current_daily') {
-      return coverageStatsFrom(currentDaily.items.map((item) => item.stats));
-    }
-    if (chartMode === 'previous_daily') {
-      return coverageStatsFrom(previousDaily.items.map((item) => item.stats));
-    }
-    return coverageStatsFrom(
-      monthly.items.slice(0, monthlyHistoryMonths).map((item) => item.stats),
-    );
-  }, [chartMode, currentDaily.items, monthly.items, previousDaily.items, showCoverage]);
-  const chartCoverageWarning = Boolean(
-    chartCoverageStats && chartCoverageStats.coverageRatio < trafficCoverageWarningThreshold,
-  );
-
-  const statItems = React.useMemo(() => {
-    if (!summary) return [];
-    const stats = summary.stats;
-    return [
-      {
-        key: 'selected',
-        label: t('traffic_selected_total'),
-        value: selectedTrafficText(stats),
-        icon: Network,
-        tone: 'accent' as const,
-        labelEmphasis: true,
-      },
-      ...(stats.p95_enabled
-        ? [
-            {
-              key: 'p95',
-              label: t('traffic_selected_p95'),
-              value: formatOptionalBandwidth(stats.selected_p95_bytes_per_sec),
-              icon: Gauge,
-              tone: 'warning' as const,
-              labelEmphasis: false,
-            },
-          ]
-        : []),
-      {
-        key: 'peak',
-        label: t('traffic_selected_peak'),
-        value: formatBandwidth(stats.selected_peak_bytes_per_sec),
-        icon: Gauge,
-        tone: 'slate' as const,
-        labelEmphasis: false,
-      },
-      ...(showCoverage
-        ? [
-            {
-              key: 'coverage',
-              label: t('traffic_coverage'),
-              value: formatCoverage(stats.coverage_ratio),
-              icon: RefreshCw,
-              tone: summaryCoverageWarning ? ('red' as const) : ('slate' as const),
-              labelEmphasis: false,
-            },
-          ]
-        : []),
-    ];
-  }, [showCoverage, summary, summaryCoverageWarning, t]);
-
-  const currentStatGroups = React.useMemo<CurrentStatGroup[]>(() => {
-    if (!summary) return [];
-    const stats = summary.stats;
-    return [
-      {
-        key: 'out',
-        label: t('traffic_outbound'),
-        tone: currentStatToneFor(summary.direction_mode, stats.selected_bytes_direction, 'out'),
-        items: [
-          {
-            key: 'out_total',
-            label: t('traffic_out_total'),
-            value: formatTrafficBytes(stats.out_bytes),
-          },
-          ...(stats.p95_enabled
-            ? [
-                {
-                  key: 'out_p95',
-                  label: t('traffic_out_p95'),
-                  value: formatOptionalBandwidth(stats.out_p95_bytes_per_sec),
-                },
-              ]
-            : []),
-          {
-            key: 'out_peak',
-            label: t('traffic_out_peak'),
-            value: formatBandwidth(stats.out_peak_bytes_per_sec),
-          },
-        ],
-      },
-      {
-        key: 'in',
-        label: t('traffic_inbound'),
-        tone: currentStatToneFor(summary.direction_mode, stats.selected_bytes_direction, 'in'),
-        items: [
-          {
-            key: 'in_total',
-            label: t('traffic_in_total'),
-            value: formatTrafficBytes(stats.in_bytes),
-          },
-          ...(stats.p95_enabled
-            ? [
-                {
-                  key: 'in_p95',
-                  label: t('traffic_in_p95'),
-                  value: formatOptionalBandwidth(stats.in_p95_bytes_per_sec),
-                },
-              ]
-            : []),
-          {
-            key: 'in_peak',
-            label: t('traffic_in_peak'),
-            value: formatBandwidth(stats.in_peak_bytes_per_sec),
-          },
-        ],
-      },
-    ];
-  }, [summary, t]);
+    trafficRebuildActionBusy,
+    nodeTrafficRebuildActive,
+    serverLabel,
+    directionLabel,
+    showP95,
+    showCoverage,
+    statItems,
+    currentStatGroups,
+    chartPoints,
+    chartCoverageStats,
+    chartCoverageWarning,
+    dailyAvailable,
+    loadTraffic,
+    rebuildNodeTraffic,
+  } = useTrafficPage();
 
   if (!isValidServerId) {
     return (

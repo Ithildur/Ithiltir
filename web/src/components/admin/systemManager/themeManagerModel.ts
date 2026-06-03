@@ -1,5 +1,5 @@
 import type { ThemeManifest } from '@app-types/admin';
-import type { I18nContextValue } from '@i18n';
+import type { I18nValue } from '@i18n';
 
 export type ThemeInfo = ThemeManifest & { broken?: boolean; missing?: boolean };
 export type DefaultThemeOption = ThemeManifest & { active: boolean };
@@ -51,7 +51,7 @@ export const statusBadgeClass = (tone: 'neutral' | 'accent' | 'warning') => {
   return chipClass;
 };
 
-export const themeBadgeLabels = (item: ThemeInfo, t: I18nContextValue['t']): string[] => {
+export const themeBadgeLabels = (item: ThemeInfo, t: I18nValue['t']): string[] => {
   if (item.missing || item.broken) return [];
   return [
     item.skin.admin.shell === 'topbar'

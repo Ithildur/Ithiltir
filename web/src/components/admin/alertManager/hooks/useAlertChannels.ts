@@ -1,18 +1,31 @@
 import React from 'react';
-import { useI18n } from '@i18n';
+import { useI18n, type TranslationKey } from '@i18n';
 import type { AlertChannel } from '@app-types/admin';
-import * as adminApi from '@lib/adminApi';
-import { useTopBanner } from '@components/ui/TopBannerStack';
+import { pushTopBanner } from '@runtime/topBannerRuntime';
 import { useApiErrorHandler } from '@hooks/useApiErrorHandler';
 import type { ConfirmAction } from '@hooks/useConfirmDialog';
+import {
+  deleteAlertChannel,
+  loadAlertChannels,
+  saveAlertChannel,
+  testAlertChannel,
+  updateAlertChannelEnabled,
+  useAlertChannelsStore,
+} from '@stores/alertChannelsStore';
 import {
   channelInputFromForm,
   formFromChannel,
   type AlertChannelForm,
+  type AlertChannelFormIssue,
 } from '@components/admin/alertManager/alertChannelForm';
+import { isActionOk } from '@utils/actionOutcome';
+import { isCanceledRequestError } from '@utils/errors';
 
-const sortChannels = (items: AlertChannel[] | null | undefined): AlertChannel[] =>
-  (items || []).slice().sort((a, b) => a.id - b.id);
+const formIssueKeys = {
+  name: 'admin_alerts_channels_name_required',
+  telegram_api_id: 'admin_alerts_channels_api_id_invalid',
+  email_port: 'admin_alerts_channels_smtp_port_invalid',
+} satisfies Record<AlertChannelFormIssue, TranslationKey>;
 
 export const useAlertChannels = ({
   enabled,
@@ -22,114 +35,119 @@ export const useAlertChannels = ({
   confirmAction: ConfirmAction;
 }) => {
   const { t } = useI18n();
-  const pushBanner = useTopBanner();
   const apiError = useApiErrorHandler();
-  const [channels, setChannels] = React.useState<AlertChannel[]>([]);
-  const [loading, setLoading] = React.useState(false);
-  const [testingId, setTestingId] = React.useState<number | null>(null);
-  const [togglingId, setTogglingId] = React.useState<number | null>(null);
-  const [saving, setSaving] = React.useState(false);
-  const [isModalOpen, setIsModalOpen] = React.useState(false);
-  const [editingChannel, setEditingChannel] = React.useState<AlertChannel | null>(null);
+  const channels = useAlertChannelsStore((state) => state.channels);
+  const loading = useAlertChannelsStore((state) => state.loading);
+  const testingIds = useAlertChannelsStore((state) => state.testingIds);
+  const togglingIds = useAlertChannelsStore((state) => state.togglingIds);
+  const saving = useAlertChannelsStore((state) => state.saving);
+  const [modal, setModal] = React.useState<{ editingChannelId: number | null } | null>(null);
+  const isModalOpen = modal !== null;
+  const editingChannelId = modal?.editingChannelId ?? null;
+  const editingChannel = React.useMemo(
+    () => channels.find((channel) => channel.id === editingChannelId) ?? null,
+    [channels, editingChannelId],
+  );
 
-  const fetchChannels = React.useCallback(async () => {
-    setLoading(true);
-    try {
-      const items = await adminApi.fetchAlertChannels();
-      setChannels(sortChannels(items));
-    } catch (error) {
-      apiError(error, t('admin_alerts_channels_fetch_failed'));
-    } finally {
-      setLoading(false);
-    }
-  }, [apiError, t]);
+  React.useEffect(() => {
+    if (!enabled && isModalOpen && !saving) setModal(null);
+  }, [enabled, isModalOpen, saving]);
+
+  React.useEffect(() => {
+    if (!isModalOpen || editingChannelId === null || editingChannel || loading || saving) return;
+    setModal(null);
+  }, [editingChannel, editingChannelId, isModalOpen, loading, saving]);
+
+  const fetchChannels = React.useCallback(
+    async (params: { signal?: AbortSignal } = {}) => {
+      try {
+        await loadAlertChannels(params);
+      } catch (error) {
+        if (isCanceledRequestError(error)) return;
+        apiError(error, { key: 'admin_alerts_channels_fetch_failed' });
+      }
+    },
+    [apiError],
+  );
 
   React.useEffect(() => {
     if (!enabled) return;
-    void fetchChannels();
+    const controller = new AbortController();
+    void fetchChannels({ signal: controller.signal });
+    return () => {
+      controller.abort();
+    };
   }, [enabled, fetchChannels]);
 
   const openAdd = React.useCallback(() => {
-    setEditingChannel(null);
-    setIsModalOpen(true);
+    setModal({ editingChannelId: null });
   }, []);
 
   const openEdit = React.useCallback((channel: AlertChannel) => {
-    setEditingChannel(channel);
-    setIsModalOpen(true);
+    setModal({ editingChannelId: channel.id });
   }, []);
 
   const closeModal = React.useCallback(() => {
     if (saving) return;
-    setIsModalOpen(false);
-    setEditingChannel(null);
+    setModal(null);
   }, [saving]);
 
   const toggleEnabled = React.useCallback(
     async (channel: AlertChannel) => {
-      if (togglingId === channel.id) return;
       const nextEnabled = !channel.enabled;
       try {
-        setTogglingId(channel.id);
-        await adminApi.updateAlertChannelEnabled(channel.id, { enabled: nextEnabled });
-        setChannels((prev) =>
-          prev.map((item) => (item.id === channel.id ? { ...item, enabled: nextEnabled } : item)),
-        );
+        const updated = await updateAlertChannelEnabled(channel.id, nextEnabled);
+        if (!isActionOk(updated)) return;
       } catch (error) {
         apiError(error, t('admin_alerts_channels_toggle_failed', { name: channel.name }));
-      } finally {
-        setTogglingId(null);
       }
     },
-    [apiError, t, togglingId],
+    [apiError, t],
   );
 
   const testChannel = React.useCallback(
     async (channel: AlertChannel) => {
-      if (testingId === channel.id) return;
       try {
-        setTestingId(channel.id);
-        await adminApi.testAlertChannel(channel.id);
-        pushBanner(t('admin_alerts_channels_test_success'), { tone: 'info' });
+        const tested = await testAlertChannel(channel.id);
+        if (!isActionOk(tested)) return;
+        pushTopBanner(t('admin_alerts_channels_test_success'), { tone: 'info' });
       } catch (error) {
         apiError(error, t('admin_alerts_channels_test_failed'));
-      } finally {
-        setTestingId(null);
       }
     },
-    [apiError, pushBanner, t, testingId],
+    [apiError, t],
   );
 
   const saveChannel = React.useCallback(
     async (input: AlertChannelForm) => {
       if (saving) return;
       const enabled = editingChannel?.enabled ?? true;
-      const channelInput = channelInputFromForm(input, enabled);
+      const result = channelInputFromForm(input, enabled);
+      if (!result.ok) {
+        pushTopBanner(t(formIssueKeys[result.issue]), { tone: 'warning' });
+        return;
+      }
 
       try {
-        setSaving(true);
-        if (editingChannel) {
-          await adminApi.updateAlertChannel(editingChannel.id, channelInput);
-          pushBanner(t('admin_alerts_channels_update_success'), { tone: 'info' });
-        } else {
-          await adminApi.createAlertChannel(channelInput);
-          pushBanner(t('admin_alerts_channels_create_success'), { tone: 'info' });
-        }
-        setIsModalOpen(false);
-        setEditingChannel(null);
-        await fetchChannels();
+        const saved = await saveAlertChannel(editingChannelId, result.input);
+        if (!isActionOk(saved)) return;
+        pushTopBanner(
+          editingChannelId !== null
+            ? t('admin_alerts_channels_update_success')
+            : t('admin_alerts_channels_create_success'),
+          { tone: 'info' },
+        );
+        setModal(null);
       } catch (error) {
         apiError(
           error,
-          editingChannel
+          editingChannelId !== null
             ? t('admin_alerts_channels_update_failed')
             : t('admin_alerts_channels_create_failed'),
         );
-      } finally {
-        setSaving(false);
       }
     },
-    [editingChannel, fetchChannels, apiError, pushBanner, saving, t],
+    [apiError, editingChannel, editingChannelId, saving, t],
   );
 
   const deleteChannel = React.useCallback(
@@ -144,16 +162,16 @@ export const useAlertChannels = ({
         },
         async () => {
           try {
-            await adminApi.deleteAlertChannel(channel.id);
-            pushBanner(t('admin_alerts_channels_delete_success'), { tone: 'info' });
-            await fetchChannels();
+            const deleted = await deleteAlertChannel(channel.id);
+            if (!isActionOk(deleted)) return;
+            pushTopBanner(t('admin_alerts_channels_delete_success'), { tone: 'info' });
           } catch (error) {
             apiError(error, t('admin_alerts_channels_delete_failed'));
           }
         },
       );
     },
-    [confirmAction, fetchChannels, apiError, pushBanner, t],
+    [confirmAction, apiError, t],
   );
 
   const modalForm = React.useMemo(
@@ -164,11 +182,12 @@ export const useAlertChannels = ({
   return {
     channels,
     loading,
-    testingId,
-    togglingId,
+    testingIds,
+    togglingIds,
     saving,
     isModalOpen,
     editingChannel,
+    editingChannelId,
     modalForm,
     openAdd,
     openEdit,

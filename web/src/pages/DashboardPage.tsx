@@ -10,68 +10,86 @@ import Server from 'lucide-react/dist/esm/icons/server';
 import Shield from 'lucide-react/dist/esm/icons/shield';
 import { useI18n } from '@i18n';
 import { useFrontMetricsPolling } from '@pages/dashboard/useFrontMetricsPolling';
-import { fetchFrontGroups } from '@lib/frontApi';
-import { fetchStatisticsAccess } from '@lib/statisticsApi';
-import type { GroupView } from '@app-types/frontMetrics';
-import type { StatisticsAccess } from '@app-types/traffic';
-import { useAuth } from '@context/AuthContext';
-import { useBootstrapAuth } from '@hooks/useBootstrapAuth';
 import { buildServerViewModel, formatBytes } from '@pages/dashboard/viewModel';
+import type { GroupView } from '@app-types/frontMetrics';
 
 import { DraggableFloatingButton } from '@components/ui/DraggableFloatingButton';
 import Card from '@components/ui/Card';
 import GroupFilter from '@components/dashboard/GroupFilter';
 import Header from '@components/dashboard/Header';
 import ServerCard from '@components/dashboard/ServerCard';
-import { useTheme } from '@context/ThemeContext';
+import { useAuthStore } from '@stores/authStore';
+import { ensureStatisticsAccess, useStatisticsAccessStore } from '@stores/statisticsAccessStore';
+import { useThemeStore } from '@stores/themeStore';
+import { fetchFrontGroups } from '@lib/frontApi';
+import { useApiErrorHandler } from '@hooks/useApiErrorHandler';
+import { isCanceledRequestError } from '@utils/errors';
 
 const SUMMARY_CARD_BASE_CLASS =
   'bg-(--theme-bg-default) dark:bg-(--theme-bg-default) border border-(--theme-border-subtle) dark:border-(--theme-border-default) shadow-sm transition-[border-color] duration-200 dark:hover:border-(--theme-fg-accent)/40';
 
 const DashboardPage: React.FC = () => {
-  useBootstrapAuth();
   const { nodes, isLoading } = useFrontMetricsPolling();
   const [searchTerm, setSearchTerm] = React.useState('');
   const [groups, setGroups] = React.useState<GroupView[]>([]);
-  const [statisticsAccess, setStatisticsAccess] = React.useState<StatisticsAccess>({
-    history_guest_access_mode: 'disabled',
-    traffic_guest_access_mode: 'disabled',
-  });
   const [selectedGroupIds, setSelectedGroupIds] = React.useState<number[]>([]);
+  const statisticsAccess = useStatisticsAccessStore((state) => state.load.access);
   const { t } = useI18n();
-  const { isAuthenticated } = useAuth();
-  const {
-    manifest: { skin: theme },
-  } = useTheme();
+  const apiError = useApiErrorHandler();
+  const authStatus = useAuthStore((state) => state.status);
+  const isAuthenticated = useAuthStore(
+    (state) => state.status === 'authenticated' && Boolean(state.accessToken),
+  );
+  const theme = useThemeStore((state) => state.themeManifest.skin);
 
   React.useEffect(() => {
+    if (authStatus === 'unknown' || authStatus === 'bootstrapping') return;
     const controller = new AbortController();
+    let cancelled = false;
 
-    Promise.allSettled([
-      fetchFrontGroups({ signal: controller.signal }),
-      fetchStatisticsAccess({ signal: controller.signal }),
-    ]).then(([groupsResult, accessResult]) => {
-      if (groupsResult.status === 'fulfilled') {
-        setGroups(groupsResult.value);
-      } else if (
-        !(groupsResult.reason instanceof DOMException && groupsResult.reason.name === 'AbortError')
-      ) {
-        console.error('Failed to fetch groups', groupsResult.reason);
-      }
+    fetchFrontGroups({ signal: controller.signal })
+      .then((nextGroups) => {
+        if (!cancelled) {
+          setGroups(nextGroups);
+        }
+      })
+      .catch((error) => {
+        if (isCanceledRequestError(error) || cancelled) return;
+        apiError(error, t('dashboard_groups_fetch_failed'));
+      });
 
-      if (accessResult.status === 'fulfilled') {
-        setStatisticsAccess(accessResult.value);
-      } else if (
-        !(accessResult.reason instanceof DOMException && accessResult.reason.name === 'AbortError')
-      ) {
-        console.error('Failed to fetch statistics access', accessResult.reason);
-      }
+    return () => {
+      cancelled = true;
+      controller.abort();
+    };
+  }, [apiError, authStatus, t]);
+
+  React.useEffect(() => {
+    if (authStatus === 'unknown' || authStatus === 'bootstrapping') return;
+    if (isAuthenticated) return;
+    const controller = new AbortController();
+    void ensureStatisticsAccess({ signal: controller.signal }).catch((error) => {
+      if (isCanceledRequestError(error)) return;
+      apiError(error, t('dashboard_statistics_access_fetch_failed'));
     });
-
     return () => {
       controller.abort();
     };
-  }, []);
+  }, [apiError, authStatus, isAuthenticated, t]);
+
+  const groupIds = React.useMemo(() => groups.map((group) => group.id), [groups]);
+
+  React.useEffect(() => {
+    if (groupIds.length === 0) {
+      setSelectedGroupIds((current) => (current.length === 0 ? current : []));
+      return;
+    }
+    const validIds = new Set(groupIds);
+    setSelectedGroupIds((current) => {
+      const next = current.filter((id) => validIds.has(id));
+      return next.length === current.length ? current : next;
+    });
+  }, [groupIds]);
 
   const groupById = React.useMemo(
     () => new Map(groups.map((group) => [group.id, group])),
@@ -133,9 +151,9 @@ const DashboardPage: React.FC = () => {
   const { alerts, avgCpu, filteredServers, healthyNodes, throughputIn, throughputOut, totalNodes } =
     summary;
   const canOpenHistory =
-    isAuthenticated || statisticsAccess.history_guest_access_mode === 'by_node';
+    isAuthenticated || statisticsAccess?.history_guest_access_mode === 'by_node';
   const canOpenTraffic =
-    isAuthenticated || statisticsAccess.traffic_guest_access_mode === 'by_node';
+    isAuthenticated || statisticsAccess?.traffic_guest_access_mode === 'by_node';
   const compact = theme.dashboard.density === 'compact';
   const summaryStrip = theme.dashboard.summary === 'strip';
   const summaryCardClass = `${SUMMARY_CARD_BASE_CLASS} ${compact ? 'rounded-2xl p-3.5' : 'rounded-xl p-4'}`;

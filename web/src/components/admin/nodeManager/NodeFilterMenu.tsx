@@ -10,19 +10,19 @@ import { useI18n } from '@i18n';
 interface Props {
   groups: Group[];
   selectedGroupIds: number[];
-  updateableOnly: boolean;
+  updatableOnly: boolean;
   showVersionFilter?: boolean;
   onGroupChange: (ids: number[]) => void;
-  onUpdateableOnlyChange: (value: boolean) => void;
+  onUpdatableOnlyChange: (value: boolean) => void;
 }
 
 const NodeFilterMenu: React.FC<Props> = ({
   groups,
   selectedGroupIds,
-  updateableOnly,
+  updatableOnly,
   showVersionFilter = true,
   onGroupChange,
-  onUpdateableOnlyChange,
+  onUpdatableOnlyChange,
 }) => {
   const { t } = useI18n();
   const [isOpen, setIsOpen] = React.useState(false);
@@ -38,7 +38,7 @@ const NodeFilterMenu: React.FC<Props> = ({
     return () => document.removeEventListener('mousedown', closeOnOutside);
   }, []);
 
-  const activeCount = selectedGroupIds.length + (showVersionFilter && updateableOnly ? 1 : 0);
+  const activeCount = selectedGroupIds.length + (showVersionFilter && updatableOnly ? 1 : 0);
 
   const toggleGroup = (id: number) => {
     if (selectedGroupIds.includes(id)) {
@@ -141,15 +141,15 @@ const NodeFilterMenu: React.FC<Props> = ({
                 <button
                   type="button"
                   role="option"
-                  aria-selected={updateableOnly}
-                  onClick={() => onUpdateableOnlyChange(!updateableOnly)}
-                  className={itemClass(updateableOnly)}
+                  aria-selected={updatableOnly}
+                  onClick={() => onUpdatableOnlyChange(!updatableOnly)}
+                  className={itemClass(updatableOnly)}
                 >
-                  <span className={checkboxClass(updateableOnly)} aria-hidden="true">
-                    {updateableOnly && <Check size={14} strokeWidth={3} />}
+                  <span className={checkboxClass(updatableOnly)} aria-hidden="true">
+                    {updatableOnly && <Check size={14} strokeWidth={3} />}
                   </span>
                   <span className="min-w-0 flex-1">
-                    <span className="block truncate">{t('admin_nodes_filter_updateable')}</span>
+                    <span className="block truncate">{t('admin_nodes_filter_updatable')}</span>
                   </span>
                 </button>
               </div>

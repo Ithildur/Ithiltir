@@ -10,20 +10,22 @@ import { Link } from 'react-router-dom';
 import BrandLogo from '@components/BrandLogo';
 import { useI18n } from '@i18n';
 import Button from '@components/ui/Button';
-import Input from '@components/ui/Input';
+import SearchInput from '@components/ui/SearchInput';
 import ThemeToggle from '@components/ui/ThemeToggle';
-import { useAuth } from '@context/AuthContext';
-import { useSiteBrand } from '@context/SiteBrandContext';
+import { logout, useAuthStore } from '@stores/authStore';
+import { useSiteBrandStore } from '@stores/siteBrandStore';
 
 interface Props {
   searchTerm: string;
-  setSearchTerm: React.Dispatch<React.SetStateAction<string>>;
+  setSearchTerm: (searchTerm: string) => void;
 }
 
 const Header: React.FC<Props> = ({ searchTerm, setSearchTerm }) => {
   const { lang, setLang, t } = useI18n();
-  const { isAuthenticated, logout } = useAuth();
-  const { brand } = useSiteBrand();
+  const isAuthenticated = useAuthStore(
+    (state) => state.status === 'authenticated' && Boolean(state.accessToken),
+  );
+  const brand = useSiteBrandStore((state) => state.brand);
   const [isMobileSearchOpen, setIsMobileSearchOpen] = React.useState(false);
   const [isPreferencesOpen, setIsPreferencesOpen] = React.useState(false);
   const preferencesRef = React.useRef<HTMLDivElement>(null);
@@ -53,14 +55,13 @@ const Header: React.FC<Props> = ({ searchTerm, setSearchTerm }) => {
 
         <div className="flex items-center gap-3">
           <div className="hidden md:flex">
-            <Input
+            <SearchInput
               type="text"
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               placeholder={t('search_placeholder')}
               aria-label={t('search_placeholder')}
               icon={Search}
-              data-search-input="true"
               className="py-1.5 w-64 rounded-full bg-(--theme-bg-muted) dark:bg-(--theme-canvas-subtle)"
               wrapperClassName="w-64"
             />
@@ -193,14 +194,13 @@ const Header: React.FC<Props> = ({ searchTerm, setSearchTerm }) => {
               onClick={() => setIsMobileSearchOpen(false)}
             />
             <div className="relative w-full max-w-xs bg-(--theme-bg-default) dark:bg-(--theme-canvas-subtle) border border-(--theme-border-default) dark:border-(--theme-border-default) rounded-full shadow-xl">
-              <Input
+              <SearchInput
                 type="text"
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
                 placeholder={t('search_placeholder')}
                 aria-label={t('search_placeholder')}
                 icon={Search}
-                data-search-input="true"
                 className="py-1.5 rounded-full bg-(--theme-bg-muted) dark:bg-(--theme-bg-default)"
                 wrapperClassName="w-full"
               />

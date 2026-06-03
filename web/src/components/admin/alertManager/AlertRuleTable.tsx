@@ -10,9 +10,9 @@ import { alertMetricName } from './alertLabels';
 interface Props {
   rules: AlertRule[];
   loading: boolean;
-  togglingId: number | null;
+  togglingIds: number[];
   onToggleEnabled: (rule: AlertRule) => void;
-  renamingId: number | null;
+  renamingIds: number[];
   onRename: (rule: AlertRule, nextName: string) => void;
   onEdit: (rule: AlertRule) => void;
   onDelete: (id: number) => void;
@@ -21,9 +21,9 @@ interface Props {
 const AlertRuleTable: React.FC<Props> = ({
   rules,
   loading,
-  togglingId,
+  togglingIds,
   onToggleEnabled,
-  renamingId,
+  renamingIds,
   onRename,
   onEdit,
   onDelete,
@@ -112,7 +112,7 @@ const AlertRuleTable: React.FC<Props> = ({
                       autoFocus
                       enterKeyHint="done"
                       value={draftName}
-                      disabled={renamingId === rule.id}
+                      disabled={renamingIds.includes(rule.id)}
                       onChange={(event) => setDraftName(event.target.value)}
                       onBlur={() => commitName(rule)}
                       onKeyDown={(event) => {
@@ -140,7 +140,7 @@ const AlertRuleTable: React.FC<Props> = ({
                   <IOSSwitch
                     size="sm"
                     checked={rule.enabled}
-                    disabled={togglingId === rule.id}
+                    disabled={togglingIds.includes(rule.id)}
                     onChange={() => onToggleEnabled(rule)}
                   />
                 </td>

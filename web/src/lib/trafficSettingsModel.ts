@@ -1,9 +1,11 @@
 import type {
   NodeTrafficDirectionMode,
   TrafficCycleMode,
+  TrafficDirectionMode,
   TrafficSettings,
 } from '@app-types/traffic';
 import type { NodeTrafficPatch } from '@app-types/api';
+import type { TranslationKey } from '@i18n';
 
 export type { NodeTrafficPatch } from '@app-types/api';
 
@@ -30,7 +32,7 @@ export type TrafficCycleFields = Pick<
   'cycle_mode' | 'billing_start_day' | 'billing_anchor_date' | 'billing_timezone'
 >;
 
-export type TrafficCyclePatch = Pick<TrafficSettings, 'cycle_mode'> &
+export type TrafficCyclePatch = Partial<Pick<TrafficSettings, 'cycle_mode'>> &
   Partial<Pick<TrafficSettings, 'billing_start_day' | 'billing_anchor_date' | 'billing_timezone'>>;
 
 export const trafficCycleModes = [
@@ -41,6 +43,47 @@ export const trafficCycleModes = [
 export const nodeTrafficCycleModes = ['default', ...trafficCycleModes] as const;
 export const trafficDirectionModes = ['out', 'both', 'max'] as const;
 export const nodeTrafficDirectionModes = ['default', ...trafficDirectionModes] as const;
+
+const trafficCycleModeSet = new Set<string>(trafficCycleModes);
+const nodeTrafficCycleModeSet = new Set<string>(nodeTrafficCycleModes);
+const trafficDirectionModeSet = new Set<string>(trafficDirectionModes);
+const nodeTrafficDirectionModeSet = new Set<string>(nodeTrafficDirectionModes);
+
+export const trafficCycleLabelKey: Record<TrafficCycleMode, TranslationKey> = {
+  calendar_month: 'traffic_cycle_calendar_month',
+  whmcs_compatible: 'traffic_cycle_whmcs_compatible',
+  clamp_to_month_end: 'traffic_cycle_clamp_to_month_end',
+};
+
+export const trafficDirectionLabelKey: Record<TrafficDirectionMode, TranslationKey> = {
+  out: 'traffic_direction_out',
+  both: 'traffic_direction_both',
+  max: 'traffic_direction_max',
+};
+
+export const nodeTrafficCycleLabelKey: Record<NodeTrafficCycleMode, TranslationKey> = {
+  default: 'admin_node_cycle_mode_default',
+  ...trafficCycleLabelKey,
+};
+
+export const nodeTrafficDirectionLabelKey: Record<NodeTrafficDirectionMode, TranslationKey> = {
+  default: 'admin_node_direction_mode_default',
+  out: trafficDirectionLabelKey.out,
+  both: trafficDirectionLabelKey.both,
+  max: trafficDirectionLabelKey.max,
+};
+
+export const parseTrafficCycleMode = (value: string): TrafficCycleMode | null =>
+  trafficCycleModeSet.has(value) ? (value as TrafficCycleMode) : null;
+
+export const parseNodeTrafficCycleMode = (value: string): NodeTrafficCycleMode | null =>
+  nodeTrafficCycleModeSet.has(value) ? (value as NodeTrafficCycleMode) : null;
+
+export const parseTrafficDirectionMode = (value: string): TrafficDirectionMode | null =>
+  trafficDirectionModeSet.has(value) ? (value as TrafficDirectionMode) : null;
+
+export const parseNodeTrafficDirectionMode = (value: string): NodeTrafficDirectionMode | null =>
+  nodeTrafficDirectionModeSet.has(value) ? (value as NodeTrafficDirectionMode) : null;
 
 export const defaultTrafficSettings: TrafficSettings = {
   guest_access_mode: 'disabled',
@@ -81,18 +124,32 @@ export const normalizeTrafficCycleFields = (draft: TrafficCycleFields): TrafficC
   billing_timezone: draft.billing_timezone.trim(),
 });
 
-export const trafficCyclePatchFromFields = (draft: TrafficCycleFields): TrafficCyclePatch => {
+export const trafficCyclePatchFromFields = (
+  draft: TrafficCycleFields,
+  saved: TrafficCycleFields,
+): TrafficCyclePatch => {
   const fields = normalizeTrafficCycleFields(draft);
-  return {
-    cycle_mode: fields.cycle_mode,
-    ...(cycleNeedsBillingStartDay(fields.cycle_mode)
-      ? { billing_start_day: fields.billing_start_day }
-      : {}),
-    ...(cycleNeedsAnchorDate(fields.cycle_mode)
-      ? { billing_anchor_date: fields.billing_anchor_date }
-      : {}),
-    ...(cycleNeedsTimezone(fields.cycle_mode) ? { billing_timezone: fields.billing_timezone } : {}),
-  };
+  const base = normalizeTrafficCycleFields(saved);
+  const modeChanged = fields.cycle_mode !== base.cycle_mode;
+  const patch: TrafficCyclePatch = {};
+
+  if (modeChanged) patch.cycle_mode = fields.cycle_mode;
+  if (
+    cycleNeedsBillingStartDay(fields.cycle_mode) &&
+    (modeChanged || fields.billing_start_day !== base.billing_start_day)
+  ) {
+    patch.billing_start_day = fields.billing_start_day;
+  }
+  if (
+    cycleNeedsAnchorDate(fields.cycle_mode) &&
+    (modeChanged || fields.billing_anchor_date !== base.billing_anchor_date)
+  ) {
+    patch.billing_anchor_date = fields.billing_anchor_date;
+  }
+  if (cycleNeedsTimezone(fields.cycle_mode) && fields.billing_timezone !== base.billing_timezone) {
+    patch.billing_timezone = fields.billing_timezone;
+  }
+  return patch;
 };
 
 export const trafficCycleValid = (draft: TrafficCycleFields): boolean =>
@@ -102,14 +159,7 @@ export const trafficCycleChanged = (
   draft: TrafficCycleFields,
   saved: TrafficCycleFields,
 ): boolean => {
-  const left = trafficCyclePatchFromFields(draft);
-  const right = trafficCyclePatchFromFields(saved);
-  return (
-    left.cycle_mode !== right.cycle_mode ||
-    left.billing_start_day !== right.billing_start_day ||
-    left.billing_anchor_date !== right.billing_anchor_date ||
-    left.billing_timezone !== right.billing_timezone
-  );
+  return Object.keys(trafficCyclePatchFromFields(draft, saved)).length > 0;
 };
 
 export const trafficSettingsWithCycleMode = (

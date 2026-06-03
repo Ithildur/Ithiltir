@@ -4,6 +4,7 @@ import BellRing from 'lucide-react/dist/esm/icons/bell-ring';
 import Plus from 'lucide-react/dist/esm/icons/plus';
 import SlidersHorizontal from 'lucide-react/dist/esm/icons/sliders-horizontal';
 import { useI18n } from '@i18n';
+import { AdminSectionTabs } from '@components/admin/AdminSectionTabs';
 import Button from '@components/ui/Button';
 import Card from '@components/ui/Card';
 import ConfirmDialog from '@components/ui/ConfirmDialog';
@@ -17,76 +18,40 @@ import { useAlertMounts } from '@components/admin/alertManager/hooks/useAlertMou
 import { useAlertRules } from '@components/admin/alertManager/hooks/useAlertRules';
 import { useConfirmDialog } from '@hooks/useConfirmDialog';
 
-type SubTab = 'rules' | 'config' | 'channels';
+const tabs = [
+  { key: 'config', labelKey: 'admin_alerts_tab_config', icon: Bell },
+  { key: 'rules', labelKey: 'admin_alerts_tab_rules', icon: SlidersHorizontal },
+  { key: 'channels', labelKey: 'admin_alerts_tab_channels', icon: BellRing },
+] as const;
+
+type AlertManagerTab = (typeof tabs)[number]['key'];
 
 const AlertManager: React.FC = () => {
   const { t } = useI18n();
-  const [activeTab, setActiveTab] = React.useState<SubTab>('config');
-  const confirmDialog = useConfirmDialog();
+  const [activeTab, setActiveTab] = React.useState<AlertManagerTab>('config');
+  const {
+    dialogProps: confirmDialogProps,
+    request: requestConfirm,
+    run: confirmAction,
+  } = useConfirmDialog();
   const rules = useAlertRules({
     enabled: activeTab === 'rules',
-    confirm: confirmDialog.request,
-    confirmAction: confirmDialog.run,
+    confirm: requestConfirm,
+    confirmAction,
   });
   const mounts = useAlertMounts({ enabled: activeTab === 'config' });
   const channels = useAlertChannels({
     enabled: activeTab === 'channels',
-    confirmAction: confirmDialog.run,
+    confirmAction,
   });
 
   return (
     <div className="space-y-4 md:space-y-6">
-      <ConfirmDialog {...confirmDialog.dialogProps} />
+      <ConfirmDialog {...confirmDialogProps} />
 
       <div className="flex flex-col md:flex-row justify-between gap-3 md:gap-4">
         <div className="flex w-full md:w-auto md:flex-1">
-          <div className="flex gap-4 border-b border-(--theme-border-subtle) dark:border-(--theme-border-default)">
-            <button
-              type="button"
-              onClick={() => setActiveTab('config')}
-              aria-current={activeTab === 'config' ? 'page' : undefined}
-              className={`px-1 py-2 text-sm font-semibold border-b-2 -mb-px transition-colors ${
-                activeTab === 'config'
-                  ? 'border-(--theme-border-underline-nav-active) text-(--theme-fg-default)'
-                  : 'border-transparent text-(--theme-fg-muted) dark:text-(--theme-fg-muted) hover:text-(--theme-fg-default) dark:hover:text-(--theme-fg-default)'
-              }`}
-            >
-              <span className="inline-flex items-center gap-2">
-                <Bell className="size-4" aria-hidden="true" />
-                {t('admin_alerts_tab_config')}
-              </span>
-            </button>
-            <button
-              type="button"
-              onClick={() => setActiveTab('rules')}
-              aria-current={activeTab === 'rules' ? 'page' : undefined}
-              className={`px-1 py-2 text-sm font-semibold border-b-2 -mb-px transition-colors ${
-                activeTab === 'rules'
-                  ? 'border-(--theme-border-underline-nav-active) text-(--theme-fg-default)'
-                  : 'border-transparent text-(--theme-fg-muted) dark:text-(--theme-fg-muted) hover:text-(--theme-fg-default) dark:hover:text-(--theme-fg-default)'
-              }`}
-            >
-              <span className="inline-flex items-center gap-2">
-                <SlidersHorizontal className="size-4" aria-hidden="true" />
-                {t('admin_alerts_tab_rules')}
-              </span>
-            </button>
-            <button
-              type="button"
-              onClick={() => setActiveTab('channels')}
-              aria-current={activeTab === 'channels' ? 'page' : undefined}
-              className={`px-1 py-2 text-sm font-semibold border-b-2 -mb-px transition-colors ${
-                activeTab === 'channels'
-                  ? 'border-(--theme-border-underline-nav-active) text-(--theme-fg-default)'
-                  : 'border-transparent text-(--theme-fg-muted) dark:text-(--theme-fg-muted) hover:text-(--theme-fg-default) dark:hover:text-(--theme-fg-default)'
-              }`}
-            >
-              <span className="inline-flex items-center gap-2">
-                <BellRing className="size-4" aria-hidden="true" />
-                {t('admin_alerts_tab_channels')}
-              </span>
-            </button>
-          </div>
+          <AdminSectionTabs tabs={tabs} activeKey={activeTab} onChange={setActiveTab} />
         </div>
 
         {activeTab === 'rules' && (
@@ -127,9 +92,9 @@ const AlertManager: React.FC = () => {
           <AlertRuleTable
             rules={rules.rules}
             loading={rules.loading}
-            togglingId={rules.togglingId}
+            togglingIds={rules.togglingIds}
             onToggleEnabled={rules.toggleEnabled}
-            renamingId={rules.renamingId}
+            renamingIds={rules.renamingIds}
             onRename={rules.rename}
             onEdit={rules.openEdit}
             onDelete={rules.deleteRule}
@@ -139,8 +104,8 @@ const AlertManager: React.FC = () => {
         <AlertChannelsPanel
           channels={channels.channels}
           loading={channels.loading}
-          togglingId={channels.togglingId}
-          testingId={channels.testingId}
+          togglingIds={channels.togglingIds}
+          testingIds={channels.testingIds}
           onToggleEnabled={channels.toggleEnabled}
           onEdit={channels.openEdit}
           onDelete={channels.deleteChannel}
@@ -152,15 +117,17 @@ const AlertManager: React.FC = () => {
         <AlertRuleModal
           isOpen={rules.isModalOpen}
           initialRule={rules.editingRule}
+          saving={rules.saving}
           onClose={rules.closeModal}
+          onSave={rules.saveRule}
           onSuccess={rules.afterSave}
         />
       )}
 
       <AlertChannelModal
         isOpen={channels.isModalOpen}
-        mode={channels.editingChannel ? 'edit' : 'add'}
-        channelId={channels.editingChannel?.id}
+        mode={channels.editingChannelId !== null ? 'edit' : 'add'}
+        channelId={channels.editingChannelId ?? undefined}
         initialForm={channels.modalForm}
         isSaving={channels.saving}
         onClose={channels.closeModal}

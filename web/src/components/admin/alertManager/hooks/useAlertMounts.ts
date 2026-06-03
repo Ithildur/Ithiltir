@@ -1,46 +1,45 @@
 import React from 'react';
 import { useI18n } from '@i18n';
-import type { AlertMounts } from '@app-types/admin';
-import * as adminApi from '@lib/adminApi';
-import { useTopBanner } from '@components/ui/TopBannerStack';
+import { pushTopBanner } from '@runtime/topBannerRuntime';
 import { useApiErrorHandler } from '@hooks/useApiErrorHandler';
+import { loadAlertMounts, setAlertMounts, useAlertMountsStore } from '@stores/alertMountsStore';
+import { isActionOk } from '@utils/actionOutcome';
+import { isCanceledRequestError } from '@utils/errors';
 
 export const useAlertMounts = ({ enabled }: { enabled: boolean }) => {
   const { t } = useI18n();
-  const pushBanner = useTopBanner();
   const apiError = useApiErrorHandler();
-  const [data, setData] = React.useState<AlertMounts>({ rules: [], nodes: [] });
-  const [loading, setLoading] = React.useState(false);
-  const [saving, setSaving] = React.useState(false);
+  const data = useAlertMountsStore((state) => state.data);
+  const loading = useAlertMountsStore((state) => state.loading);
+  const saving = useAlertMountsStore((state) => state.saving);
 
-  const fetchMounts = React.useCallback(async () => {
-    setLoading(true);
-    try {
-      setData(await adminApi.fetchAlertMounts());
-    } catch (error) {
-      apiError(error, t('admin_alerts_mounts_fetch_failed'));
-    } finally {
-      setLoading(false);
-    }
-  }, [apiError, t]);
+  const fetchMounts = React.useCallback(
+    async (params: { signal?: AbortSignal } = {}) => {
+      try {
+        await loadAlertMounts(params);
+      } catch (error) {
+        if (isCanceledRequestError(error)) return;
+        apiError(error, { key: 'admin_alerts_mounts_fetch_failed' });
+      }
+    },
+    [apiError],
+  );
 
   React.useEffect(() => {
     if (!enabled) return;
-    void fetchMounts();
+    const controller = new AbortController();
+    void fetchMounts({ signal: controller.signal });
+    return () => {
+      controller.abort();
+    };
   }, [enabled, fetchMounts]);
 
   const setMounts = React.useCallback(
     async (ruleIds: number[], serverIds: number[], mounted: boolean) => {
-      if (saving || ruleIds.length === 0 || serverIds.length === 0) return false;
       try {
-        setSaving(true);
-        await adminApi.updateAlertMounts({
-          rule_ids: ruleIds,
-          server_ids: serverIds,
-          mounted,
-        });
-        await fetchMounts();
-        pushBanner(
+        const updated = await setAlertMounts(ruleIds, serverIds, mounted);
+        if (!isActionOk(updated)) return false;
+        pushTopBanner(
           mounted
             ? t('admin_alerts_mounts_apply_success')
             : t('admin_alerts_mounts_cancel_success'),
@@ -50,11 +49,9 @@ export const useAlertMounts = ({ enabled }: { enabled: boolean }) => {
       } catch (error) {
         apiError(error, t('admin_alerts_mounts_update_failed'));
         return false;
-      } finally {
-        setSaving(false);
       }
     },
-    [apiError, fetchMounts, pushBanner, saving, t],
+    [apiError, t],
   );
 
   return {

@@ -1,10 +1,10 @@
-import React, { useEffect, useRef, useState, useCallback } from 'react';
+import React from 'react';
 import Laptop from 'lucide-react/dist/esm/icons/laptop';
 import Moon from 'lucide-react/dist/esm/icons/moon';
 import Sun from 'lucide-react/dist/esm/icons/sun';
 import { useI18n } from '@i18n';
-
-type ThemeMode = 'light' | 'dark' | 'system';
+import { useThemeStore } from '@stores/themeStore';
+import type { ThemeMode } from '@app-types/theme';
 
 interface Props {
   className?: string;
@@ -15,31 +15,6 @@ interface Props {
   size?: 'sm' | 'md' | 'icon';
   variant?: 'soft' | 'plain';
 }
-
-const fallbackGetTheme = (): ThemeMode => {
-  try {
-    const raw = globalThis.window?.__theme?.get?.();
-    return raw === 'light' || raw === 'dark' || raw === 'system' ? raw : 'system';
-  } catch {
-    return 'system';
-  }
-};
-
-const fallbackSetTheme = (theme: ThemeMode) => {
-  try {
-    globalThis.window?.__theme?.set?.(theme);
-  } catch {
-    // The inline theme bridge may be unavailable during early boot.
-  }
-};
-
-const fallbackApplyTheme = (theme: ThemeMode) => {
-  try {
-    globalThis.window?.__theme?.apply?.(theme);
-  } catch {
-    // The inline theme bridge may be unavailable during early boot.
-  }
-};
 
 const iconByTheme: Record<ThemeMode, React.ReactNode> = {
   light: <Sun size={16} />,
@@ -57,33 +32,8 @@ const ThemeToggle: React.FC<Props> = ({
   variant = 'soft',
 }) => {
   const { t } = useI18n();
-  const [theme, setThemeState] = useState<ThemeMode>(() => fallbackGetTheme());
-  const unsubscribeSystemRef = useRef<null | (() => void)>(null);
-
-  useEffect(() => {
-    fallbackApplyTheme(theme);
-    fallbackSetTheme(theme);
-
-    unsubscribeSystemRef.current?.();
-    unsubscribeSystemRef.current = null;
-
-    if (theme !== 'system') return;
-
-    const onSystemChange = globalThis.window?.__theme?.onSystemChange;
-    if (!onSystemChange) return;
-
-    const unsubscribe = onSystemChange(() => fallbackApplyTheme('system'));
-    unsubscribeSystemRef.current = unsubscribe;
-
-    return () => {
-      unsubscribeSystemRef.current?.();
-      unsubscribeSystemRef.current = null;
-    };
-  }, [theme]);
-
-  const setTheme = useCallback((newTheme: ThemeMode) => {
-    setThemeState(newTheme);
-  }, []);
+  const theme = useThemeStore((state) => state.themeMode);
+  const setTheme = useThemeStore((state) => state.setThemeMode);
 
   const nextTheme: ThemeMode = React.useMemo(() => {
     if (theme === 'light') return 'dark';

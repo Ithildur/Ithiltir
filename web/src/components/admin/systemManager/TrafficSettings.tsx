@@ -8,7 +8,7 @@ import IOSSwitch from '@components/ui/IOSSwitch';
 import Select from '@components/ui/Select';
 import TimezoneSelect from '@components/ui/TimezoneSelect';
 import SettingRow from '@components/admin/systemManager/SettingRow';
-import { useTopBanner } from '@components/ui/TopBannerStack';
+import { pushTopBanner } from '@runtime/topBannerRuntime';
 import {
   billingDayFromAnchor,
   clampBillingDay,
@@ -19,58 +19,100 @@ import {
   normalizeTrafficCycleFields,
   trafficCycleModes,
   trafficCycleChanged,
+  trafficCycleLabelKey,
   trafficCyclePatchFromFields,
   trafficCycleValid,
   trafficDirectionModes,
+  trafficDirectionLabelKey,
   trafficSettingsWithCycleMode,
+  parseTrafficCycleMode,
+  parseTrafficDirectionMode,
 } from '@lib/trafficSettingsModel';
-import type {
-  TrafficCycleMode,
-  TrafficDirectionMode,
-  TrafficSettings as TrafficSettingsView,
-  TrafficUsageMode,
-} from '@app-types/traffic';
-import { useI18n, type TranslationKey } from '@i18n';
-import { fetchTrafficSettings, updateTrafficSettings } from '@lib/statisticsApi';
+import type { TrafficSettings as TrafficSettingsView, TrafficUsageMode } from '@app-types/traffic';
+import { useI18n } from '@i18n';
 import { useApiErrorHandler } from '@hooks/useApiErrorHandler';
 import { useConfirmDialog } from '@hooks/useConfirmDialog';
+import {
+  loadTrafficSettings,
+  patchTrafficSettings,
+  useTrafficSettingsStore,
+} from '@stores/trafficSettingsStore';
+import { isActionOk } from '@utils/actionOutcome';
+import { isCanceledRequestError } from '@utils/errors';
+
+type TrafficDraftState = {
+  value: TrafficSettingsView;
+  dirty: boolean;
+};
+
+const initialTrafficDraft: TrafficDraftState = {
+  value: defaultTrafficSettings,
+  dirty: false,
+};
+
+const mergeTrafficDraft = (
+  current: TrafficDraftState,
+  settings: TrafficSettingsView,
+): TrafficDraftState => {
+  const value = current.dirty
+    ? {
+        ...current.value,
+        usage_mode: settings.usage_mode,
+        guest_access_mode: settings.guest_access_mode,
+        direction_mode: settings.direction_mode,
+      }
+    : settings;
+
+  return {
+    value,
+    dirty: trafficCycleChanged(value, settings),
+  };
+};
 
 const TrafficSettings: React.FC = () => {
   const { t } = useI18n();
   const apiError = useApiErrorHandler();
-  const pushBanner = useTopBanner();
-  const confirmDialog = useConfirmDialog();
-  const [trafficSettings, setTrafficSettings] =
-    React.useState<TrafficSettingsView>(defaultTrafficSettings);
-  const [draft, setDraft] = React.useState<TrafficSettingsView>(defaultTrafficSettings);
-  const [loading, setLoading] = React.useState(false);
-  const [savingSettings, setSavingSettings] = React.useState(false);
-  const [savingMode, setSavingMode] = React.useState(false);
-  const [savingGuestAccess, setSavingGuestAccess] = React.useState(false);
-  const [savingDirection, setSavingDirection] = React.useState(false);
+  const { dialogProps: confirmDialogProps, request: requestConfirm } = useConfirmDialog();
+  const trafficSettings = useTrafficSettingsStore((state) => state.settings);
+  const loading = useTrafficSettingsStore((state) => state.loading);
+  const savingSettings = useTrafficSettingsStore((state) => state.savingCycle);
+  const savingMode = useTrafficSettingsStore((state) => state.savingUsageMode);
+  const savingGuestAccess = useTrafficSettingsStore((state) => state.savingGuestAccess);
+  const savingDirection = useTrafficSettingsStore((state) => state.savingDirection);
+  const [draftState, setDraftState] = React.useState<TrafficDraftState>(initialTrafficDraft);
+  const draft = draftState.value;
 
-  const load = React.useCallback(async () => {
-    setLoading(true);
-    try {
-      const nextTraffic = await fetchTrafficSettings();
-      setTrafficSettings(nextTraffic);
-      setDraft(nextTraffic);
-    } catch (error) {
-      apiError(error, t('admin_traffic_fetch_failed'));
-    } finally {
-      setLoading(false);
-    }
-  }, [apiError, t]);
+  const load = React.useCallback(
+    async (signal: AbortSignal) => {
+      try {
+        await loadTrafficSettings({ signal });
+      } catch (error) {
+        if (isCanceledRequestError(error)) return;
+        apiError(error, { key: 'admin_traffic_fetch_failed' });
+      }
+    },
+    [apiError],
+  );
 
   React.useEffect(() => {
-    void load();
+    const controller = new AbortController();
+
+    void load(controller.signal);
+
+    return () => {
+      controller.abort();
+    };
   }, [load]);
+
+  React.useEffect(() => {
+    setDraftState((current) => mergeTrafficDraft(current, trafficSettings));
+  }, [trafficSettings]);
 
   const saveUsageMode = React.useCallback(
     async (mode: TrafficUsageMode) => {
       if (mode === trafficSettings.usage_mode || savingMode) return;
       const enableBilling = mode === 'billing';
-      const ok = await confirmDialog.request({
+      const ok = await requestConfirm({
         title: t(
           enableBilling
             ? 'admin_system_traffic_usage_confirm_billing_title'
@@ -91,92 +133,79 @@ const TrafficSettings: React.FC = () => {
       });
       if (!ok) return;
 
-      const previous = trafficSettings.usage_mode;
-      setTrafficSettings((current) => ({ ...current, usage_mode: mode }));
-      setDraft((current) => ({ ...current, usage_mode: mode }));
-      setSavingMode(true);
       try {
-        await updateTrafficSettings({ usage_mode: mode });
-        pushBanner(t('admin_system_settings_saved'), { tone: 'info' });
+        const saved = await patchTrafficSettings({ usage_mode: mode }, { kind: 'usageMode' });
+        if (!isActionOk(saved)) return;
+        pushTopBanner(t('admin_system_settings_saved'), { tone: 'info' });
       } catch (error) {
-        setTrafficSettings((current) => ({ ...current, usage_mode: previous }));
-        setDraft((current) => ({ ...current, usage_mode: previous }));
         apiError(error, t('admin_system_settings_save_failed'));
-      } finally {
-        setSavingMode(false);
       }
     },
-    [apiError, confirmDialog, pushBanner, savingMode, t, trafficSettings.usage_mode],
+    [apiError, requestConfirm, savingMode, t, trafficSettings.usage_mode],
   );
 
   const saveTrafficSettings = React.useCallback(async () => {
     if (savingSettings || !trafficCycleChanged(draft, trafficSettings) || !trafficCycleValid(draft))
       return;
-    setSavingSettings(true);
     try {
       const next = normalizeTrafficCycleFields(draft);
-      await updateTrafficSettings(trafficCyclePatchFromFields(draft));
-      setTrafficSettings((current) => ({ ...current, ...next }));
-      setDraft((current) => ({ ...current, ...next }));
-      pushBanner(t('admin_traffic_settings_saved'), { tone: 'info' });
+      const saved = await patchTrafficSettings(trafficCyclePatchFromFields(draft, trafficSettings), {
+        kind: 'cycle',
+        commit: next,
+      });
+      if (!isActionOk(saved)) return;
+      setDraftState({ value: { ...draft, ...next }, dirty: false });
+      pushTopBanner(t('admin_traffic_settings_saved'), { tone: 'info' });
     } catch (error) {
       apiError(error, { key: 'traffic_settings_save_failed' });
-    } finally {
-      setSavingSettings(false);
     }
-  }, [apiError, draft, pushBanner, savingSettings, t, trafficSettings]);
+  }, [apiError, draft, savingSettings, t, trafficSettings]);
 
   const saveGuestAccess = React.useCallback(async () => {
     if (loading || savingGuestAccess) return;
     const nextMode = draft.guest_access_mode === 'by_node' ? 'disabled' : 'by_node';
-    const previous = trafficSettings.guest_access_mode;
-    setTrafficSettings((current) => ({ ...current, guest_access_mode: nextMode }));
-    setDraft((current) => ({ ...current, guest_access_mode: nextMode }));
-    setSavingGuestAccess(true);
     try {
-      await updateTrafficSettings({ guest_access_mode: nextMode });
-      pushBanner(t('admin_traffic_settings_saved'), { tone: 'info' });
+      const saved = await patchTrafficSettings(
+        { guest_access_mode: nextMode },
+        { kind: 'guestAccess' },
+      );
+      if (!isActionOk(saved)) return;
+      pushTopBanner(t('admin_traffic_settings_saved'), { tone: 'info' });
     } catch (error) {
-      setTrafficSettings((current) => ({ ...current, guest_access_mode: previous }));
-      setDraft((current) => ({ ...current, guest_access_mode: previous }));
       apiError(error, { key: 'traffic_settings_save_failed' });
-    } finally {
-      setSavingGuestAccess(false);
     }
-  }, [
-    apiError,
-    draft.guest_access_mode,
-    loading,
-    pushBanner,
-    savingGuestAccess,
-    t,
-    trafficSettings.guest_access_mode,
-  ]);
+  }, [apiError, draft.guest_access_mode, loading, savingGuestAccess, t]);
 
   const saveDirectionMode = React.useCallback(
-    async (mode: TrafficDirectionMode) => {
+    async (mode: TrafficSettingsView['direction_mode']) => {
       if (loading || savingDirection || mode === trafficSettings.direction_mode) return;
-      const previous = trafficSettings.direction_mode;
-      setTrafficSettings((current) => ({ ...current, direction_mode: mode }));
-      setDraft((current) => ({ ...current, direction_mode: mode }));
-      setSavingDirection(true);
       try {
-        await updateTrafficSettings({ direction_mode: mode });
-        pushBanner(t('admin_traffic_settings_saved'), { tone: 'info' });
+        const saved = await patchTrafficSettings({ direction_mode: mode }, { kind: 'direction' });
+        if (!isActionOk(saved)) return;
+        pushTopBanner(t('admin_traffic_settings_saved'), { tone: 'info' });
       } catch (error) {
-        setTrafficSettings((current) => ({ ...current, direction_mode: previous }));
-        setDraft((current) => ({ ...current, direction_mode: previous }));
         apiError(error, { key: 'traffic_settings_save_failed' });
-      } finally {
-        setSavingDirection(false);
       }
     },
-    [apiError, loading, pushBanner, savingDirection, t, trafficSettings.direction_mode],
+    [apiError, loading, savingDirection, t, trafficSettings.direction_mode],
   );
 
-  const setCycleMode = React.useCallback((mode: TrafficCycleMode) => {
-    setDraft((current) => trafficSettingsWithCycleMode(current, mode));
-  }, []);
+  const updateCycleDraft = React.useCallback(
+    (update: (current: TrafficSettingsView) => TrafficSettingsView) => {
+      setDraftState((current) => ({
+        value: update(current.value),
+        dirty: true,
+      }));
+    },
+    [],
+  );
+
+  const setCycleMode = React.useCallback(
+    (mode: TrafficSettingsView['cycle_mode']) => {
+      updateCycleDraft((current) => trafficSettingsWithCycleMode(current, mode));
+    },
+    [updateCycleDraft],
+  );
 
   const changed = trafficCycleChanged(draft, trafficSettings);
   const cycleValid = trafficCycleValid(draft);
@@ -186,7 +215,7 @@ const TrafficSettings: React.FC = () => {
 
   return (
     <section className="space-y-4">
-      <ConfirmDialog {...confirmDialog.dialogProps} />
+      <ConfirmDialog {...confirmDialogProps} />
 
       <div className="px-1">
         <div className="flex items-center gap-2 text-sm font-semibold text-(--theme-fg-default)">
@@ -227,11 +256,14 @@ const TrafficSettings: React.FC = () => {
             aria-label={t('traffic_direction_mode')}
             width="auto"
             className="min-w-44"
-            onChange={(event) => void saveDirectionMode(event.target.value as TrafficDirectionMode)}
+            onChange={(event) => {
+              const mode = parseTrafficDirectionMode(event.target.value);
+              if (mode) void saveDirectionMode(mode);
+            }}
           >
             {trafficDirectionModes.map((mode) => (
               <option key={mode} value={mode}>
-                {t(`traffic_direction_${mode}` as TranslationKey)}
+                {t(trafficDirectionLabelKey[mode])}
               </option>
             ))}
           </Select>
@@ -266,11 +298,14 @@ const TrafficSettings: React.FC = () => {
                 value={draft.cycle_mode}
                 disabled={loading || savingSettings}
                 aria-label={t('traffic_cycle_mode')}
-                onChange={(event) => setCycleMode(event.target.value as TrafficCycleMode)}
+                onChange={(event) => {
+                  const mode = parseTrafficCycleMode(event.target.value);
+                  if (mode) setCycleMode(mode);
+                }}
               >
                 {trafficCycleModes.map((mode) => (
                   <option key={mode} value={mode}>
-                    {t(`traffic_cycle_${mode}` as TranslationKey)}
+                    {t(trafficCycleLabelKey[mode])}
                   </option>
                 ))}
               </Select>
@@ -290,7 +325,7 @@ const TrafficSettings: React.FC = () => {
                   value={draft.billing_start_day}
                   onChange={(event) => {
                     const next = Number(event.target.value);
-                    setDraft((current) => ({
+                    updateCycleDraft((current) => ({
                       ...current,
                       billing_start_day: Number.isFinite(next)
                         ? clampBillingDay(next)
@@ -312,16 +347,16 @@ const TrafficSettings: React.FC = () => {
                   disabled={loading || savingSettings}
                   aria-label={t('traffic_anchor_date')}
                   value={draft.billing_anchor_date}
-                  onChange={(event) =>
-                    setDraft((current) => ({
+                  onChange={(event) => {
+                    updateCycleDraft((current) => ({
                       ...current,
                       billing_anchor_date: event.target.value,
                       billing_start_day: billingDayFromAnchor(
                         event.target.value,
                         current.billing_start_day,
                       ),
-                    }))
-                  }
+                    }));
+                  }}
                 />
               </label>
             )}
@@ -338,12 +373,12 @@ const TrafficSettings: React.FC = () => {
                   placeholder={t('traffic_billing_timezone_placeholder')}
                   systemLabel={t('traffic_billing_timezone_system')}
                   emptyLabel={t('traffic_billing_timezone_empty')}
-                  onChange={(value) =>
-                    setDraft((current) => ({
+                  onChange={(value) => {
+                    updateCycleDraft((current) => ({
                       ...current,
                       billing_timezone: value,
-                    }))
-                  }
+                    }));
+                  }}
                 />
               </label>
             )}

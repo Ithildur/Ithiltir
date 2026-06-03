@@ -2,34 +2,26 @@ import React from 'react';
 import Globe from 'lucide-react/dist/esm/icons/globe';
 import LayoutDashboard from 'lucide-react/dist/esm/icons/layout-dashboard';
 import LogOut from 'lucide-react/dist/esm/icons/log-out';
-import type { LucideIcon } from 'lucide-react';
 import BrandLogo from '@components/BrandLogo';
 import ThemeToggle from '@components/ui/ThemeToggle';
 import SidebarItem from '@components/admin/SidebarItem';
-import { useAuth } from '@context/AuthContext';
-import { useSiteBrand } from '@context/SiteBrandContext';
-import { useI18n, type TranslationKey } from '@i18n';
-import type { DashboardTab } from '@app-types/admin';
-
-export interface AdminNavItem {
-  key: DashboardTab;
-  labelKey: TranslationKey;
-  icon: LucideIcon;
-  hidden?: boolean;
-}
+import { logout } from '@stores/authStore';
+import { useSiteBrandStore } from '@stores/siteBrandStore';
+import { useI18n } from '@i18n';
+import type { AdminConsoleTab } from '@app-types/admin';
+import type { AdminNavItem } from './adminNav';
 
 interface Props {
   tabs: AdminNavItem[];
-  activeTab: DashboardTab;
-  onTabChange: (tab: DashboardTab) => void;
+  activeTab: AdminConsoleTab;
+  onTabChange: (tab: AdminConsoleTab) => void;
   versionLabel: string;
 }
 
 const AdminSidebar: React.FC<Props> = ({ tabs, activeTab, onTabChange, versionLabel }) => {
   const [isLangMenuOpen, setIsLangMenuOpen] = React.useState(false);
   const langMenuRef = React.useRef<HTMLDivElement | null>(null);
-  const { logout } = useAuth();
-  const { brand } = useSiteBrand();
+  const brand = useSiteBrandStore((state) => state.brand);
   const { lang, setLang, t } = useI18n();
   const visibleTabs = React.useMemo(() => tabs.filter((tab) => !tab.hidden), [tabs]);
   const langOptionClass = (selected: boolean) =>

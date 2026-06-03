@@ -22,9 +22,10 @@ export const fetchTrafficSettings = (params: { signal?: AbortSignal } = {}) =>
   });
 
 export const updateTrafficSettings = (input: Partial<TrafficSettings>) =>
-  apiFetch<void>('/statistics/traffic/settings', {
+  apiFetch('/statistics/traffic/settings', {
     method: 'PATCH',
     json: input,
+    responseType: 'empty',
   });
 
 export const fetchTrafficIfaces = (params: { serverId: number; signal?: AbortSignal }) => {

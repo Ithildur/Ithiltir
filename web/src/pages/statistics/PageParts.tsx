@@ -5,10 +5,8 @@ import RefreshCw from 'lucide-react/dist/esm/icons/refresh-cw';
 import SlidersHorizontal from 'lucide-react/dist/esm/icons/sliders-horizontal';
 import X from 'lucide-react/dist/esm/icons/x';
 import { Link } from 'react-router-dom';
-import type { MetricHistoryAggregation, MetricHistoryRange } from '@app-types/metricsHistory';
 import MetricHistoryChart from '@components/dashboard/MetricHistoryChart';
 import { useI18n } from '@i18n';
-import type { TranslationKey } from '@i18n';
 import Button from '@components/ui/Button';
 import { Modal, ModalBody, ModalHeader } from '@components/ui/Modal';
 import Select from '@components/ui/Select';
@@ -16,6 +14,9 @@ import ThemeToggle from '@components/ui/ThemeToggle';
 import { formatScaledValue, resolveUnitScale } from '@utils/metricFormat';
 import {
   AGGREGATION_OPTIONS,
+  aggregationLabelKey,
+  parseMetricHistoryAggregation,
+  parseMetricHistoryRange,
   RANGE_OPTIONS,
   type MetricConfig,
   type MetricSection,
@@ -241,11 +242,15 @@ export const StatisticsOverviewPanel = ({
           </div>
           <div className="text-sm text-(--theme-fg-default) dark:text-(--theme-fg-default)">
             {serverLabel}
-            {overview.serverMissing && (
+            {overview.serverMissing ? (
               <span className="ml-2 text-xs text-(--theme-fg-danger) dark:text-(--theme-fg-danger)">
                 {t('stats_no_server')}
               </span>
-            )}
+            ) : overview.overviewErrorKey ? (
+              <span className="ml-2 text-xs text-(--theme-fg-danger) dark:text-(--theme-fg-danger)">
+                {t(overview.overviewErrorKey)}
+              </span>
+            ) : null}
           </div>
           <div className="text-xs text-(--theme-fg-subtle) dark:text-(--theme-fg-control-muted) flex flex-col gap-1 sm:flex-row sm:items-center sm:gap-2">
             {overview.stepSec ? <span>{`${t('stats_step')} ${overview.stepSec}s`}</span> : null}
@@ -261,7 +266,10 @@ export const StatisticsOverviewPanel = ({
         <div className="absolute right-0 top-0 w-24 sm:static sm:w-full lg:w-auto">
           <Select
             value={overview.range}
-            onChange={(event) => overview.setRange(event.target.value as MetricHistoryRange)}
+            onChange={(event) => {
+              const range = parseMetricHistoryRange(event.target.value);
+              if (range) overview.setRange(range);
+            }}
             className="h-auto w-full text-xs/4 py-0.5 bg-(--theme-bg-muted) dark:bg-(--theme-bg-default) sm:w-full lg:w-auto"
             aria-label={t('stats_range')}
           >
@@ -494,7 +502,10 @@ export const StatisticsDetailModal = ({ detail }: { detail: DetailState }) => {
               </span>
               <Select
                 value={detail.range}
-                onChange={(event) => detail.setRange(event.target.value as MetricHistoryRange)}
+                onChange={(event) => {
+                  const range = parseMetricHistoryRange(event.target.value);
+                  if (range) detail.setRange(range);
+                }}
                 className="text-xs py-1 bg-(--theme-bg-muted) dark:bg-(--theme-bg-default) min-w-32"
                 aria-label={t('stats_range')}
               >
@@ -512,15 +523,16 @@ export const StatisticsDetailModal = ({ detail }: { detail: DetailState }) => {
               </span>
               <Select
                 value={detail.aggregation}
-                onChange={(event) =>
-                  detail.setAggregation(event.target.value as MetricHistoryAggregation)
-                }
+                onChange={(event) => {
+                  const aggregation = parseMetricHistoryAggregation(event.target.value);
+                  if (aggregation) detail.setAggregation(aggregation);
+                }}
                 className="text-xs py-1 bg-(--theme-bg-muted) dark:bg-(--theme-bg-default) min-w-32"
                 aria-label={t('stats_agg')}
               >
                 {AGGREGATION_OPTIONS.map((option) => (
                   <option key={option} value={option}>
-                    {t(`stats_agg_${option}` as TranslationKey)}
+                    {t(aggregationLabelKey[option])}
                   </option>
                 ))}
               </Select>

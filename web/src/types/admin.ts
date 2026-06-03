@@ -2,7 +2,7 @@ import type { NodeVersion } from './api';
 import type { SiteBrand } from './site';
 import type { NodeTrafficDirectionMode, TrafficCycleMode } from './traffic';
 
-export type DashboardTab = 'nodes' | 'groups' | 'alerts' | 'system';
+export type AdminConsoleTab = 'nodes' | 'groups' | 'alerts' | 'system';
 
 export type ISODateString = string;
 
@@ -161,12 +161,6 @@ export interface WebhookConfig {
   secret?: string;
 }
 
-export type ChannelConfigInput =
-  | TelegramBotConfig
-  | TelegramMtprotoConfig
-  | EmailConfig
-  | WebhookConfig;
-
 export interface TelegramBotViewConfig {
   mode?: 'bot';
   chat_id: string;
@@ -193,18 +187,27 @@ export interface WebhookViewConfig {
   url: string;
 }
 
-export type ChannelConfig =
-  | TelegramBotViewConfig
-  | TelegramMtprotoViewConfig
-  | EmailViewConfig
-  | WebhookViewConfig;
-
-export interface AlertChannel {
+interface AlertChannelBase {
   id: number;
   name: string;
-  type: AlertChannelType;
-  config: ChannelConfig;
   enabled: boolean;
   created_at: ISODateString;
   updated_at: ISODateString;
 }
+
+export interface TelegramAlertChannel extends AlertChannelBase {
+  type: 'telegram';
+  config: TelegramBotViewConfig | TelegramMtprotoViewConfig;
+}
+
+export interface EmailAlertChannel extends AlertChannelBase {
+  type: 'email';
+  config: EmailViewConfig;
+}
+
+export interface WebhookAlertChannel extends AlertChannelBase {
+  type: 'webhook';
+  config: WebhookViewConfig;
+}
+
+export type AlertChannel = TelegramAlertChannel | EmailAlertChannel | WebhookAlertChannel;

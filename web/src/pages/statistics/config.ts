@@ -28,6 +28,22 @@ export const RANGE_OPTIONS: MetricHistoryRange[] = ['30m', '1h', '12h', '24h', '
 export const AGGREGATION_OPTIONS: MetricHistoryAggregation[] = ['avg', 'max', 'min', 'last'];
 export const DEFAULT_AGGREGATION: MetricHistoryAggregation = 'avg';
 
+const rangeOptionSet = new Set<string>(RANGE_OPTIONS);
+const aggregationOptionSet = new Set<string>(AGGREGATION_OPTIONS);
+
+export const aggregationLabelKey: Record<MetricHistoryAggregation, TranslationKey> = {
+  avg: 'stats_agg_avg',
+  max: 'stats_agg_max',
+  min: 'stats_agg_min',
+  last: 'stats_agg_last',
+};
+
+export const parseMetricHistoryRange = (value: string): MetricHistoryRange | null =>
+  rangeOptionSet.has(value) ? (value as MetricHistoryRange) : null;
+
+export const parseMetricHistoryAggregation = (value: string): MetricHistoryAggregation | null =>
+  aggregationOptionSet.has(value) ? (value as MetricHistoryAggregation) : null;
+
 export const buildMetricSections = (percentTransform: MetricTransform): MetricSection[] => [
   {
     key: 'cpu',

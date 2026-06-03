@@ -8,13 +8,12 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import BrandLogo from '@components/BrandLogo';
 import Input from '@components/ui/Input';
 import ThemeToggle from '@components/ui/ThemeToggle';
-import { useTopBanner } from '@components/ui/TopBannerStack';
-import { useAuth } from '@context/AuthContext';
-import { useSiteBrand } from '@context/SiteBrandContext';
+import { pushTopBanner } from '@runtime/topBannerRuntime';
+import { login, useAuthStore } from '@stores/authStore';
+import { useSiteBrandStore } from '@stores/siteBrandStore';
 import { ApiError } from '@lib/api';
 import { useI18n } from '@i18n';
-import { useBootstrapAuth } from '@hooks/useBootstrapAuth';
-import { readRememberLogin } from '@lib/authStore';
+import { readLoginPersistence } from '@lib/authSession';
 
 interface Props extends React.ButtonHTMLAttributes<HTMLButtonElement> {
   loading?: boolean;
@@ -82,16 +81,16 @@ const readRedirectState = (state: unknown): LoginRedirectState => {
 const LoginPage: React.FC = () => {
   const [password, setPassword] = useState('');
   const [usernameTrap, setUsernameTrap] = useState('');
-  const [remember, setRemember] = useState(() => readRememberLogin());
+  const [remember, setRemember] = useState(() => readLoginPersistence() === 'persistent');
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
-  useBootstrapAuth();
-  const { login, isAuthenticated } = useAuth();
+  const isAuthenticated = useAuthStore(
+    (state) => state.status === 'authenticated' && Boolean(state.accessToken),
+  );
   const location = useLocation();
   const navigate = useNavigate();
-  const pushBanner = useTopBanner();
   const { t } = useI18n();
-  const { brand } = useSiteBrand();
+  const brand = useSiteBrandStore((state) => state.brand);
   const redirectState = React.useMemo(() => readRedirectState(location.state), [location.state]);
   const redirectTo = redirectState.from ?? '/admin';
   const deniedNoticeKeyRef = React.useRef<string | null>(null);
@@ -106,8 +105,8 @@ const LoginPage: React.FC = () => {
       return;
     }
     deniedNoticeKeyRef.current = noticeKey;
-    pushBanner(t('stats_auth_required'), { tone: 'error', durationMs: 4000 });
-  }, [location.key, pushBanner, redirectState.denied, t]);
+    pushTopBanner(t('stats_auth_required'), { tone: 'error', durationMs: 4000 });
+  }, [location.key, redirectState.denied, t]);
 
   React.useEffect(() => {
     if (isAuthenticated) {
@@ -121,26 +120,26 @@ const LoginPage: React.FC = () => {
       setIsLoading(true);
       try {
         await new Promise((resolve) => window.setTimeout(resolve, 400));
-        pushBanner(t('login_failed'), { tone: 'error' });
+        pushTopBanner(t('login_failed'), { tone: 'error' });
       } finally {
         setIsLoading(false);
       }
       return;
     }
     if (!password.trim()) {
-      pushBanner(t('login_password_required'), { tone: 'warning' });
+      pushTopBanner(t('login_password_required'), { tone: 'warning' });
       return;
     }
     setIsLoading(true);
     try {
       await login(password.trim(), remember);
-      pushBanner(t('login_success'), { tone: 'info' });
+      pushTopBanner(t('login_success'), { tone: 'info' });
       navigate(redirectTo, { replace: true });
     } catch (error) {
       if (error instanceof ApiError) {
-        pushBanner(error.message || t('login_failed'), { tone: 'error' });
+        pushTopBanner(error.message || t('login_failed'), { tone: 'error' });
       } else {
-        pushBanner(t('login_failed_retry'), { tone: 'error' });
+        pushTopBanner(t('login_failed_retry'), { tone: 'error' });
       }
     } finally {
       setIsLoading(false);

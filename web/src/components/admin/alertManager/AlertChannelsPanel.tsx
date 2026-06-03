@@ -9,30 +9,30 @@ import Webhook from 'lucide-react/dist/esm/icons/webhook';
 import type { LucideIcon } from 'lucide-react';
 import Badge from '@components/ui/Badge';
 import Card from '@components/ui/Card';
-import Input from '@components/ui/Input';
 import IOSSwitch from '@components/ui/IOSSwitch';
+import SearchInput from '@components/ui/SearchInput';
 import type { AlertChannel, AlertChannelType } from '@app-types/admin';
 import { useI18n } from '@i18n';
 import { formatTimeAgo } from '@utils/time';
 
-type FilterKey = 'all' | 'active' | 'paused';
-
 interface Props {
   channels: AlertChannel[];
   loading: boolean;
-  togglingId: number | null;
-  testingId: number | null;
+  togglingIds: number[];
+  testingIds: number[];
   onToggleEnabled: (channel: AlertChannel) => void;
   onEdit: (channel: AlertChannel) => void;
   onDelete: (channel: AlertChannel) => void;
   onTest: (channel: AlertChannel) => void;
 }
 
+type AlertChannelFilter = 'all' | 'active' | 'paused';
+
 const AlertChannelsPanel: React.FC<Props> = ({
   channels,
   loading,
-  togglingId,
-  testingId,
+  togglingIds,
+  testingIds,
   onToggleEnabled,
   onEdit,
   onDelete,
@@ -40,7 +40,7 @@ const AlertChannelsPanel: React.FC<Props> = ({
 }) => {
   const { t, lang } = useI18n();
   const [search, setSearch] = React.useState('');
-  const [activeFilter, setActiveFilter] = React.useState<FilterKey>('all');
+  const [activeFilter, setActiveFilter] = React.useState<AlertChannelFilter>('all');
 
   const channelTypeMeta: Record<
     AlertChannelType,
@@ -56,26 +56,25 @@ const AlertChannelsPanel: React.FC<Props> = ({
   const formatSummary = React.useCallback(
     (channel: AlertChannel): string => {
       if (channel.type === 'telegram') {
-        const config = channel.config as { mode?: string; chat_id?: string; phone?: string };
+        const config = channel.config;
         if (config.mode === 'mtproto') {
           return t('admin_alerts_channels_summary_mtproto', {
-            phone: config.phone ?? '-'.toString(),
-            chat: config.chat_id ?? '-'.toString(),
+            phone: config.phone,
+            chat: config.chat_id,
           });
         }
         return t('admin_alerts_channels_summary_bot', {
-          chat: config.chat_id ?? '-'.toString(),
+          chat: config.chat_id,
         });
       }
       if (channel.type === 'email') {
-        const config = channel.config as { from?: string; to?: string[] };
+        const config = channel.config;
         return t('admin_alerts_channels_summary_email', {
-          from: config.from ?? '-',
-          count: String(config.to?.length ?? 0),
+          from: config.from,
+          count: String(config.to.length),
         });
       }
-      const config = channel.config as { url?: string };
-      return t('admin_alerts_channels_summary_webhook', { url: config.url ?? '-' });
+      return t('admin_alerts_channels_summary_webhook', { url: channel.config.url });
     },
     [t],
   );
@@ -92,7 +91,7 @@ const AlertChannelsPanel: React.FC<Props> = ({
     });
   }, [activeFilter, channels, formatSummary, search]);
 
-  const filters: Array<{ key: FilterKey; label: string }> = [
+  const filters: Array<{ key: AlertChannelFilter; label: string }> = [
     { key: 'all', label: t('admin_alerts_channels_filter_all') },
     { key: 'active', label: t('admin_alerts_channels_filter_active') },
     { key: 'paused', label: t('admin_alerts_channels_filter_paused') },
@@ -101,13 +100,12 @@ const AlertChannelsPanel: React.FC<Props> = ({
   return (
     <div className="space-y-4 md:space-y-6">
       <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
-        <Input
+        <SearchInput
           icon={Search}
           placeholder={t('admin_alerts_channels_search_placeholder')}
           aria-label={t('admin_alerts_channels_search_placeholder')}
           value={search}
           onChange={(event) => setSearch(event.target.value)}
-          data-search-input="true"
           wrapperClassName="w-full lg:max-w-md"
         />
         <div className="inline-flex rounded-lg border border-(--theme-border-subtle) dark:border-(--theme-border-default) bg-(--theme-surface-control) dark:bg-(--theme-bg-default) p-1">
@@ -206,7 +204,7 @@ const AlertChannelsPanel: React.FC<Props> = ({
                         <IOSSwitch
                           size="sm"
                           checked={channel.enabled}
-                          disabled={togglingId === channel.id}
+                          disabled={togglingIds.includes(channel.id)}
                           onChange={() => onToggleEnabled(channel)}
                         />
                       </td>
@@ -229,7 +227,7 @@ const AlertChannelsPanel: React.FC<Props> = ({
                             className="p-1.5 text-(--theme-fg-subtle) hover:text-(--theme-fg-interactive) dark:hover:text-(--theme-fg-interactive-hover) hover:bg-(--theme-bg-interactive-hover) dark:hover:bg-(--theme-bg-interactive-hover) rounded transition-colors"
                             aria-label={t('admin_alerts_channels_action_test')}
                             title={t('admin_alerts_channels_action_test')}
-                            disabled={testingId === channel.id}
+                            disabled={testingIds.includes(channel.id)}
                           >
                             <FlaskConical className="size-4.5" />
                           </button>

@@ -1,11 +1,23 @@
 import React from 'react';
 import type { ThemeManifest, ThemePackage } from '@app-types/admin';
 import { useI18n } from '@i18n';
-import * as adminApi from '@lib/adminApi';
-import { defaultThemeManifest, refreshActiveThemeStyles } from '@lib/themePackageRuntime';
-import { useTopBanner } from '@components/ui/TopBannerStack';
+import { pushTopBanner } from '@runtime/topBannerRuntime';
 import { useApiErrorHandler } from '@hooks/useApiErrorHandler';
 import type { ConfirmAction } from '@hooks/useConfirmDialog';
+import * as adminApi from '@lib/adminApi';
+import { defaultThemeManifest, refreshActiveThemeStyles } from '@lib/themePackageRuntime';
+import { isCanceledRequestError } from '@utils/errors';
+import { createSeqGate, runLatestLoad } from '@utils/seqGate';
+
+type ThemeTarget = Pick<ThemeManifest, 'id' | 'name'> & { active: boolean };
+
+type ThemePackageBusy =
+  | { kind: 'idle' }
+  | { kind: 'upload' }
+  | { kind: 'apply'; id: string }
+  | { kind: 'delete'; id: string };
+
+const idleThemePackageBusy: ThemePackageBusy = { kind: 'idle' };
 
 const sortPackages = (items: ThemePackage[]): ThemePackage[] =>
   items.slice().sort((a, b) => {
@@ -18,15 +30,12 @@ const sortPackages = (items: ThemePackage[]): ThemePackage[] =>
     return a.name.localeCompare(b.name);
   });
 
-type BusyState =
-  | { kind: 'idle' }
-  | { kind: 'upload' }
-  | { kind: 'apply'; id: string }
-  | { kind: 'delete'; id: string };
-
-type ThemeTarget = Pick<ThemeManifest, 'id' | 'name'> & { active: boolean };
-
-const idleBusy: BusyState = { kind: 'idle' };
+const fetchThemePackages = async (params: { signal?: AbortSignal } = {}): Promise<ThemePackage[]> =>
+  sortPackages(
+    (await adminApi.fetchThemePackages(params)).filter(
+      (item) => item.id !== defaultThemeManifest.id,
+    ),
+  );
 
 export const useThemePackages = ({
   enabled,
@@ -37,73 +46,89 @@ export const useThemePackages = ({
 }) => {
   const { t } = useI18n();
   const apiError = useApiErrorHandler();
-  const pushBanner = useTopBanner();
   const [packages, setPackages] = React.useState<ThemePackage[]>([]);
   const [loading, setLoading] = React.useState(false);
   const [loaded, setLoaded] = React.useState(false);
-  const [busy, setBusy] = React.useState<BusyState>(idleBusy);
-  const fetchSeqRef = React.useRef(0);
-  const busyKindRef = React.useRef<BusyState['kind']>('idle');
+  const [busy, setBusy] = React.useState<ThemePackageBusy>(idleThemePackageBusy);
+  const busyRef = React.useRef<ThemePackageBusy>(idleThemePackageBusy);
+  const loadGate = React.useMemo(createSeqGate, []);
 
-  React.useEffect(() => {
-    busyKindRef.current = busy.kind;
-  }, [busy.kind]);
-
-  const beginBusy = React.useCallback((next: BusyState): boolean => {
-    if (busyKindRef.current !== 'idle') return false;
-    busyKindRef.current = next.kind;
+  const beginBusy = React.useCallback((next: ThemePackageBusy): boolean => {
+    if (busyRef.current.kind !== 'idle') return false;
+    busyRef.current = next;
     setBusy(next);
     return true;
   }, []);
 
   const endBusy = React.useCallback(() => {
-    busyKindRef.current = 'idle';
-    setBusy(idleBusy);
+    busyRef.current = idleThemePackageBusy;
+    setBusy(idleThemePackageBusy);
   }, []);
 
-  const fetchPackages = React.useCallback(async () => {
-    const seq = fetchSeqRef.current + 1;
-    fetchSeqRef.current = seq;
-    setLoading(true);
-    try {
-      const items = sortPackages(
-        (await adminApi.fetchThemePackages()).filter((item) => item.id !== defaultThemeManifest.id),
+  const loadPackages = React.useCallback(
+    async (params: { signal?: AbortSignal } = {}) => {
+      return runLatestLoad(
+        loadGate,
+        () => fetchThemePackages(params),
+        (nextPackages) => {
+          setPackages(nextPackages);
+          setLoaded(true);
+        },
+        setLoading,
       );
-      if (seq !== fetchSeqRef.current) return;
-      setPackages(items);
-    } catch (error) {
-      if (seq !== fetchSeqRef.current) return;
-      apiError(error, t('admin_theme_fetch_failed'));
-    } finally {
-      if (seq === fetchSeqRef.current) {
-        setLoading(false);
-        setLoaded(true);
+    },
+    [loadGate],
+  );
+
+  const fetchPackages = React.useCallback(
+    async (params: { signal?: AbortSignal } = {}) => {
+      try {
+        await loadPackages(params);
+      } catch (error) {
+        if (isCanceledRequestError(error)) return;
+        apiError(error, { key: 'admin_theme_fetch_failed' });
       }
+    },
+    [apiError, loadPackages],
+  );
+
+  const syncPackages = React.useCallback(async () => {
+    try {
+      await loadPackages();
+    } catch (error) {
+      if (isCanceledRequestError(error)) return;
+      throw error;
     }
-  }, [apiError, t]);
+  }, [loadPackages]);
 
   React.useEffect(() => {
     if (!enabled) return;
-    void fetchPackages();
+    const controller = new AbortController();
+    void fetchPackages({ signal: controller.signal });
+    return () => {
+      controller.abort();
+    };
   }, [enabled, fetchPackages]);
 
   const uploadTheme = React.useCallback(
     async (file: File) => {
       if (!beginBusy({ kind: 'upload' })) return;
       try {
-        const pkg = await adminApi.uploadThemePackage(file);
-        pushBanner(t('admin_theme_upload_success', { name: pkg.name }), { tone: 'info' });
-        if (pkg.active) {
+        const uploaded = await adminApi.uploadThemePackage(file);
+        if (uploaded.active) {
           refreshActiveThemeStyles();
         }
-        await fetchPackages();
+        await syncPackages();
+        pushTopBanner(t('admin_theme_upload_success', { name: uploaded.name }), {
+          tone: 'info',
+        });
       } catch (error) {
         apiError(error, t('admin_theme_upload_failed'));
       } finally {
         endBusy();
       }
     },
-    [apiError, beginBusy, endBusy, fetchPackages, pushBanner, t],
+    [apiError, beginBusy, endBusy, syncPackages, t],
   );
 
   const applyTheme = React.useCallback(
@@ -112,19 +137,20 @@ export const useThemePackages = ({
       try {
         await adminApi.applyThemePackage(target.id);
         refreshActiveThemeStyles();
-        pushBanner(t('admin_theme_apply_success', { name: target.name }), { tone: 'info' });
-        await fetchPackages();
+        await syncPackages();
+        pushTopBanner(t('admin_theme_apply_success', { name: target.name }), { tone: 'info' });
       } catch (error) {
         apiError(error, t('admin_theme_apply_failed'));
       } finally {
         endBusy();
       }
     },
-    [apiError, beginBusy, endBusy, fetchPackages, pushBanner, t],
+    [apiError, beginBusy, endBusy, syncPackages, t],
   );
 
   const deleteTheme = React.useCallback(
     async (pkg: ThemePackage) => {
+      if (busyRef.current.kind !== 'idle') return;
       await confirmAction(
         {
           title: t('common_confirm'),
@@ -137,8 +163,8 @@ export const useThemePackages = ({
           if (!beginBusy({ kind: 'delete', id: pkg.id })) return;
           try {
             await adminApi.deleteThemePackage(pkg.id);
-            pushBanner(t('admin_theme_delete_success', { name: pkg.name }), { tone: 'info' });
-            await fetchPackages();
+            await syncPackages();
+            pushTopBanner(t('admin_theme_delete_success', { name: pkg.name }), { tone: 'info' });
           } catch (error) {
             apiError(error, t('admin_theme_delete_failed'));
           } finally {
@@ -147,7 +173,7 @@ export const useThemePackages = ({
         },
       );
     },
-    [apiError, beginBusy, confirmAction, endBusy, fetchPackages, pushBanner, t],
+    [apiError, beginBusy, confirmAction, endBusy, syncPackages, t],
   );
 
   const isBusy = busy.kind !== 'idle';

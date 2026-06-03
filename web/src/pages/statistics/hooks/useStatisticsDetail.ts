@@ -4,9 +4,10 @@ import type { MetricHistoryAggregation, MetricHistoryRange } from '@app-types/me
 import type { MetricPoint } from '@components/dashboard/MetricHistoryChart';
 import { fetchMetricHistory } from '@lib/metricsHistoryApi';
 import { computeSeriesStats, resolveUnitScale } from '@utils/metricFormat';
+import { isCanceledRequestError } from '@utils/errors';
 import { DEFAULT_AGGREGATION } from '../config';
 import type { MetricConfig } from '../config';
-import { metricPoints, findLatestTimestamp, isAbortError, resolveMetricDevice } from '../viewModel';
+import { metricPoints, findLatestTimestamp, resolveMetricDevice } from '../viewModel';
 
 type UseStatisticsDetailParams = {
   numericServerId: number;
@@ -100,7 +101,7 @@ export const useStatisticsDetail = ({
       setStepSec(response.step_sec);
       setUpdatedAt(findLatestTimestamp(nextSeries));
     } catch (error) {
-      if (isAbortError(error)) {
+      if (isCanceledRequestError(error)) {
         aborted = true;
         return;
       }

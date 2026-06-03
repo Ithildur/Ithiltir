@@ -3,7 +3,7 @@ import Search from 'lucide-react/dist/esm/icons/search';
 import Upload from 'lucide-react/dist/esm/icons/upload';
 import Button from '@components/ui/Button';
 import Card from '@components/ui/Card';
-import Input from '@components/ui/Input';
+import SearchInput from '@components/ui/SearchInput';
 import { useI18n } from '@i18n';
 import type { ConfirmAction } from '@hooks/useConfirmDialog';
 import { useThemePackages } from '@components/admin/systemManager/hooks/useThemePackages';
@@ -61,8 +61,11 @@ const ThemeManager: React.FC<{
     async (event: React.ChangeEvent<HTMLInputElement>) => {
       const file = event.target.files?.[0];
       if (!file) return;
-      await uploadTheme(file);
-      event.target.value = '';
+      try {
+        await uploadTheme(file);
+      } finally {
+        event.target.value = '';
+      }
     },
     [uploadTheme],
   );
@@ -78,13 +81,12 @@ const ThemeManager: React.FC<{
       />
 
       <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-        <Input
+        <SearchInput
           icon={Search}
           placeholder={t('admin_theme_search_placeholder')}
           aria-label={t('admin_theme_search_placeholder')}
           value={search}
           onChange={(event) => setSearch(event.target.value)}
-          data-search-input="true"
           wrapperClassName="w-full lg:max-w-md"
         />
 

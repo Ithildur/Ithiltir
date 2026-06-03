@@ -7,4 +7,4 @@ export { default as AdminTopbar } from './AdminTopbar';
 export { default as AdminMobileMenu } from './AdminMobileMenu';
 export { default as AlertManager } from './alertManager/AlertManager';
 export { default as SystemSettings } from './systemManager/SystemSettings';
-export type { AdminNavItem } from './AdminSidebar';
+export type { AdminNavItem } from './adminNav';

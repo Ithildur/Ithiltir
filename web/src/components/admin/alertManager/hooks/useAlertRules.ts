@@ -1,12 +1,19 @@
 import React from 'react';
 import { useI18n } from '@i18n';
-import type { AlertRule } from '@app-types/admin';
-import * as adminApi from '@lib/adminApi';
-import { useTopBanner } from '@components/ui/TopBannerStack';
+import type { AlertRule, AlertRuleInput } from '@app-types/admin';
+import { pushTopBanner } from '@runtime/topBannerRuntime';
+import { useApiErrorHandler } from '@hooks/useApiErrorHandler';
 import type { ConfirmAction, ConfirmRequest } from '@hooks/useConfirmDialog';
-
-const sortRules = (items: AlertRule[] | null | undefined): AlertRule[] =>
-  (items || []).slice().sort((a, b) => a.id - b.id);
+import {
+  deleteAlertRule,
+  loadAlertRules,
+  renameAlertRule,
+  saveAlertRule,
+  toggleAlertRuleEnabled,
+  useAlertRulesStore,
+} from '@stores/alertRulesStore';
+import { isActionOk } from '@utils/actionOutcome';
+import { isCanceledRequestError } from '@utils/errors';
 
 export const useAlertRules = ({
   enabled,
@@ -18,53 +25,83 @@ export const useAlertRules = ({
   confirmAction: ConfirmAction;
 }) => {
   const { t } = useI18n();
-  const pushBanner = useTopBanner();
-  const [rules, setRules] = React.useState<AlertRule[]>([]);
-  const [loading, setLoading] = React.useState(false);
-  const [isModalOpen, setIsModalOpen] = React.useState(false);
-  const [editingRule, setEditingRule] = React.useState<AlertRule | null>(null);
-  const [togglingId, setTogglingId] = React.useState<number | null>(null);
-  const [renamingId, setRenamingId] = React.useState<number | null>(null);
+  const apiError = useApiErrorHandler();
+  const rules = useAlertRulesStore((state) => state.rules);
+  const loading = useAlertRulesStore((state) => state.loading);
+  const saving = useAlertRulesStore((state) => state.saving);
+  const togglingIds = useAlertRulesStore((state) => state.togglingIds);
+  const renamingIds = useAlertRulesStore((state) => state.renamingIds);
+  const [modal, setModal] = React.useState<{ editingRuleId: number | null } | null>(null);
+  const isModalOpen = modal !== null;
+  const editingRuleId = modal?.editingRuleId ?? null;
+  const editingRule = React.useMemo(
+    () => rules.find((rule) => rule.id === editingRuleId) ?? null,
+    [editingRuleId, rules],
+  );
 
-  const fetchRules = React.useCallback(async () => {
-    setLoading(true);
-    try {
-      const data = await adminApi.fetchAlertRules();
-      setRules(sortRules(data));
-    } catch (error) {
-      console.error('Failed to fetch alert rules', error);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+  React.useEffect(() => {
+    if (!enabled && isModalOpen && !saving) setModal(null);
+  }, [enabled, isModalOpen, saving]);
+
+  React.useEffect(() => {
+    if (!isModalOpen || editingRuleId === null || editingRule || loading || saving) return;
+    setModal(null);
+  }, [editingRule, editingRuleId, isModalOpen, loading, saving]);
+
+  const fetchRules = React.useCallback(
+    async (params: { signal?: AbortSignal } = {}) => {
+      try {
+        await loadAlertRules(params);
+      } catch (error) {
+        if (isCanceledRequestError(error)) return;
+        apiError(error, { key: 'admin_alerts_rules_fetch_failed' });
+      }
+    },
+    [apiError],
+  );
 
   React.useEffect(() => {
     if (!enabled) return;
-    void fetchRules();
+    const controller = new AbortController();
+    void fetchRules({ signal: controller.signal });
+    return () => {
+      controller.abort();
+    };
   }, [enabled, fetchRules]);
 
   const openAdd = React.useCallback(() => {
-    setEditingRule(null);
-    setIsModalOpen(true);
+    setModal({ editingRuleId: null });
   }, []);
 
   const openEdit = React.useCallback((rule: AlertRule) => {
-    setEditingRule(rule);
-    setIsModalOpen(true);
+    setModal({ editingRuleId: rule.id });
   }, []);
 
   const closeModal = React.useCallback(() => {
-    setIsModalOpen(false);
+    setModal(null);
   }, []);
 
   const afterSave = React.useCallback(() => {
-    setIsModalOpen(false);
-    void fetchRules();
-  }, [fetchRules]);
+    setModal(null);
+  }, []);
+
+  const saveRule = React.useCallback(
+    async (id: number | null, input: AlertRuleInput): Promise<boolean> => {
+      try {
+        const saved = await saveAlertRule(id, input);
+        if (!isActionOk(saved)) return false;
+        pushTopBanner(t('admin_alerts_toast_saved'), { tone: 'info' });
+        return true;
+      } catch (error) {
+        apiError(error, t('admin_alerts_toast_save_failed'));
+        return false;
+      }
+    },
+    [apiError, t],
+  );
 
   const toggleEnabled = React.useCallback(
     async (rule: AlertRule) => {
-      if (togglingId === rule.id) return;
       const ok = await confirm({
         title: t('common_confirm'),
         message: rule.enabled
@@ -76,28 +113,23 @@ export const useAlertRules = ({
       });
       if (!ok) return;
       try {
-        setTogglingId(rule.id);
-        await adminApi.updateAlertRule(rule.id, { enabled: !rule.enabled });
-        await fetchRules();
-        pushBanner(
+        const updated = await toggleAlertRuleEnabled(rule.id, !rule.enabled);
+        if (!isActionOk(updated)) return;
+        pushTopBanner(
           !rule.enabled
             ? t('admin_alerts_toast_enabled', { name: rule.name })
             : t('admin_alerts_toast_disabled', { name: rule.name }),
           { tone: 'info' },
         );
       } catch (error) {
-        console.error('Failed to toggle rule enabled', error);
-        pushBanner(t('admin_alerts_toast_toggle_failed', { name: rule.name }), { tone: 'error' });
-      } finally {
-        setTogglingId(null);
+        apiError(error, t('admin_alerts_toast_toggle_failed', { name: rule.name }));
       }
     },
-    [confirm, fetchRules, pushBanner, t, togglingId],
+    [apiError, confirm, t],
   );
 
   const rename = React.useCallback(
     async (rule: AlertRule, nextName: string) => {
-      if (renamingId === rule.id) return;
       const ok = await confirm({
         title: t('common_confirm'),
         message: t('admin_alerts_confirm_rename_rule', { name: rule.name, next: nextName }),
@@ -107,22 +139,14 @@ export const useAlertRules = ({
       });
       if (!ok) return;
       try {
-        setRenamingId(rule.id);
-        await adminApi.updateAlertRule(rule.id, { name: nextName });
-        pushBanner(t('admin_alerts_toast_renamed', { name: nextName }), { tone: 'info' });
+        const updated = await renameAlertRule(rule.id, nextName);
+        if (!isActionOk(updated)) return;
+        pushTopBanner(t('admin_alerts_toast_renamed', { name: nextName }), { tone: 'info' });
       } catch (error) {
-        console.error('Failed to rename rule', error);
-        pushBanner(t('admin_alerts_toast_rename_failed', { name: rule.name }), { tone: 'error' });
-      } finally {
-        try {
-          await fetchRules();
-        } catch (error) {
-          console.error('Failed to refresh rules after rename', error);
-        }
-        setRenamingId(null);
+        apiError(error, t('admin_alerts_toast_rename_failed', { name: rule.name }));
       }
     },
-    [confirm, fetchRules, pushBanner, renamingId, t],
+    [apiError, confirm, t],
   );
 
   const deleteRule = React.useCallback(
@@ -138,32 +162,31 @@ export const useAlertRules = ({
         },
         async () => {
           try {
-            await adminApi.deleteAlertRule(id);
-            await fetchRules();
-            pushBanner(t('admin_alerts_toast_deleted', { name: deletedName }), { tone: 'info' });
+            const deleted = await deleteAlertRule(id);
+            if (!isActionOk(deleted)) return;
+            pushTopBanner(t('admin_alerts_toast_deleted', { name: deletedName }), { tone: 'info' });
           } catch (error) {
-            console.error('Failed to delete rule', error);
-            pushBanner(t('admin_alerts_toast_delete_failed', { name: deletedName }), {
-              tone: 'error',
-            });
+            apiError(error, t('admin_alerts_toast_delete_failed', { name: deletedName }));
           }
         },
       );
     },
-    [confirmAction, fetchRules, pushBanner, rules, t],
+    [apiError, confirmAction, rules, t],
   );
 
   return {
     rules,
     loading,
-    togglingId,
-    renamingId,
+    saving,
+    togglingIds,
+    renamingIds,
     isModalOpen,
     editingRule,
     openAdd,
     openEdit,
     closeModal,
     afterSave,
+    saveRule,
     toggleEnabled,
     rename,
     deleteRule,

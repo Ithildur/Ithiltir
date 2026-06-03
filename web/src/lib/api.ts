@@ -1,5 +1,6 @@
 import type { ErrorResponse } from '@app-types/api';
-import { clearAuthState, getAuthState, getCsrfToken, patchAuthState } from './authStore';
+import type { AuthState } from '@app-types/auth';
+import { getCsrfToken } from './authSession';
 
 const API_BASE = '/api';
 const API_WARNING_HEADER = 'X-Dash-Warning';
@@ -24,11 +25,32 @@ export class ApiError extends Error {
   }
 }
 
+export class ApiAuthStaleError extends Error {
+  constructor() {
+    super('Auth session changed');
+    this.name = 'ApiAuthStaleError';
+  }
+}
+
+export const isApiAuthStaleError = (error: unknown): error is ApiAuthStaleError =>
+  error instanceof ApiAuthStaleError;
+
+export class ApiRuntimeError extends Error {
+  code: string;
+
+  constructor(message: string, code: string) {
+    super(message);
+    this.name = 'ApiRuntimeError';
+    this.code = code;
+  }
+}
+
 export interface ApiRequestOptions extends RequestInit {
   json?: unknown;
   auth?: 'auto' | 'none';
   csrf?: 'auto' | 'none';
   retryOn401?: boolean;
+  responseType?: 'json' | 'text' | 'empty' | 'jsonOrEmpty';
 }
 
 const buildUrl = (path: string): string => {
@@ -72,7 +94,39 @@ type RefreshResponse = {
   csrf_token: string;
 };
 
-let refreshInFlight: Promise<void> | null = null;
+export interface ApiAuthSession {
+  getState: () => AuthState;
+  patch: (patch: Partial<AuthState>) => void;
+  expire: () => void;
+  currentGeneration: () => number;
+  isGenerationCurrent: (generation: number) => boolean;
+}
+
+let authSession: ApiAuthSession | null = null;
+
+export const bindApiAuthSession = (session: ApiAuthSession): void => {
+  authSession = session;
+};
+
+const requireAuthSession = (): ApiAuthSession => {
+  if (!authSession) {
+    throw new ApiRuntimeError('API auth session is not bound', 'api_auth_session_unbound');
+  }
+  return authSession;
+};
+
+const isSafeMethod = (method: string): boolean =>
+  method === 'GET' || method === 'HEAD' || method === 'OPTIONS';
+
+const needsBoundAuthSession = (path: string, method: string): boolean => {
+  if (isAbsoluteUrl(path)) return false;
+  const normalized = normalizePath(path);
+  if (normalized.startsWith('/admin')) return true;
+  if (normalized === '/auth/login') return false;
+  return !isSafeMethod(method);
+};
+
+let refreshInFlight: { generation: number; promise: Promise<void> } | null = null;
 
 const emitApiWarning = (code: string): void => {
   if (typeof window === 'undefined') return;
@@ -92,25 +146,20 @@ const emitApiWarning = (code: string): void => {
 export const refreshSession = async (
   reason: 'bootstrap' | 'retry401' = 'retry401',
 ): Promise<void> => {
-  if (refreshInFlight) return refreshInFlight;
+  const session = requireAuthSession();
+  const generation = session.currentGeneration();
+  if (refreshInFlight?.generation === generation) return refreshInFlight.promise;
 
-  refreshInFlight = (async () => {
+  const promise = (async () => {
     if (reason === 'bootstrap') {
-      const current = getAuthState();
-      if (current.status === 'unknown') {
-        patchAuthState({ status: 'bootstrapping' });
+      const current = session.getState();
+      if (session.isGenerationCurrent(generation) && current.status === 'unknown') {
+        session.patch({ status: 'bootstrapping' });
       }
     }
 
     try {
       const csrfToken = getCsrfToken();
-      if (!csrfToken && import.meta.env.DEV) {
-        // If csrf cookie is scoped to /api (or HttpOnly), document.cookie won't expose it,
-        // and CSRF-protected endpoints like /api/auth/refresh will fail.
-        console.warn(
-          '[auth] Missing CSRF token for /api/auth/refresh. Ensure csrf cookie is readable by JS (not HttpOnly) and scoped to Path=/.',
-        );
-      }
       const headers = new Headers({ Accept: 'application/json' });
       if (csrfToken) headers.set('X-CSRF-Token', csrfToken);
 
@@ -140,31 +189,33 @@ export const refreshSession = async (
         throw new ApiError('Invalid refresh response', 500, 'invalid_refresh_response', parsed);
       }
 
-      patchAuthState({
+      if (!session.isGenerationCurrent(generation)) return;
+      session.patch({
         status: 'authenticated',
         accessToken: data.access_token,
         expiresAt: data.expires_at ?? null,
-        // CSRF is rotated and stored in cookie; avoid caching in memory.
-        csrfToken: null,
       });
     } catch (error) {
+      if (!session.isGenerationCurrent(generation)) return;
       // Only treat refresh 401 as "session is gone" and hard logout.
       if (error instanceof ApiError && error.status === 401) {
-        clearAuthState();
+        session.expire();
       } else if (reason === 'bootstrap') {
         // Avoid getting stuck in "bootstrapping" state on transient errors.
-        patchAuthState({ status: 'guest' });
+        session.patch({ status: 'guest' });
       }
       throw error;
     }
   })().finally(() => {
-    refreshInFlight = null;
+    if (refreshInFlight?.generation === generation) refreshInFlight = null;
   });
 
-  return refreshInFlight;
+  refreshInFlight = { generation, promise };
+  return promise;
 };
 
-const shouldAttemptRefresh = (path: string): boolean => {
+const shouldAttemptRefresh = (path: string, session: ApiAuthSession): boolean => {
+  if (isAbsoluteUrl(path)) return false;
   const normalized = normalizePath(path);
   if (
     normalized === '/auth/login' ||
@@ -172,7 +223,15 @@ const shouldAttemptRefresh = (path: string): boolean => {
     normalized === '/auth/logout'
   )
     return false;
-  return Boolean(getAuthState().accessToken);
+  return Boolean(session.getState().accessToken);
+};
+
+const shouldAttachAuthHeader = (path: string): boolean => {
+  if (isAbsoluteUrl(path)) return false;
+  const normalized = normalizePath(path);
+  return (
+    normalized !== '/auth/login' && normalized !== '/auth/refresh' && normalized !== '/auth/logout'
+  );
 };
 
 const buildCredentials = (path: string, credentials: RequestCredentials | undefined) => {
@@ -180,66 +239,95 @@ const buildCredentials = (path: string, credentials: RequestCredentials | undefi
   return isAbsoluteUrl(path) ? 'same-origin' : 'include';
 };
 
-export const apiFetch = async <T = void>(
+type ApiResponseType = NonNullable<ApiRequestOptions['responseType']>;
+
+interface ApiAuthContext {
+  shouldUseAuth: boolean;
+  session: ApiAuthSession | null;
+  generation?: number;
+}
+
+interface ApiRequestContext {
+  path: string;
+  json: unknown;
+  csrf: ApiRequestOptions['csrf'];
+  headersInit: HeadersInit | undefined;
+  credentials: RequestCredentials | undefined;
+  body: BodyInit | null | undefined;
+  requestInit: RequestInit;
+  session: ApiAuthSession | null;
+}
+
+const resolveAuthContext = (
   path: string,
-  options: ApiRequestOptions = {},
-): Promise<T> => {
-  const {
-    json,
-    auth,
-    csrf,
-    retryOn401,
-    headers: headersInit,
-    credentials,
-    body,
-    ...requestInit
-  } = options;
+  method: string,
+  authMode: NonNullable<ApiRequestOptions['auth']>,
+): ApiAuthContext => {
+  const shouldUseAuth = authMode === 'auto' && !isAbsoluteUrl(path);
+  const session =
+    shouldUseAuth && needsBoundAuthSession(path, method)
+      ? requireAuthSession()
+      : shouldUseAuth
+        ? authSession
+        : null;
 
-  const doFetch = async (): Promise<Response> => {
-    const headers = new Headers(headersInit ?? {});
-    headers.set('Accept', 'application/json');
-
-    if (json !== undefined) {
-      headers.set('Content-Type', 'application/json');
-    }
-
-    const authMode = auth ?? 'auto';
-    if (authMode === 'auto') {
-      const { accessToken } = getAuthState();
-      if (accessToken) headers.set('Authorization', `Bearer ${accessToken}`);
-    }
-
-    const csrfMode = csrf ?? 'auto';
-    if (csrfMode === 'auto') {
-      if (shouldInjectCsrfHeader(path)) {
-        const csrfToken = getCsrfToken();
-        if (csrfToken) headers.set('X-CSRF-Token', csrfToken);
-      }
-    }
-
-    return fetch(buildUrl(path), {
-      ...requestInit,
-      headers,
-      credentials: buildCredentials(path, credentials),
-      body: json !== undefined ? JSON.stringify(json) : body,
-    });
+  return {
+    shouldUseAuth,
+    session,
+    generation: session?.currentGeneration(),
   };
+};
 
-  let response = await doFetch();
+const assertAuthContextCurrent = ({ session, generation }: ApiAuthContext): void => {
+  if (session && generation !== undefined && !session.isGenerationCurrent(generation)) {
+    throw new ApiAuthStaleError();
+  }
+};
 
-  const shouldRetryOn401 = retryOn401 ?? true;
-  if (shouldRetryOn401 && response.status === 401 && shouldAttemptRefresh(path)) {
-    await refreshSession('retry401');
-    response = await doFetch();
+const sendApiRequest = ({
+  path,
+  json,
+  csrf,
+  headersInit,
+  credentials,
+  body,
+  requestInit,
+  session,
+}: ApiRequestContext): Promise<Response> => {
+  const headers = new Headers(headersInit ?? {});
+  headers.set('Accept', 'application/json');
+
+  if (json !== undefined) {
+    headers.set('Content-Type', 'application/json');
   }
 
-  if (response.status === 204) {
-    emitApiWarning(response.headers.get(API_WARNING_HEADER) ?? '');
-    return undefined as T;
+  if (session && shouldAttachAuthHeader(path)) {
+    const { accessToken } = session.getState();
+    if (accessToken) headers.set('Authorization', `Bearer ${accessToken}`);
   }
 
+  const csrfMode = csrf ?? 'auto';
+  if (csrfMode === 'auto' && shouldInjectCsrfHeader(path)) {
+    const csrfToken = getCsrfToken();
+    if (csrfToken) headers.set('X-CSRF-Token', csrfToken);
+  }
+
+  return fetch(buildUrl(path), {
+    ...requestInit,
+    headers,
+    credentials: buildCredentials(path, credentials),
+    body: json !== undefined ? JSON.stringify(json) : body,
+  });
+};
+
+const readApiResponse = async <T>(
+  response: Response,
+  responseType: ApiResponseType,
+  assertCurrent: () => void,
+): Promise<T | string | undefined> => {
   const contentType = response.headers.get('content-type') ?? '';
   const rawText = await response.text();
+  assertCurrent();
 
   if (!response.ok) {
     const parsed = shouldTreatAsJson(contentType)
@@ -251,16 +339,107 @@ export const apiFetch = async <T = void>(
 
   emitApiWarning(response.headers.get(API_WARNING_HEADER) ?? '');
 
-  if (shouldTreatAsJson(contentType)) {
-    try {
-      return parseJsonText(rawText) as T;
-    } catch (error) {
-      throw new ApiError('Invalid JSON response', response.status, 'invalid_json_response', {
-        body: rawText,
-        cause: error instanceof Error ? error.message : String(error),
-      });
-    }
+  if (responseType === 'text') {
+    return rawText;
   }
 
-  return rawText as unknown as T;
+  if (responseType === 'empty') {
+    if (rawText.trim()) {
+      throw new ApiError('Expected empty response', response.status, 'unexpected_response_body', {
+        body: rawText,
+      });
+    }
+    return undefined;
+  }
+
+  if (!rawText.trim()) {
+    if (responseType === 'jsonOrEmpty') return undefined;
+    throw new ApiError('Expected JSON response', response.status, 'empty_response', {
+      status: response.status,
+    });
+  }
+
+  if (!shouldTreatAsJson(contentType)) {
+    throw new ApiError('Expected JSON response', response.status, 'invalid_response_content_type', {
+      contentType,
+      body: rawText,
+    });
+  }
+
+  try {
+    return parseJsonText(rawText) as T;
+  } catch (error) {
+    throw new ApiError('Invalid JSON response', response.status, 'invalid_json_response', {
+      body: rawText,
+      cause: error instanceof Error ? error.message : String(error),
+    });
+  }
 };
+
+export function apiFetch(
+  path: string,
+  options: ApiRequestOptions & { responseType: 'text' },
+): Promise<string>;
+export function apiFetch(
+  path: string,
+  options: ApiRequestOptions & { responseType: 'empty' },
+): Promise<void>;
+export function apiFetch<T>(
+  path: string,
+  options: ApiRequestOptions & { responseType: 'jsonOrEmpty' },
+): Promise<T | undefined>;
+export function apiFetch<T = unknown>(
+  path: string,
+  options?: ApiRequestOptions & { responseType?: 'json' },
+): Promise<T>;
+export async function apiFetch<T = unknown>(
+  path: string,
+  options: ApiRequestOptions = {},
+): Promise<T | string | undefined> {
+  const {
+    json,
+    auth,
+    csrf,
+    retryOn401,
+    responseType = 'json',
+    headers: headersInit,
+    credentials,
+    body,
+    ...requestInit
+  } = options;
+
+  const method = String(requestInit.method ?? 'GET').toUpperCase();
+  const authMode = auth ?? 'auto';
+  const authContext = resolveAuthContext(path, method, authMode);
+  const requestContext: ApiRequestContext = {
+    path,
+    json,
+    csrf,
+    headersInit,
+    credentials,
+    body,
+    requestInit,
+    session: authContext.session,
+  };
+
+  let response = await sendApiRequest(requestContext);
+  assertAuthContextCurrent(authContext);
+
+  const shouldRetryOn401 = retryOn401 ?? true;
+  if (
+    authContext.shouldUseAuth &&
+    shouldRetryOn401 &&
+    response.status === 401 &&
+    authContext.session &&
+    authContext.generation !== undefined &&
+    authContext.session.isGenerationCurrent(authContext.generation) &&
+    shouldAttemptRefresh(path, authContext.session)
+  ) {
+    await refreshSession('retry401');
+    assertAuthContextCurrent(authContext);
+    response = await sendApiRequest(requestContext);
+    assertAuthContextCurrent(authContext);
+  }
+
+  return readApiResponse<T>(response, responseType, () => assertAuthContextCurrent(authContext));
+}

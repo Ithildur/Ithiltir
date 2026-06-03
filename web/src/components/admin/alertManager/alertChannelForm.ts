@@ -1,12 +1,4 @@
-import type {
-  EmailViewConfig,
-  AlertChannel,
-  TelegramBotViewConfig,
-  TelegramMtprotoViewConfig,
-  AlertChannelType,
-  WebhookViewConfig,
-  AlertTelegramMode,
-} from '@app-types/admin';
+import type { AlertChannel, AlertChannelType, AlertTelegramMode } from '@app-types/admin';
 import type { AlertChannelInput } from '@lib/adminApi';
 
 export type AlertChannelFormKind = 'telegram_bot' | 'telegram_mtproto' | 'email' | 'webhook';
@@ -52,6 +44,12 @@ export type AlertChannelForm =
   | EmailChannelForm
   | WebhookChannelForm;
 
+export type AlertChannelFormIssue = 'name' | 'telegram_api_id' | 'email_port';
+
+export type AlertChannelFormResult =
+  | { ok: true; input: AlertChannelInput }
+  | { ok: false; issue: AlertChannelFormIssue };
+
 export interface ChannelDrafts {
   telegram_bot: Omit<TelegramBotChannelForm, 'name'>;
   telegram_mtproto: Omit<TelegramMtprotoChannelForm, 'name'>;
@@ -61,9 +59,12 @@ export interface ChannelDrafts {
 
 export const DEFAULT_CHANNEL_KIND: AlertChannelFormKind = 'telegram_bot';
 
-const toNumber = (value: string): number => {
-  const parsed = Number.parseInt(value, 10);
-  return Number.isNaN(parsed) ? 0 : parsed;
+const parseInteger = (value: string, min: number, max = Number.MAX_SAFE_INTEGER): number | null => {
+  const text = value.trim();
+  if (!/^\d+$/.test(text)) return null;
+  const parsed = Number(text);
+  if (!Number.isSafeInteger(parsed) || parsed < min || parsed > max) return null;
+  return parsed;
 };
 
 const splitRecipients = (value: string): string[] =>
@@ -151,62 +152,81 @@ export const telegramModeFromKind = (kind: AlertChannelFormKind): AlertTelegramM
 export const channelInputFromForm = (
   form: AlertChannelForm,
   enabled: boolean,
-): AlertChannelInput => {
+): AlertChannelFormResult => {
   const name = form.name.trim();
+  if (!name) return { ok: false, issue: 'name' };
 
   if (form.kind === 'telegram_mtproto') {
+    const apiId = parseInteger(form.apiId, 1);
+    if (apiId === null) return { ok: false, issue: 'telegram_api_id' };
+
     return {
-      name,
-      type: 'telegram',
-      enabled,
-      config: {
-        mode: 'mtproto',
-        api_id: toNumber(form.apiId),
-        api_hash: form.apiHash.trim(),
-        phone: form.phoneNumber.trim(),
-        chat_id: form.chatId.trim(),
+      ok: true,
+      input: {
+        name,
+        type: 'telegram',
+        enabled,
+        config: {
+          mode: 'mtproto',
+          api_id: apiId,
+          api_hash: form.apiHash.trim(),
+          phone: form.phoneNumber.trim(),
+          chat_id: form.chatId.trim(),
+        },
       },
     };
   }
 
   if (form.kind === 'telegram_bot') {
     return {
-      name,
-      type: 'telegram',
-      enabled,
-      config: {
-        mode: 'bot',
-        bot_token: form.botToken.trim(),
-        chat_id: form.chatId.trim(),
+      ok: true,
+      input: {
+        name,
+        type: 'telegram',
+        enabled,
+        config: {
+          mode: 'bot',
+          bot_token: form.botToken.trim(),
+          chat_id: form.chatId.trim(),
+        },
       },
     };
   }
 
   if (form.kind === 'email') {
+    const smtpPort = parseInteger(form.emailPort, 1, 65535);
+    if (smtpPort === null) return { ok: false, issue: 'email_port' };
+
     return {
-      name,
-      type: 'email',
-      enabled,
-      config: {
-        smtp_host: form.emailHost.trim(),
-        smtp_port: toNumber(form.emailPort),
-        username: form.emailUsername.trim(),
-        password: form.emailPassword,
-        from: form.emailFrom.trim(),
-        to: splitRecipients(form.emailRecipients),
-        use_tls: form.emailUseTls,
+      ok: true,
+      input: {
+        name,
+        type: 'email',
+        enabled,
+        config: {
+          smtp_host: form.emailHost.trim(),
+          smtp_port: smtpPort,
+          username: form.emailUsername.trim(),
+          password: form.emailPassword,
+          from: form.emailFrom.trim(),
+          to: splitRecipients(form.emailRecipients),
+          use_tls: form.emailUseTls,
+        },
       },
     };
   }
 
   const secret = form.webhookSecret.trim();
   return {
-    name,
-    type: 'webhook',
-    enabled,
-    config: {
-      url: form.webhookUrl.trim(),
-      ...(secret !== '' ? { secret } : {}),
+    ok: true,
+    input: {
+      name,
+      type: 'webhook',
+      enabled,
+      config: {
+        url: form.webhookUrl.trim(),
+        ...(secret !== '' ? { secret } : {}),
+      },
     },
   };
 };
@@ -215,45 +235,45 @@ export const formFromChannel = (channel: AlertChannel): AlertChannelForm => {
   const base = { name: channel.name };
 
   if (channel.type === 'telegram') {
-    const config = channel.config as TelegramBotViewConfig | TelegramMtprotoViewConfig;
+    const config = channel.config;
     if (config.mode === 'mtproto') {
       return {
         ...base,
         kind: 'telegram_mtproto',
-        apiId: String(config.api_id ?? ''),
+        apiId: String(config.api_id),
         apiHash: '',
-        phoneNumber: config.phone ?? '',
-        chatId: config.chat_id ?? '',
+        phoneNumber: config.phone,
+        chatId: config.chat_id,
       };
     }
     return {
       ...base,
       kind: 'telegram_bot',
       botToken: '',
-      chatId: config.chat_id ?? '',
+      chatId: config.chat_id,
     };
   }
 
   if (channel.type === 'email') {
-    const config = channel.config as EmailViewConfig;
+    const config = channel.config;
     return {
       ...base,
       kind: 'email',
-      emailHost: config.smtp_host ?? '',
-      emailPort: config.smtp_port ? String(config.smtp_port) : '',
-      emailUsername: config.username ?? '',
+      emailHost: config.smtp_host,
+      emailPort: String(config.smtp_port),
+      emailUsername: config.username,
       emailPassword: '',
-      emailFrom: config.from ?? '',
-      emailRecipients: config.to?.join(', ') ?? '',
-      emailUseTls: config.use_tls ?? true,
+      emailFrom: config.from,
+      emailRecipients: config.to.join(', '),
+      emailUseTls: config.use_tls,
     };
   }
 
-  const config = channel.config as WebhookViewConfig;
+  const config = channel.config;
   return {
     ...base,
     kind: 'webhook',
-    webhookUrl: config.url ?? '',
+    webhookUrl: config.url,
     webhookSecret: '',
   };
 };

@@ -1,9 +1,9 @@
 import React from 'react';
-import { useAuth } from '@context/AuthContext';
-import { ApiError } from '@lib/api';
+import { logout } from '@stores/authStore';
+import { ApiError, isApiAuthStaleError } from '@lib/api';
 import type { TranslationKey } from '@i18n';
 import { useI18n } from '@i18n';
-import { useTopBanner } from '@components/ui/TopBannerStack';
+import { pushTopBanner } from '@runtime/topBannerRuntime';
 
 export type ApiErrorFallback =
   | string
@@ -28,29 +28,29 @@ const fallbackText = (
 ): string => (typeof fallback === 'string' ? fallback : t(fallback.key, fallback.vars));
 
 export const useApiErrorHandler = (): ApiErrorHandler => {
-  const { logout } = useAuth();
-  const pushBanner = useTopBanner();
   const { t } = useI18n();
-  const currentRef = React.useRef({ logout, pushBanner, t });
+  const currentRef = React.useRef({ t });
 
   React.useEffect(() => {
-    currentRef.current = { logout, pushBanner, t };
-  }, [logout, pushBanner, t]);
+    currentRef.current = { t };
+  }, [t]);
 
   return React.useCallback((error: unknown, fallback: ApiErrorFallback) => {
-    const { logout, pushBanner, t } = currentRef.current;
+    const { t } = currentRef.current;
     const fallbackMessage = fallbackText(t, fallback);
+
+    if (isApiAuthStaleError(error)) return;
 
     if (error instanceof ApiError) {
       if (error.status === 401) {
-        pushBanner(t('auth_session_expired'), { tone: 'warning' });
+        pushTopBanner(t('auth_session_expired'), { tone: 'warning' });
         logout();
         return;
       }
       const key = error.code ? errorKeyByCode[error.code] : undefined;
-      pushBanner(key ? t(key) : error.message || fallbackMessage, { tone: 'error' });
+      pushTopBanner(key ? t(key) : error.message || fallbackMessage, { tone: 'error' });
       return;
     }
-    pushBanner(fallbackMessage, { tone: 'error' });
+    pushTopBanner(fallbackMessage, { tone: 'error' });
   }, []);
 };

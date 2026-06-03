@@ -1,9 +1,8 @@
+import type { PushBanner } from '@app-types/topBanner';
+
 export type ClipboardCopyResult = 'success' | 'https_required' | 'unsupported' | 'failed';
 
-export type BannerPusher = (
-  message: string,
-  options?: { tone?: 'info' | 'warning' | 'error'; durationMs?: number | null },
-) => number;
+export type BannerPusher = PushBanner;
 
 const isIpHostname = (hostname: string): boolean => {
   if (!hostname) return false;

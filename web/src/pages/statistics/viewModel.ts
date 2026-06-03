@@ -97,9 +97,6 @@ export const resolveMetricDevice = (
   return undefined;
 };
 
-export const isAbortError = (error: unknown): boolean =>
-  error instanceof DOMException && error.name === 'AbortError';
-
 const hasTemperature = (value: number | undefined): boolean =>
   typeof value === 'number' && Number.isFinite(value) && value > 0;
 

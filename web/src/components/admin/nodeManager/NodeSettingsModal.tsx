@@ -11,7 +11,7 @@ import Button from '@components/ui/Button';
 import Input from '@components/ui/Input';
 import IOSSwitch from '@components/ui/IOSSwitch';
 import { Modal, ModalHeader, ModalBody, ModalFooter } from '@components/ui/Modal';
-import { useTopBanner } from '@components/ui/TopBannerStack';
+import { pushTopBanner } from '@runtime/topBannerRuntime';
 import { PlatformLogo } from '@components/system/SystemLogo';
 import type { NodeRow } from '@app-types/admin';
 import type { Group, NodeDeploy, NodeDeployPlatform } from '@app-types/api';
@@ -25,13 +25,14 @@ interface Props {
   node: NodeRow;
   groups: Group[];
   deploy?: NodeDeploy | null;
+  saving: boolean;
   onSave: (input: {
     name: string;
     secret: string;
     guestVisible: boolean;
     groupIds: number[];
     tags?: string[];
-  }) => void;
+  }) => Promise<boolean>;
 }
 
 const platforms: { id: NodeDeployPlatform; label: string }[] = [
@@ -58,7 +59,15 @@ const tagDraftsFromList = (tags: string[]): TagDraft[] =>
 const tagListFromDrafts = (drafts: TagDraft[]): string[] =>
   normalizeTags(drafts.map((draft) => draft.value));
 
-const NodeSettingsModal: React.FC<Props> = ({ isOpen, onClose, node, groups, deploy, onSave }) => {
+const NodeSettingsModal: React.FC<Props> = ({
+  isOpen,
+  onClose,
+  node,
+  groups,
+  deploy,
+  saving,
+  onSave,
+}) => {
   const titleId = React.useId();
   const nameId = React.useId();
   const groupsLabelId = React.useId();
@@ -75,7 +84,7 @@ const NodeSettingsModal: React.FC<Props> = ({ isOpen, onClose, node, groups, dep
   const [copied, setCopied] = React.useState(false);
   const tagInputRefs = React.useRef(new Map<string, HTMLInputElement>());
   const pendingTagFocusId = React.useRef<string | null>(null);
-  const pushBanner = useTopBanner();
+  const copiedTimerRef = React.useRef<number | null>(null);
   const { t } = useI18n();
   const installCommand = React.useMemo(() => {
     const prefix = deploy?.scripts?.[activePlatform]?.command_prefix;
@@ -93,6 +102,15 @@ const NodeSettingsModal: React.FC<Props> = ({ isOpen, onClose, node, groups, dep
     setTagsDirty(false);
     pendingTagFocusId.current = null;
   }, [node]);
+
+  React.useEffect(
+    () => () => {
+      if (copiedTimerRef.current !== null) {
+        window.clearTimeout(copiedTimerRef.current);
+      }
+    },
+    [],
+  );
 
   React.useLayoutEffect(() => {
     const id = pendingTagFocusId.current;
@@ -154,7 +172,10 @@ const NodeSettingsModal: React.FC<Props> = ({ isOpen, onClose, node, groups, dep
     setTagDrafts((prev) => prev.filter((draft) => draft.id !== id));
   };
 
-  const save = () => {
+  const save = async () => {
+    if (saving) return;
+    const trimmedName = name.trim();
+    if (!trimmedName) return;
     const input: {
       name: string;
       secret: string;
@@ -162,7 +183,7 @@ const NodeSettingsModal: React.FC<Props> = ({ isOpen, onClose, node, groups, dep
       groupIds: number[];
       tags?: string[];
     } = {
-      name: name.trim() || node.name,
+      name: trimmedName,
       secret: secret.trim(),
       guestVisible,
       groupIds: selectedGroups,
@@ -170,18 +191,17 @@ const NodeSettingsModal: React.FC<Props> = ({ isOpen, onClose, node, groups, dep
     if (tagsDirty) {
       input.tags = tagListFromDrafts(tagDrafts);
     }
-    onSave(input);
-    onClose();
+    if (await onSave(input)) onClose();
   };
 
   const copyCommand = React.useCallback(async () => {
     if (!installCommand) {
-      pushBanner(t('admin_deploy_command_unavailable'), { tone: 'error' });
+      pushTopBanner(t('admin_deploy_command_unavailable'), { tone: 'error' });
       return;
     }
 
     const ok = await copyTextToClipboardWithFeedback(installCommand, {
-      pushBanner,
+      pushBanner: pushTopBanner,
       successMessage: t('admin_deploy_command_copied'),
       httpsRequiredMessage: t('admin_clipboard_https_required'),
       failureMessage: t('admin_copy_failed_manual'),
@@ -189,8 +209,14 @@ const NodeSettingsModal: React.FC<Props> = ({ isOpen, onClose, node, groups, dep
     if (!ok) return;
 
     setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  }, [installCommand, pushBanner, t]);
+    if (copiedTimerRef.current !== null) {
+      window.clearTimeout(copiedTimerRef.current);
+    }
+    copiedTimerRef.current = window.setTimeout(() => {
+      setCopied(false);
+      copiedTimerRef.current = null;
+    }, 2000);
+  }, [installCommand, t]);
 
   const savedTagDrafts = tagDrafts.filter(
     (draft) => draft.kind === 'saved' && !editingTagIds.has(draft.id),
@@ -198,6 +224,7 @@ const NodeSettingsModal: React.FC<Props> = ({ isOpen, onClose, node, groups, dep
   const editableTagDrafts = tagDrafts.filter(
     (draft) => draft.kind === 'new' || editingTagIds.has(draft.id),
   );
+  const canSave = !saving && name.trim() !== '';
 
   if (!isOpen) return null;
 
@@ -380,7 +407,11 @@ const NodeSettingsModal: React.FC<Props> = ({ isOpen, onClose, node, groups, dep
                 </div>
               </div>
             </div>
-            <IOSSwitch checked={guestVisible} onChange={() => setGuestVisible((prev) => !prev)} />
+            <IOSSwitch
+              checked={guestVisible}
+              disabled={saving}
+              onChange={() => setGuestVisible((prev) => !prev)}
+            />
           </div>
         </div>
 
@@ -436,11 +467,11 @@ const NodeSettingsModal: React.FC<Props> = ({ isOpen, onClose, node, groups, dep
       </ModalBody>
 
       <ModalFooter>
-        <Button variant="secondary" onClick={onClose}>
+        <Button variant="secondary" onClick={onClose} disabled={saving}>
           {t('common_cancel')}
         </Button>
-        <Button variant="primary" onClick={save}>
-          {t('common_save_changes')}
+        <Button variant="primary" onClick={() => void save()} disabled={!canSave}>
+          {saving ? t('common_saving') : t('common_save_changes')}
         </Button>
       </ModalFooter>
     </Modal>

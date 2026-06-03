@@ -4,21 +4,20 @@ import LayoutDashboard from 'lucide-react/dist/esm/icons/layout-dashboard';
 import LogOut from 'lucide-react/dist/esm/icons/log-out';
 import ThemeToggle from '@components/ui/ThemeToggle';
 import SidebarItem from '@components/admin/SidebarItem';
-import { useAuth } from '@context/AuthContext';
+import { logout } from '@stores/authStore';
 import { useI18n } from '@i18n';
-import type { AdminNavItem } from '@components/admin/AdminSidebar';
-import type { DashboardTab } from '@app-types/admin';
+import type { AdminConsoleTab } from '@app-types/admin';
+import type { AdminNavItem } from './adminNav';
 
 interface Props {
   isOpen: boolean;
   tabs: AdminNavItem[];
-  activeTab: DashboardTab;
-  onTabChange: (tab: DashboardTab) => void;
+  activeTab: AdminConsoleTab;
+  onTabChange: (tab: AdminConsoleTab) => void;
   onClose: () => void;
 }
 
 const AdminMobileMenu: React.FC<Props> = ({ isOpen, tabs, activeTab, onTabChange, onClose }) => {
-  const { logout } = useAuth();
   const { lang, setLang, t } = useI18n();
   const visibleTabs = React.useMemo(() => tabs.filter((tab) => !tab.hidden), [tabs]);
 

@@ -1,11 +1,49 @@
 import React from 'react';
 import { useI18n } from '@i18n';
 import type { AlertChannelType, AlertTelegramMode } from '@app-types/admin';
-import * as adminApi from '@lib/adminApi';
-import { useTopBanner } from '@components/ui/TopBannerStack';
+import { pushTopBanner } from '@runtime/topBannerRuntime';
 import { useApiErrorHandler } from '@hooks/useApiErrorHandler';
+import {
+  pingAlertMtproto,
+  requestAlertMtprotoCode,
+  submitAlertMtprotoPassword,
+  verifyAlertMtprotoCode,
+} from '@lib/adminApi';
+import { testAlertChannel } from '@stores/alertChannelsStore';
+import { isActionOk } from '@utils/actionOutcome';
 
 type ConnectionStatus = 'unknown' | 'valid' | 'invalid';
+type LoginScope = {
+  key: string;
+  version: number;
+};
+type ActiveLoginScope = LoginScope & {
+  isOpen: boolean;
+};
+
+type PendingLogin = 'request_code' | 'verify_code' | 'submit_password' | 'test';
+
+type LoginState = {
+  connectionStatus: ConnectionStatus;
+  connectionReason: string | null;
+  loginId: string | null;
+  loginTimeout: number | null;
+  loginCode: string;
+  twoFactorPassword: string;
+  passwordRequired: boolean;
+  pending: PendingLogin | null;
+};
+
+const initialLoginState: LoginState = {
+  connectionStatus: 'unknown',
+  connectionReason: null,
+  loginId: null,
+  loginTimeout: null,
+  loginCode: '',
+  twoFactorPassword: '',
+  passwordRequired: false,
+  pending: null,
+};
 
 export const useTelegramMtprotoLogin = ({
   isOpen,
@@ -19,123 +57,195 @@ export const useTelegramMtprotoLogin = ({
   telegramMode: AlertTelegramMode;
 }) => {
   const { t } = useI18n();
-  const pushBanner = useTopBanner();
   const apiError = useApiErrorHandler();
-  const [connectionStatus, setConnectionStatus] = React.useState<ConnectionStatus>('unknown');
-  const [connectionReason, setConnectionReason] = React.useState<string | null>(null);
-  const [loginId, setLoginId] = React.useState<string | null>(null);
-  const [loginTimeout, setLoginTimeout] = React.useState<number | null>(null);
-  const [loginCode, setLoginCode] = React.useState('');
-  const [twoFactorPassword, setTwoFactorPassword] = React.useState('');
-  const [passwordRequired, setPasswordRequired] = React.useState(false);
-  const [isRequestingCode, setIsRequestingCode] = React.useState(false);
-  const [isVerifyingCode, setIsVerifyingCode] = React.useState(false);
-  const [isSubmittingPassword, setIsSubmittingPassword] = React.useState(false);
-  const [isTesting, setIsTesting] = React.useState(false);
+  const [state, setState] = React.useState<LoginState>(initialLoginState);
+  const {
+    connectionStatus,
+    connectionReason,
+    loginId,
+    loginTimeout,
+    loginCode,
+    twoFactorPassword,
+    passwordRequired,
+    pending,
+  } = state;
+  const scopeKey = `${isOpen ? 'open' : 'closed'}:${channelId ?? 'new'}:${channelType}:${telegramMode}`;
+  const activeScopeRef = React.useRef<ActiveLoginScope>({ key: scopeKey, version: 0, isOpen });
+  const pendingRef = React.useRef<PendingLogin | null>(null);
 
-  React.useEffect(() => {
-    if (!isOpen) return;
-    setConnectionStatus('unknown');
-    setConnectionReason(null);
-    setLoginId(null);
-    setLoginTimeout(null);
-    setLoginCode('');
-    setTwoFactorPassword('');
-    setPasswordRequired(false);
-  }, [isOpen]);
+  React.useLayoutEffect(() => {
+    activeScopeRef.current = {
+      key: scopeKey,
+      version:
+        activeScopeRef.current.key === scopeKey
+          ? activeScopeRef.current.version
+          : activeScopeRef.current.version + 1,
+      isOpen,
+    };
+    pendingRef.current = null;
+    setState(initialLoginState);
+  }, [isOpen, scopeKey]);
+
+  const currentScope = React.useCallback((): LoginScope => {
+    const { key, version } = activeScopeRef.current;
+    return { key, version };
+  }, []);
+
+  const isCurrentScope = React.useCallback((scope: LoginScope): boolean => {
+    const current = activeScopeRef.current;
+    return current.isOpen && current.key === scope.key && current.version === scope.version;
+  }, []);
+
+  const beginPending = React.useCallback(
+    (next: PendingLogin): LoginScope | null => {
+      if (pendingRef.current) return null;
+      pendingRef.current = next;
+      setState((current) => (current.pending ? current : { ...current, pending: next }));
+      return currentScope();
+    },
+    [currentScope],
+  );
+
+  const finishPending = React.useCallback(
+    (scope: LoginScope, current: PendingLogin): void => {
+      if (!isCurrentScope(scope)) return;
+      if (pendingRef.current === current) pendingRef.current = null;
+      setState((state) => (state.pending === current ? { ...state, pending: null } : state));
+    },
+    [isCurrentScope],
+  );
 
   const requireChannelId = React.useCallback((): number | null => {
     if (!channelId) {
-      pushBanner(t('admin_alerts_channels_need_save'), { tone: 'warning' });
+      pushTopBanner(t('admin_alerts_channels_need_save'), { tone: 'warning' });
       return null;
     }
     return channelId;
-  }, [channelId, pushBanner, t]);
+  }, [channelId, t]);
+
+  const setLoginCode = React.useCallback((value: string) => {
+    setState((current) => ({ ...current, loginCode: value }));
+  }, []);
+
+  const setTwoFactorPassword = React.useCallback((value: string) => {
+    setState((current) => ({ ...current, twoFactorPassword: value }));
+  }, []);
 
   const requestCode = React.useCallback(async () => {
     const id = requireChannelId();
-    if (!id || isRequestingCode) return;
-    setIsRequestingCode(true);
+    if (!id) return;
+    const scope = beginPending('request_code');
+    if (!scope) return;
     try {
-      const data = await adminApi.requestAlertMtprotoCode(id);
-      setLoginId(data.login_id);
-      setLoginTimeout(data.timeout);
-      setPasswordRequired(false);
-      pushBanner(t('admin_alerts_channels_request_code_success'), { tone: 'info' });
+      const data = await requestAlertMtprotoCode(id);
+      if (!isCurrentScope(scope)) return;
+      setState((current) => ({
+        ...current,
+        loginId: data.login_id,
+        loginTimeout: data.timeout,
+        passwordRequired: false,
+      }));
+      pushTopBanner(t('admin_alerts_channels_request_code_success'), { tone: 'info' });
     } catch (error) {
-      apiError(error, t('admin_alerts_channels_request_code_failed'));
+      if (isCurrentScope(scope)) {
+        apiError(error, t('admin_alerts_channels_request_code_failed'));
+      }
     } finally {
-      setIsRequestingCode(false);
+      finishPending(scope, 'request_code');
     }
-  }, [apiError, isRequestingCode, pushBanner, requireChannelId, t]);
+  }, [apiError, beginPending, finishPending, isCurrentScope, requireChannelId, t]);
 
   const verifyCode = React.useCallback(async () => {
     const code = loginCode.trim();
-    if (!loginId || !code || isVerifyingCode) return;
-    setIsVerifyingCode(true);
+    if (!loginId || !code) return;
+    const scope = beginPending('verify_code');
+    if (!scope) return;
     try {
-      const response = await adminApi.verifyAlertMtprotoCode({
+      const response = await verifyAlertMtprotoCode({
         login_id: loginId,
         code,
       });
-      if (response && 'password_required' in response && response.password_required) {
-        setPasswordRequired(true);
-        pushBanner(t('admin_alerts_channels_password_required'), { tone: 'warning' });
+      if (!isCurrentScope(scope)) return;
+      const nextPasswordRequired = response !== undefined && response.password_required === true;
+      setState((current) => ({ ...current, passwordRequired: nextPasswordRequired }));
+      if (nextPasswordRequired) {
+        pushTopBanner(t('admin_alerts_channels_password_required'), { tone: 'warning' });
       } else {
-        setPasswordRequired(false);
-        pushBanner(t('admin_alerts_channels_verify_code_success'), { tone: 'info' });
+        pushTopBanner(t('admin_alerts_channels_verify_code_success'), { tone: 'info' });
       }
     } catch (error) {
-      apiError(error, t('admin_alerts_channels_verify_code_failed'));
+      if (isCurrentScope(scope)) {
+        apiError(error, t('admin_alerts_channels_verify_code_failed'));
+      }
     } finally {
-      setIsVerifyingCode(false);
+      finishPending(scope, 'verify_code');
     }
-  }, [apiError, isVerifyingCode, loginCode, loginId, pushBanner, t]);
+  }, [apiError, beginPending, finishPending, isCurrentScope, loginCode, loginId, t]);
 
   const submitPassword = React.useCallback(async () => {
     const password = twoFactorPassword.trim();
-    if (!loginId || !password || isSubmittingPassword) return;
-    setIsSubmittingPassword(true);
+    if (!loginId || !password) return;
+    const scope = beginPending('submit_password');
+    if (!scope) return;
     try {
-      await adminApi.submitAlertMtprotoPassword({
+      await submitAlertMtprotoPassword({
         login_id: loginId,
         password,
       });
-      setPasswordRequired(false);
-      pushBanner(t('admin_alerts_channels_password_submit_success'), { tone: 'info' });
+      if (!isCurrentScope(scope)) return;
+      setState((current) => ({ ...current, passwordRequired: false }));
+      pushTopBanner(t('admin_alerts_channels_password_submit_success'), { tone: 'info' });
     } catch (error) {
-      apiError(error, t('admin_alerts_channels_password_submit_failed'));
+      if (isCurrentScope(scope)) {
+        apiError(error, t('admin_alerts_channels_password_submit_failed'));
+      }
     } finally {
-      setIsSubmittingPassword(false);
+      finishPending(scope, 'submit_password');
     }
-  }, [apiError, isSubmittingPassword, loginId, pushBanner, t, twoFactorPassword]);
+  }, [apiError, beginPending, finishPending, isCurrentScope, loginId, t, twoFactorPassword]);
 
   const testConnection = React.useCallback(async () => {
     const id = requireChannelId();
-    if (!id || isTesting) return;
-    setIsTesting(true);
+    if (!id) return;
+    const scope = beginPending('test');
+    if (!scope) return;
     try {
       if (channelType === 'telegram' && telegramMode === 'mtproto') {
-        const result = await adminApi.pingAlertMtproto(id);
+        const result = await pingAlertMtproto(id);
+        if (!isCurrentScope(scope)) return;
+        setState((current) => ({
+          ...current,
+          connectionStatus: result.valid ? 'valid' : 'invalid',
+          connectionReason: result.valid ? null : (result.reason ?? null),
+        }));
         if (result.valid) {
-          setConnectionStatus('valid');
-          setConnectionReason(null);
-          pushBanner(t('admin_alerts_channels_test_success'), { tone: 'info' });
+          pushTopBanner(t('admin_alerts_channels_test_success'), { tone: 'info' });
         } else {
-          setConnectionStatus('invalid');
-          setConnectionReason(result.reason ?? null);
-          pushBanner(t('admin_alerts_channels_test_failed'), { tone: 'error' });
+          pushTopBanner(t('admin_alerts_channels_test_failed'), { tone: 'error' });
         }
       } else {
-        await adminApi.testAlertChannel(id);
-        pushBanner(t('admin_alerts_channels_test_success'), { tone: 'info' });
+        const result = await testAlertChannel(id);
+        if (!isCurrentScope(scope)) return;
+        if (!isActionOk(result)) return;
+        pushTopBanner(t('admin_alerts_channels_test_success'), { tone: 'info' });
       }
     } catch (error) {
-      apiError(error, t('admin_alerts_channels_test_failed'));
+      if (isCurrentScope(scope)) {
+        apiError(error, t('admin_alerts_channels_test_failed'));
+      }
     } finally {
-      setIsTesting(false);
+      finishPending(scope, 'test');
     }
-  }, [channelType, apiError, isTesting, pushBanner, requireChannelId, t, telegramMode]);
+  }, [
+    apiError,
+    beginPending,
+    channelType,
+    finishPending,
+    isCurrentScope,
+    requireChannelId,
+    t,
+    telegramMode,
+  ]);
 
   const connectionLabel =
     connectionStatus === 'valid'
@@ -164,10 +274,10 @@ export const useTelegramMtprotoLogin = ({
     twoFactorPassword,
     setTwoFactorPassword,
     passwordRequired,
-    isRequestingCode,
-    isVerifyingCode,
-    isSubmittingPassword,
-    isTesting,
+    isRequestingCode: pending === 'request_code',
+    isVerifyingCode: pending === 'verify_code',
+    isSubmittingPassword: pending === 'submit_password',
+    isTesting: pending === 'test',
     connectionStatus,
     connectionReason,
     connectionLabel,

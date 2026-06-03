@@ -16,6 +16,8 @@ export interface Props {
   bundledNodeVersion: string;
   canRequestUpgrade: boolean;
   needsManualUpdate: boolean;
+  savingGuestVisible: boolean;
+  upgrading: boolean;
   onOpenSettings: (node: NodeRow) => void;
   onToggleGuestVisible: (node: NodeRow) => void;
   onCopySecret: (secret: string) => void;
@@ -31,6 +33,8 @@ const MobileNodeCard: React.FC<Props> = ({
   bundledNodeVersion,
   canRequestUpgrade,
   needsManualUpdate,
+  savingGuestVisible,
+  upgrading,
   onOpenSettings,
   onToggleGuestVisible,
   onCopySecret,
@@ -86,7 +90,11 @@ const MobileNodeCard: React.FC<Props> = ({
         </div>
         <div className="flex items-center gap-2">
           <span className="uppercase text-(--theme-fg-subtle)">{t('admin_nodes_guest_label')}</span>
-          <IOSSwitch checked={node.guestVisible} onChange={() => onToggleGuestVisible(node)} />
+          <IOSSwitch
+            checked={node.guestVisible}
+            disabled={savingGuestVisible}
+            onChange={() => onToggleGuestVisible(node)}
+          />
         </div>
         <div className="flex items-center gap-1.5 text-(--theme-fg-default) dark:text-(--theme-fg-default)">
           <span className="uppercase text-(--theme-fg-subtle)">
@@ -126,8 +134,9 @@ const MobileNodeCard: React.FC<Props> = ({
               {canRequestUpgrade && bundledNodeVersion ? (
                 <button
                   type="button"
-                  className="inline-flex size-6 shrink-0 items-center justify-center rounded-md text-(--theme-fg-warning-strong) transition-colors hover:bg-(--theme-bg-warning-muted) dark:text-(--theme-fg-warning-strong) dark:hover:bg-(--theme-bg-warning-soft)"
+                  className="inline-flex size-6 shrink-0 items-center justify-center rounded-md text-(--theme-fg-warning-strong) transition-colors hover:bg-(--theme-bg-warning-muted) disabled:cursor-not-allowed disabled:opacity-50 dark:text-(--theme-fg-warning-strong) dark:hover:bg-(--theme-bg-warning-soft)"
                   onClick={() => onRequestUpgrade(node)}
+                  disabled={upgrading}
                   title={t('admin_nodes_version_update_target', {
                     target: bundledNodeVersion,
                   })}

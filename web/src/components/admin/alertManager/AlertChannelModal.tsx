@@ -63,7 +63,11 @@ const AlertChannelModal: React.FC<Props> = ({
 }) => {
   const { t } = useI18n();
   const titleId = React.useId();
-  const form = useAlertChannelForm({ isOpen, initialForm });
+  const form = useAlertChannelForm({
+    isOpen,
+    sourceKey: `${mode}:${channelId ?? 'new'}`,
+    initialForm,
+  });
   const telegramLogin = useTelegramMtprotoLogin({
     isOpen,
     channelId,

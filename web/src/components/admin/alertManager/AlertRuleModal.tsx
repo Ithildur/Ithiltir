@@ -1,19 +1,19 @@
-import React, { useState, useEffect } from 'react';
+import React from 'react';
 import SlidersHorizontal from 'lucide-react/dist/esm/icons/sliders-horizontal';
 import Button from '@components/ui/Button';
 import Input from '@components/ui/Input';
 import Select from '@components/ui/Select';
 import { Modal, ModalBody, ModalFooter, ModalHeader } from '@components/ui/Modal';
-import { useTopBanner } from '@components/ui/TopBannerStack';
 import type { AlertRule, AlertRuleThresholdMode, AlertRuleInput } from '@app-types/admin';
-import * as adminApi from '@lib/adminApi';
 import { useI18n } from '@i18n';
 import { alertMetricName, alertMetricValues } from './alertLabels';
 
 interface Props {
   isOpen: boolean;
   initialRule: AlertRule | null;
+  saving: boolean;
   onClose: () => void;
+  onSave: (id: number | null, input: AlertRuleInput) => Promise<boolean>;
   onSuccess: () => void;
 }
 
@@ -41,9 +41,27 @@ const pickRuleInput = (rule: AlertRuleInput): AlertRuleInput => ({
   threshold_offset: rule.threshold_offset,
 });
 
-const AlertRuleModal: React.FC<Props> = ({ isOpen, initialRule, onClose, onSuccess }) => {
+type DraftState = {
+  sourceId: number | null;
+  sourceVersion: string;
+  dirty: boolean;
+  draft: Partial<AlertRuleInput>;
+};
+
+const sourceDraftFromRule = (rule: AlertRule | null): AlertRuleInput =>
+  rule ? pickRuleInput(rule) : defaultRule;
+
+const sourceVersionFromRule = (rule: AlertRule | null): string => rule?.updated_at ?? 'new';
+
+const AlertRuleModal: React.FC<Props> = ({
+  isOpen,
+  initialRule,
+  saving,
+  onClose,
+  onSave,
+  onSuccess,
+}) => {
   const { t } = useI18n();
-  const pushBanner = useTopBanner();
   const titleId = React.useId();
   const nameId = React.useId();
   const thresholdModeId = React.useId();
@@ -53,27 +71,35 @@ const AlertRuleModal: React.FC<Props> = ({ isOpen, initialRule, onClose, onSucce
   const operatorId = React.useId();
   const thresholdId = React.useId();
   const thresholdOffsetId = React.useId();
-  const [loading, setLoading] = useState(false);
-  const [draft, setDraft] = useState<Partial<AlertRuleInput>>(defaultRule);
+  const sourceId = initialRule?.id ?? null;
+  const sourceVersion = sourceVersionFromRule(initialRule);
+  const sourceDraft = React.useMemo(() => sourceDraftFromRule(initialRule), [initialRule]);
+  const [draftState, setDraftState] = React.useState<DraftState>(() => ({
+    sourceId,
+    sourceVersion,
+    dirty: false,
+    draft: sourceDraft,
+  }));
+  const sourceChanged = draftState.sourceId !== sourceId;
+  const sourceRefreshed = draftState.sourceVersion !== sourceVersion;
+  const draft =
+    sourceChanged || (sourceRefreshed && !draftState.dirty) ? sourceDraft : draftState.draft;
   const durationSec = draft.duration_sec ?? 60;
   const durationValue =
     durationSec === 0 || durationSec === 60 || durationSec === 300 ? String(durationSec) : 'custom';
 
-  useEffect(() => {
-    if (initialRule) {
-      setDraft(pickRuleInput(initialRule));
-    } else {
-      setDraft(defaultRule);
-    }
-  }, [initialRule, isOpen]);
-
   const setField = <K extends keyof AlertRuleInput>(field: K, value: AlertRuleInput[K]) => {
-    setDraft((prev) => ({ ...prev, [field]: value }));
+    setDraftState({
+      sourceId,
+      sourceVersion,
+      dirty: true,
+      draft: { ...draft, [field]: value },
+    });
   };
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setLoading(true);
+    if (saving) return;
 
     const thresholdMode = (draft.threshold_mode ?? 'static') as AlertRuleThresholdMode;
     const input: AlertRuleInput = {
@@ -88,19 +114,8 @@ const AlertRuleModal: React.FC<Props> = ({ isOpen, initialRule, onClose, onSucce
       threshold_offset: thresholdMode === 'static' ? 0 : Number(draft.threshold_offset ?? 0),
     };
 
-    try {
-      if (initialRule) {
-        await adminApi.updateAlertRule(initialRule.id, input);
-      } else {
-        await adminApi.createAlertRule(input);
-      }
-      pushBanner(t('admin_alerts_toast_saved'), { tone: 'info' });
+    if (await onSave(initialRule?.id ?? null, input)) {
       onSuccess();
-    } catch (error) {
-      console.error('Failed to save alert rule', error);
-      pushBanner(t('admin_alerts_toast_save_failed'), { tone: 'error' });
-    } finally {
-      setLoading(false);
     }
   };
 
@@ -149,11 +164,16 @@ const AlertRuleModal: React.FC<Props> = ({ isOpen, initialRule, onClose, onSucce
                   value={draft.threshold_mode ?? 'static'}
                   onChange={(e) => {
                     const next = e.target.value as AlertRuleThresholdMode;
-                    setDraft((prev) => ({
-                      ...prev,
-                      threshold_mode: next,
-                      threshold_offset: next === 'static' ? 0 : (prev.threshold_offset ?? 0),
-                    }));
+                    setDraftState({
+                      sourceId,
+                      sourceVersion,
+                      dirty: true,
+                      draft: {
+                        ...draft,
+                        threshold_mode: next,
+                        threshold_offset: next === 'static' ? 0 : (draft.threshold_offset ?? 0),
+                      },
+                    });
                   }}
                 >
                   <option value="static">static</option>
@@ -288,11 +308,11 @@ const AlertRuleModal: React.FC<Props> = ({ isOpen, initialRule, onClose, onSucce
         </ModalBody>
 
         <ModalFooter>
-          <Button variant="secondary" onClick={onClose} disabled={loading}>
+          <Button variant="secondary" onClick={onClose} disabled={saving}>
             {t('common_cancel')}
           </Button>
-          <Button variant="primary" type="submit" disabled={loading}>
-            {loading ? t('loading') : t('common_save')}
+          <Button variant="primary" type="submit" disabled={saving}>
+            {saving ? t('loading') : t('common_save')}
           </Button>
         </ModalFooter>
       </form>

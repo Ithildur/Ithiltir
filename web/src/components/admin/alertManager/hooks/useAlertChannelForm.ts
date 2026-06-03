@@ -19,44 +19,83 @@ const createVisibleSecrets = (): Record<SecretKey, boolean> => ({
   webhookSecret: false,
 });
 
+type FormState = {
+  sourceKey: string;
+  dirty: boolean;
+  channelName: string;
+  kind: AlertChannelFormKind;
+  drafts: ChannelDrafts;
+  visibleSecrets: Record<SecretKey, boolean>;
+};
+
+const createFormState = (sourceKey: string, form?: AlertChannelForm): FormState => ({
+  sourceKey,
+  dirty: false,
+  channelName: form?.name ?? '',
+  kind: form?.kind ?? DEFAULT_CHANNEL_KIND,
+  drafts: draftsFor(form),
+  visibleSecrets: createVisibleSecrets(),
+});
+
 export const useAlertChannelForm = ({
   isOpen,
+  sourceKey,
   initialForm,
 }: {
   isOpen: boolean;
+  sourceKey: string;
   initialForm?: AlertChannelForm;
 }) => {
-  const [channelName, setChannelName] = React.useState(() => initialForm?.name ?? '');
-  const [kind, setKind] = React.useState<AlertChannelFormKind>(
-    () => initialForm?.kind ?? DEFAULT_CHANNEL_KIND,
-  );
-  const [drafts, setDrafts] = React.useState<ChannelDrafts>(() => draftsFor(initialForm));
-  const [visibleSecrets, setVisibleSecrets] = React.useState(createVisibleSecrets);
+  const [formState, setFormState] = React.useState(() => createFormState(sourceKey, initialForm));
+  const wasOpenRef = React.useRef(isOpen);
 
   React.useEffect(() => {
+    const justOpened = isOpen && !wasOpenRef.current;
+    wasOpenRef.current = isOpen;
+
     if (!isOpen) return;
-    setChannelName(initialForm?.name ?? '');
-    setKind(initialForm?.kind ?? DEFAULT_CHANNEL_KIND);
-    setDrafts(draftsFor(initialForm));
-    setVisibleSecrets(createVisibleSecrets());
-  }, [initialForm, isOpen]);
+    setFormState((current) => {
+      if (justOpened || current.sourceKey !== sourceKey) {
+        return createFormState(sourceKey, initialForm);
+      }
+      if (current.dirty) return current;
+      return createFormState(sourceKey, initialForm);
+    });
+  }, [initialForm, isOpen, sourceKey]);
+
+  const setChannelNameDraft = React.useCallback((nextName: string) => {
+    setFormState((current) => ({ ...current, dirty: true, channelName: nextName }));
+  }, []);
 
   const setChannelType = React.useCallback((nextType: AlertChannelType) => {
-    setKind((current) => {
-      if (nextType !== 'telegram') return nextType;
-      return current === 'telegram_mtproto' ? 'telegram_mtproto' : 'telegram_bot';
+    setFormState((current) => {
+      const nextKind =
+        nextType !== 'telegram'
+          ? nextType
+          : current.kind === 'telegram_mtproto'
+            ? 'telegram_mtproto'
+            : 'telegram_bot';
+      return { ...current, dirty: true, kind: nextKind };
     });
   }, []);
 
   const setTelegramMode = React.useCallback((nextMode: AlertTelegramMode) => {
-    setKind(nextMode === 'mtproto' ? 'telegram_mtproto' : 'telegram_bot');
+    setFormState((current) => ({
+      ...current,
+      dirty: true,
+      kind: nextMode === 'mtproto' ? 'telegram_mtproto' : 'telegram_bot',
+    }));
   }, []);
 
   const patchTelegramBot = React.useCallback(
     (patch: Partial<Omit<ChannelDrafts['telegram_bot'], 'kind'>>) => {
-      setDrafts((prev) => ({
-        ...prev,
-        telegram_bot: { ...prev.telegram_bot, ...patch },
+      setFormState((current) => ({
+        ...current,
+        dirty: true,
+        drafts: {
+          ...current.drafts,
+          telegram_bot: { ...current.drafts.telegram_bot, ...patch },
+        },
       }));
     },
     [],
@@ -64,35 +103,54 @@ export const useAlertChannelForm = ({
 
   const patchTelegramMtproto = React.useCallback(
     (patch: Partial<Omit<ChannelDrafts['telegram_mtproto'], 'kind'>>) => {
-      setDrafts((prev) => ({
-        ...prev,
-        telegram_mtproto: { ...prev.telegram_mtproto, ...patch },
+      setFormState((current) => ({
+        ...current,
+        dirty: true,
+        drafts: {
+          ...current.drafts,
+          telegram_mtproto: { ...current.drafts.telegram_mtproto, ...patch },
+        },
       }));
     },
     [],
   );
 
   const patchEmail = React.useCallback((patch: Partial<Omit<ChannelDrafts['email'], 'kind'>>) => {
-    setDrafts((prev) => ({
-      ...prev,
-      email: { ...prev.email, ...patch },
+    setFormState((current) => ({
+      ...current,
+      dirty: true,
+      drafts: {
+        ...current.drafts,
+        email: { ...current.drafts.email, ...patch },
+      },
     }));
   }, []);
 
   const patchWebhook = React.useCallback(
     (patch: Partial<Omit<ChannelDrafts['webhook'], 'kind'>>) => {
-      setDrafts((prev) => ({
-        ...prev,
-        webhook: { ...prev.webhook, ...patch },
+      setFormState((current) => ({
+        ...current,
+        dirty: true,
+        drafts: {
+          ...current.drafts,
+          webhook: { ...current.drafts.webhook, ...patch },
+        },
       }));
     },
     [],
   );
 
   const toggleSecret = React.useCallback((key: SecretKey) => {
-    setVisibleSecrets((prev) => ({ ...prev, [key]: !prev[key] }));
+    setFormState((current) => ({
+      ...current,
+      visibleSecrets: {
+        ...current.visibleSecrets,
+        [key]: !current.visibleSecrets[key],
+      },
+    }));
   }, []);
 
+  const { channelName, drafts, kind, visibleSecrets } = formState;
   const channelType = channelTypeFromKind(kind);
   const telegramMode = telegramModeFromKind(kind);
 
@@ -116,7 +174,7 @@ export const useAlertChannelForm = ({
     visibleSecrets,
     channelType,
     telegramMode,
-    setChannelName,
+    setChannelName: setChannelNameDraft,
     setChannelType,
     setTelegramMode,
     patchTelegramBot,

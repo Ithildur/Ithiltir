@@ -1,23 +1,24 @@
 /// <reference types="vite/client" />
 
-import type { ThemeManifest } from '@app-types/admin';
+import type { ThemeMode } from '@app-types/theme';
 
-type ThemeMode = 'light' | 'dark' | 'system';
+type BrowserThemeRuntime = {
+  get: () => ThemeMode;
+  set: (theme: ThemeMode) => void;
+  apply: (theme: ThemeMode) => void;
+  onSystemChange: (handler: () => void) => () => void;
+};
+
+type BrowserThemePackageRuntime = {
+  manifest: unknown | null;
+  manifestPromise: Promise<unknown | null>;
+  refresh: () => void;
+};
 
 declare global {
   interface Window {
-    __themeInitialized?: boolean;
-    __theme?: {
-      get: () => ThemeMode;
-      set: (theme: ThemeMode) => void;
-      apply: (theme: ThemeMode) => void;
-      onSystemChange?: (handler: (e: MediaQueryListEvent) => void) => () => void;
-    };
-    __themePackage?: {
-      manifest?: Partial<ThemeManifest> | null;
-      manifestPromise?: Promise<Partial<ThemeManifest> | null>;
-      refresh: () => void;
-    };
+    __theme?: BrowserThemeRuntime;
+    __themePackage?: BrowserThemePackageRuntime;
   }
 }
 

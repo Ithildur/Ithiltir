@@ -3,78 +3,77 @@ import Plus from 'lucide-react/dist/esm/icons/plus';
 import Search from 'lucide-react/dist/esm/icons/search';
 import Settings2 from 'lucide-react/dist/esm/icons/settings-2';
 import SlidersHorizontal from 'lucide-react/dist/esm/icons/sliders-horizontal';
+import { AdminSectionTabs } from '@components/admin/AdminSectionTabs';
 import Button from '@components/ui/Button';
 import Card from '@components/ui/Card';
 import ConfirmDialog from '@components/ui/ConfirmDialog';
-import Input from '@components/ui/Input';
-import { useTopBanner } from '@components/ui/TopBannerStack';
+import SearchInput from '@components/ui/SearchInput';
 import NodeTrafficSettingsModal from './NodeTrafficSettingsModal';
 import NodeSettingsModal from './NodeSettingsModal';
-import { useAuth } from '@context/AuthContext';
-import {
-  createNode,
-  deleteNode,
-  requestNodeUpgrade,
-  updateNode,
-  updateNodesTrafficP95,
-} from '@lib/adminApi';
-import type { NodeDeployPlatform, NodeTrafficPatch } from '@app-types/api';
-import type { NodeRow } from '@app-types/admin';
+import { useAuthStore } from '@stores/authStore';
+import { useAdminNodesStore } from '@stores/adminNodesStore';
 import { useI18n } from '@i18n';
-import { copyTextToClipboardWithFeedback } from '@utils/clipboard';
-import { useApiErrorHandler } from '@hooks/useApiErrorHandler';
 import { useConfirmDialog } from '@hooks/useConfirmDialog';
-import { isVersionOlder } from '@utils/version';
 import MobileAdvancedNodeCard from '@components/admin/nodeManager/MobileAdvancedNodeCard';
 import MobileNodeCard from '@components/admin/nodeManager/MobileNodeCard';
 import NodeAdvancedTable from '@components/admin/nodeManager/NodeAdvancedTable';
 import NodeFilterMenu from '@components/admin/nodeManager/NodeFilterMenu';
 import NodeTable from '@components/admin/nodeManager/NodeTable';
-import { useNodes } from '@components/admin/nodeManager/useNodes';
-import { useReorder } from '@components/admin/nodeManager/useReorder';
+import {
+  filterNodeManagerNodes,
+  nodeCanRequestUpgrade,
+  nodeNeedsManualUpdate,
+} from '@components/admin/nodeManager/nodeManagerModel';
+import { useNodeManagerData } from '@components/admin/nodeManager/useNodeManagerData';
+import { useNodeManagerActions } from '@components/admin/nodeManager/useNodeManagerActions';
+import { useNodeP95Selection } from '@components/admin/nodeManager/useNodeP95Selection';
+import { useNodeOrder } from '@components/admin/nodeManager/useNodeOrder';
 import { useTrafficRebuildBanner } from '@hooks/useTrafficRebuildBanner';
 import { useTrafficRebuild } from '@hooks/useTrafficRebuild';
+import { useIdSelection } from '@hooks/useIdSelection';
 
-type SubTab = 'basic' | 'advanced';
+const tabs = [
+  { key: 'basic', labelKey: 'admin_nodes_tab_basic', icon: Settings2 },
+  { key: 'advanced', labelKey: 'admin_nodes_tab_advanced', icon: SlidersHorizontal },
+] as const;
 
-const tabClass = (active: boolean) =>
-  `px-1 py-2 text-sm font-semibold border-b-2 -mb-px transition-colors ${
-    active
-      ? 'border-(--theme-border-underline-nav-active) text-(--theme-fg-default)'
-      : 'border-transparent text-(--theme-fg-muted) dark:text-(--theme-fg-muted) hover:text-(--theme-fg-default) dark:hover:text-(--theme-fg-default)'
-  }`;
+type NodeManagerTab = (typeof tabs)[number]['key'];
 
 const NodeManager: React.FC = () => {
-  const { token } = useAuth();
+  const token = useAuthStore((state) => state.accessToken);
   const { t } = useI18n();
-  const apiError = useApiErrorHandler();
-  const pushBanner = useTopBanner();
   const { dialogProps: confirmDialogProps, request: requestConfirm } = useConfirmDialog();
 
   const {
     nodes,
-    setNodes,
     groups,
-    groupLookup,
     deploy,
     trafficSettings,
+    trafficSettingsLoading,
+    trafficSettingsLoaded,
     bundledNodeVersion,
     isLoading,
     refreshNodes,
-  } = useNodes(token);
+  } = useNodeManagerData(token);
 
-  const [activeTab, setActiveTab] = React.useState<SubTab>('basic');
+  const [activeTab, setActiveTab] = React.useState<NodeManagerTab>('basic');
   const [search, setSearch] = React.useState('');
-  const [selectedGroupIds, setSelectedGroupIds] = React.useState<number[]>([]);
-  const [updateableOnly, setUpdateableOnly] = React.useState(false);
-  const [basicSettingsNode, setBasicSettingsNode] = React.useState<NodeRow | null>(null);
-  const [trafficSettingsNode, setTrafficSettingsNode] = React.useState<NodeRow | null>(null);
-  const [isCreating, setIsCreating] = React.useState(false);
-  const [savingP95NodeIds, setSavingP95NodeIds] = React.useState<Set<number>>(() => new Set());
-  const [savingTrafficSettingsNodeIds, setSavingTrafficSettingsNodeIds] = React.useState<
-    Set<number>
-  >(() => new Set());
-  const [selectedP95NodeIds, setSelectedP95NodeIds] = React.useState<Set<number>>(() => new Set());
+  const {
+    selectedIds: selectedGroupIds,
+    setSelectedIds: setSelectedGroupIds,
+    prune: pruneSelectedGroupIds,
+  } = useIdSelection();
+  const [updatableOnly, setUpdatableOnly] = React.useState(false);
+  const isCreating = useAdminNodesStore((state) => state.creating);
+  const savingGuestVisibleNodeIds = useAdminNodesStore((state) => state.savingGuestVisibleNodeIds);
+  const savingP95NodeIds = useAdminNodesStore((state) => state.savingP95NodeIds);
+  const savingTrafficSettingsNodeIds = useAdminNodesStore(
+    (state) => state.savingTrafficSettingsNodeIds,
+  );
+  const savingSettingsNodeIds = useAdminNodesStore((state) => state.savingSettingsNodeIds);
+  const upgradingNodeIds = useAdminNodesStore((state) => state.upgradingNodeIds);
+  const [basicSettingsNodeId, setBasicSettingsNodeId] = React.useState<number | null>(null);
+  const [trafficSettingsNodeId, setTrafficSettingsNodeId] = React.useState<number | null>(null);
 
   const {
     rebuildingNodeId: rebuildingTrafficNodeId,
@@ -83,484 +82,157 @@ const NodeManager: React.FC = () => {
   } = useTrafficRebuild();
   const showTrafficRebuildOutcome = useTrafficRebuildBanner();
 
-  const nodeHasNewerBundledVersion = React.useCallback(
-    (node: NodeRow): boolean => {
-      if (!bundledNodeVersion) return false;
-      return isVersionOlder(node.version.version, bundledNodeVersion);
-    },
-    [bundledNodeVersion],
+  const savingGuestVisibleNodeIdSet = React.useMemo(
+    () => new Set(savingGuestVisibleNodeIds),
+    [savingGuestVisibleNodeIds],
   );
-  const nodeCanRequestUpgrade = React.useCallback(
-    (node: NodeRow): boolean =>
-      !node.version.is_outdated &&
-      node.version.supports_auto_update &&
-      nodeHasNewerBundledVersion(node),
-    [nodeHasNewerBundledVersion],
+  const savingTrafficSettingsNodeIdSet = React.useMemo(
+    () => new Set(savingTrafficSettingsNodeIds),
+    [savingTrafficSettingsNodeIds],
   );
-  const nodeNeedsManualUpdate = React.useCallback(
-    (node: NodeRow): boolean =>
-      !node.version.is_outdated &&
-      !node.version.supports_auto_update &&
-      nodeHasNewerBundledVersion(node),
-    [nodeHasNewerBundledVersion],
+  const savingSettingsNodeIdSet = React.useMemo(
+    () => new Set(savingSettingsNodeIds),
+    [savingSettingsNodeIds],
   );
-  const nodeNeedsUpdate = React.useCallback(
-    (node: NodeRow): boolean =>
-      node.version.is_outdated || nodeCanRequestUpgrade(node) || nodeNeedsManualUpdate(node),
-    [nodeCanRequestUpgrade, nodeNeedsManualUpdate],
+  const basicSettingsNode = React.useMemo(
+    () => nodes.find((node) => node.id === basicSettingsNodeId) ?? null,
+    [basicSettingsNodeId, nodes],
   );
+  const trafficSettingsNode = React.useMemo(
+    () => nodes.find((node) => node.id === trafficSettingsNodeId) ?? null,
+    [nodes, trafficSettingsNodeId],
+  );
+  const trafficSettingsUnavailable = trafficSettingsLoading || !trafficSettingsLoaded;
 
-  const selectedGroupSet = React.useMemo(() => new Set(selectedGroupIds), [selectedGroupIds]);
+  React.useEffect(() => {
+    if (basicSettingsNodeId !== null && !basicSettingsNode && !isLoading) {
+      setBasicSettingsNodeId(null);
+    }
+  }, [basicSettingsNode, basicSettingsNodeId, isLoading, setBasicSettingsNodeId]);
 
-  const filteredNodes = React.useMemo(() => {
-    const keyword = search.trim().toLowerCase();
+  React.useEffect(() => {
+    if (trafficSettingsNodeId !== null && !trafficSettingsNode && !isLoading) {
+      setTrafficSettingsNodeId(null);
+    }
+  }, [isLoading, setTrafficSettingsNodeId, trafficSettingsNode, trafficSettingsNodeId]);
 
-    return nodes.filter((node) => {
-      if (keyword) {
-        const haystack = [
-          node.name,
-          node.ip ?? '',
-          String(node.id),
-          node.groupNames.join(' '),
-          node.tags.join(' '),
-        ]
-          .join(' ')
-          .toLowerCase();
+  React.useEffect(() => {
+    if (trafficSettingsNodeId !== null && !trafficSettingsLoaded) {
+      setTrafficSettingsNodeId(null);
+    }
+  }, [setTrafficSettingsNodeId, trafficSettingsLoaded, trafficSettingsNodeId]);
 
-        if (!haystack.includes(keyword)) return false;
-      }
+  React.useEffect(() => {
+    if (selectedGroupIds.length === 0) return;
+    pruneSelectedGroupIds(groups.map((group) => group.id));
+  }, [groups, pruneSelectedGroupIds, selectedGroupIds.length]);
 
-      if (
-        selectedGroupSet.size > 0 &&
-        !node.groupIds.some((groupId) => selectedGroupSet.has(groupId))
-      ) {
-        return false;
-      }
-
-      return activeTab !== 'basic' || !updateableOnly || nodeNeedsUpdate(node);
-    });
-  }, [activeTab, nodeNeedsUpdate, nodes, search, selectedGroupSet, updateableOnly]);
+  const filteredNodes = React.useMemo(
+    () =>
+      filterNodeManagerNodes({
+        nodes,
+        search,
+        selectedGroupIds,
+        updatableOnly: activeTab === 'basic' && updatableOnly,
+        bundledNodeVersion,
+      }),
+    [activeTab, bundledNodeVersion, nodes, search, selectedGroupIds, updatableOnly],
+  );
 
   const filteredNodeIds = React.useMemo(
     () => filteredNodes.map((node) => node.id),
     [filteredNodes],
   );
 
-  React.useEffect(() => {
-    setSelectedP95NodeIds((current) => {
-      if (current.size === 0) return current;
-
-      const nodeIds = new Set(nodes.map((node) => node.id));
-      let changed = false;
-      const next = new Set<number>();
-      for (const id of current) {
-        if (nodeIds.has(id)) {
-          next.add(id);
-        } else {
-          changed = true;
-        }
-      }
-
-      return changed ? next : current;
-    });
-  }, [nodes]);
-
-  const selectedP95Ids = React.useMemo(() => Array.from(selectedP95NodeIds), [selectedP95NodeIds]);
-  const allVisibleP95Selected =
-    filteredNodeIds.length > 0 && filteredNodeIds.every((id) => selectedP95NodeIds.has(id));
-  const someVisibleP95Selected = filteredNodeIds.some((id) => selectedP95NodeIds.has(id));
-  const canBatchP95 =
-    selectedP95Ids.length > 0 &&
-    !isLoading &&
-    !selectedP95Ids.some((id) => savingP95NodeIds.has(id));
+  const {
+    selectedP95Ids,
+    selectedP95NodeIdSet,
+    savingP95NodeIdSet,
+    allVisibleP95Selected,
+    someVisibleP95Selected,
+    canBatchP95,
+    toggleP95NodeSelection,
+    toggleVisibleP95Nodes,
+    clearP95Selection,
+  } = useNodeP95Selection({
+    nodes,
+    filteredNodeIds,
+    savingP95NodeIds,
+    isLoading,
+  });
 
   const updatableNodeIds = React.useMemo(() => {
-    return new Set(nodes.filter((node) => nodeCanRequestUpgrade(node)).map((node) => node.id));
-  }, [nodeCanRequestUpgrade, nodes]);
+    return new Set(
+      nodes
+        .filter((node) => nodeCanRequestUpgrade(node, bundledNodeVersion))
+        .map((node) => node.id),
+    );
+  }, [bundledNodeVersion, nodes]);
   const manualUpdateNodeIds = React.useMemo(() => {
-    return new Set(nodes.filter((node) => nodeNeedsManualUpdate(node)).map((node) => node.id));
-  }, [nodeNeedsManualUpdate, nodes]);
+    return new Set(
+      nodes
+        .filter((node) => nodeNeedsManualUpdate(node, bundledNodeVersion))
+        .map((node) => node.id),
+    );
+  }, [bundledNodeVersion, nodes]);
+  const upgradingNodeIdSet = React.useMemo(() => new Set(upgradingNodeIds), [upgradingNodeIds]);
 
-  const copyToClipboard = React.useCallback(
-    async (text: string, successMessage = t('admin_secret_copied')) => {
-      await copyTextToClipboardWithFeedback(text, {
-        pushBanner,
-        successMessage,
-        httpsRequiredMessage: t('admin_clipboard_https_required'),
-        failureMessage: t('admin_copy_failed_manual'),
-      });
-    },
-    [pushBanner, t],
-  );
-
-  const copyDeploy = React.useCallback(
-    (platform: NodeDeployPlatform, secret: string) => {
-      const prefix = deploy?.scripts?.[platform]?.command_prefix;
-      if (!prefix) {
-        pushBanner(t('admin_deploy_command_unavailable'), { tone: 'error' });
-        return;
-      }
-      void copyToClipboard(`${prefix}${secret}`, t('admin_deploy_command_copied'));
-    },
-    [copyToClipboard, deploy, pushBanner, t],
-  );
-
-  const addNode = React.useCallback(async () => {
-    if (!token) return;
-    setIsCreating(true);
-    try {
-      await createNode();
-      pushBanner(t('admin_node_created'), { tone: 'info' });
-    } catch (error) {
-      apiError(error, t('admin_create_node_failed'));
-      setIsCreating(false);
-      return;
-    }
-    try {
-      await refreshNodes();
-    } catch (error) {
-      apiError(error, t('admin_fetch_nodes_failed'));
-    } finally {
-      setIsCreating(false);
-    }
-  }, [apiError, pushBanner, refreshNodes, t, token]);
-
-  const { draggingId, dragOverId, dragStart, dragOver, drop, dragEnd } = useReorder({
+  const { draggingId, dragOverId, dragStart, dragOver, drop, dragEnd } = useNodeOrder({
     token,
     nodes,
-    setNodes,
     filteredNodeIds,
     refreshNodes,
   });
 
-  const rename = React.useCallback(
-    async (node: NodeRow, nextName: string) => {
-      const trimmed = nextName.trim();
-      if (!trimmed || trimmed === node.name.trim() || !token) return;
-      const ok = await requestConfirm({
-        title: t('common_confirm'),
-        message: t('admin_confirm_save_node_name', { name: node.name, next: trimmed }),
-        confirmLabel: t('common_save_changes'),
-        cancelLabel: t('common_cancel'),
-        tone: 'default',
-      });
-      if (!ok) return;
-
-      try {
-        await updateNode(node.id, { name: trimmed });
-        setNodes((prev) =>
-          prev.map((item) => (item.id === node.id ? { ...item, name: trimmed } : item)),
-        );
-        pushBanner(t('admin_node_name_updated'), { tone: 'info' });
-      } catch (error) {
-        apiError(error, t('admin_update_node_name_failed'));
-      }
-    },
-    [apiError, pushBanner, requestConfirm, setNodes, t, token],
-  );
-
-  const toggleGuestVisible = React.useCallback(
-    async (node: NodeRow) => {
-      if (!token) return;
-      const nextVisible = !node.guestVisible;
-      try {
-        await updateNode(node.id, { is_guest_visible: nextVisible });
-        setNodes((prev) =>
-          prev.map((item) => (item.id === node.id ? { ...item, guestVisible: nextVisible } : item)),
-        );
-        pushBanner(t('admin_guest_visible_updated'), { tone: 'info' });
-      } catch (error) {
-        apiError(error, t('admin_update_guest_visible_failed'));
-      }
-    },
-    [apiError, pushBanner, setNodes, t, token],
-  );
-
-  const toggleTrafficP95 = React.useCallback(
-    async (node: NodeRow) => {
-      if (!token || savingP95NodeIds.has(node.id)) return;
-      const nextEnabled = !node.trafficP95Enabled;
-      setSavingP95NodeIds((current) => new Set(current).add(node.id));
-      setNodes((prev) =>
-        prev.map((item) =>
-          item.id === node.id ? { ...item, trafficP95Enabled: nextEnabled } : item,
-        ),
-      );
-      try {
-        await updateNode(node.id, { traffic_p95_enabled: nextEnabled });
-        pushBanner(t('admin_traffic_p95_updated'), { tone: 'info' });
-      } catch (error) {
-        setNodes((prev) =>
-          prev.map((item) =>
-            item.id === node.id ? { ...item, trafficP95Enabled: node.trafficP95Enabled } : item,
-          ),
-        );
-        apiError(error, t('admin_traffic_p95_update_failed'));
-      } finally {
-        setSavingP95NodeIds((current) => {
-          const next = new Set(current);
-          next.delete(node.id);
-          return next;
-        });
-      }
-    },
-    [apiError, pushBanner, savingP95NodeIds, setNodes, t, token],
-  );
-
-  const toggleP95NodeSelection = React.useCallback((id: number) => {
-    setSelectedP95NodeIds((current) => {
-      const next = new Set(current);
-      if (next.has(id)) {
-        next.delete(id);
-      } else {
-        next.add(id);
-      }
-      return next;
-    });
-  }, []);
-
-  const toggleVisibleP95Nodes = React.useCallback(() => {
-    setSelectedP95NodeIds((current) => {
-      const next = new Set(current);
-      if (filteredNodeIds.length > 0 && filteredNodeIds.every((id) => next.has(id))) {
-        for (const id of filteredNodeIds) next.delete(id);
-      } else {
-        for (const id of filteredNodeIds) next.add(id);
-      }
-      return next;
-    });
-  }, [filteredNodeIds]);
-
-  const setTrafficP95ForSelected = React.useCallback(
-    async (enabled: boolean) => {
-      if (!token || selectedP95Ids.length === 0) return;
-      const selected = nodes.filter((node) => selectedP95NodeIds.has(node.id));
-      if (selected.length === 0) return;
-      const previous = new Map(selected.map((node) => [node.id, node.trafficP95Enabled]));
-      const selectedIds = selected.map((node) => node.id);
-      setSavingP95NodeIds((current) => new Set([...current, ...selectedIds]));
-      setNodes((prev) =>
-        prev.map((node) =>
-          previous.has(node.id) ? { ...node, trafficP95Enabled: enabled } : node,
-        ),
-      );
-      try {
-        await updateNodesTrafficP95(selectedIds, enabled);
-        pushBanner(
-          t(enabled ? 'admin_traffic_p95_batch_enabled' : 'admin_traffic_p95_batch_disabled'),
-          { tone: 'info' },
-        );
-      } catch (error) {
-        setNodes((prev) =>
-          prev.map((node) =>
-            previous.has(node.id)
-              ? { ...node, trafficP95Enabled: previous.get(node.id) ?? node.trafficP95Enabled }
-              : node,
-          ),
-        );
-        apiError(error, t('admin_traffic_p95_update_failed'));
-      } finally {
-        setSavingP95NodeIds((current) => {
-          const next = new Set(current);
-          for (const id of selectedIds) next.delete(id);
-          return next;
-        });
-      }
-    },
-    [apiError, nodes, pushBanner, selectedP95Ids.length, selectedP95NodeIds, setNodes, t, token],
-  );
-
-  const saveNodeTrafficSettings = React.useCallback(
-    async (node: NodeRow, patch: NodeTrafficPatch): Promise<boolean> => {
-      if (!token || savingTrafficSettingsNodeIds.has(node.id)) return false;
-      setSavingTrafficSettingsNodeIds((current) => new Set(current).add(node.id));
-      let failureMessage = t('admin_node_traffic_settings_save_failed');
-      try {
-        await updateNode(node.id, patch);
-        failureMessage = t('admin_fetch_nodes_failed');
-        await refreshNodes();
-        pushBanner(t('admin_node_traffic_settings_saved'), { tone: 'info' });
-        return true;
-      } catch (error) {
-        apiError(error, failureMessage);
-        return false;
-      } finally {
-        setSavingTrafficSettingsNodeIds((current) => {
-          const next = new Set(current);
-          next.delete(node.id);
-          return next;
-        });
-      }
-    },
-    [apiError, pushBanner, refreshNodes, savingTrafficSettingsNodeIds, t, token],
-  );
-
-  const confirmAndDelete = React.useCallback(
-    async (node: NodeRow) => {
-      const ok = await requestConfirm({
-        title: t('common_confirm'),
-        message: t('admin_confirm_delete_node', { name: node.name }),
-        confirmLabel: t('common_delete'),
-        cancelLabel: t('common_cancel'),
-        tone: 'danger',
-      });
-      if (!ok || !token) return;
-      try {
-        await deleteNode(node.id);
-        setNodes((prev) => prev.filter((item) => item.id !== node.id));
-        pushBanner(t('admin_node_deleted'), { tone: 'info' });
-      } catch (error) {
-        apiError(error, t('admin_delete_node_failed'));
-      }
-    },
-    [apiError, pushBanner, requestConfirm, setNodes, t, token],
-  );
-
-  const confirmUpgrade = React.useCallback(
-    async (node: NodeRow) => {
-      if (!token || !bundledNodeVersion) return;
-      const ok = await requestConfirm({
-        title: t('common_confirm'),
-        message: t('admin_confirm_upgrade_node', {
-          name: node.name,
-          version: bundledNodeVersion,
-        }),
-        confirmLabel: t('admin_nodes_confirm_upgrade'),
-        cancelLabel: t('common_cancel'),
-        tone: 'default',
-      });
-      if (!ok) return;
-
-      try {
-        await requestNodeUpgrade(node.id);
-        pushBanner(t('admin_node_upgrade_requested'), { tone: 'info' });
-      } catch (error) {
-        apiError(error, t('admin_request_node_upgrade_failed'));
-        return;
-      }
-      try {
-        await refreshNodes();
-      } catch (error) {
-        apiError(error, t('admin_fetch_nodes_failed'));
-      }
-    },
-    [apiError, bundledNodeVersion, pushBanner, refreshNodes, requestConfirm, t, token],
-  );
-
-  const rebuildNodeTraffic = React.useCallback(
-    async (node: NodeRow) => {
-      if (!token || trafficRebuildBusy) return;
-      const ok = await requestConfirm({
-        title: t('common_confirm'),
-        message: t('admin_confirm_rebuild_node_traffic', { name: node.name }),
-        confirmLabel: t('admin_node_traffic_rebuild'),
-        cancelLabel: t('common_cancel'),
-        tone: 'default',
-      });
-      if (ok) {
-        const outcome = await startTrafficRebuild(node.id);
-        showTrafficRebuildOutcome(outcome);
-      }
-    },
-    [requestConfirm, showTrafficRebuildOutcome, startTrafficRebuild, t, token, trafficRebuildBusy],
-  );
-
-  const saveSettings = React.useCallback(
-    async (
-      nodeId: number,
-      input: {
-        name: string;
-        secret: string;
-        guestVisible: boolean;
-        groupIds: number[];
-        tags?: string[];
-      },
-    ) => {
-      if (!token) return;
-      try {
-        const payload = {
-          name: input.name,
-          secret: input.secret,
-          is_guest_visible: input.guestVisible,
-          group_ids: input.groupIds,
-          ...(input.tags !== undefined ? { tags: input.tags } : {}),
-        };
-        await updateNode(nodeId, payload);
-        const groupNames =
-          input.groupIds.length > 0
-            ? input.groupIds.map((gid) => groupLookup[gid] ?? `#${gid}`)
-            : [];
-        setNodes((prev) =>
-          prev.map((node) =>
-            node.id === nodeId
-              ? {
-                  ...node,
-                  name: input.name,
-                  secret: input.secret,
-                  guestVisible: input.guestVisible,
-                  groupIds: input.groupIds,
-                  groupNames,
-                  ...(input.tags !== undefined ? { tags: input.tags } : {}),
-                }
-              : node,
-          ),
-        );
-        pushBanner(t('admin_node_settings_updated'), { tone: 'info' });
-      } catch (error) {
-        apiError(error, t('admin_save_node_settings_failed'));
-      }
-    },
-    [groupLookup, apiError, pushBanner, setNodes, t, token],
-  );
+  const {
+    addNode,
+    confirmAndDelete,
+    confirmUpgrade,
+    copyDeploy,
+    copyToClipboard,
+    rebuildNodeTraffic,
+    rename,
+    saveNodeTrafficSettings,
+    saveSettings,
+    setTrafficP95ForSelected,
+    toggleGuestVisible,
+    toggleTrafficP95,
+  } = useNodeManagerActions({
+    token,
+    deploy,
+    nodes,
+    selectedP95NodeIdSet,
+    bundledNodeVersion,
+    trafficRebuildBusy,
+    requestConfirm,
+    startTrafficRebuild,
+    showTrafficRebuildOutcome,
+  });
 
   return (
     <div className="space-y-4 md:space-y-6">
       <ConfirmDialog {...confirmDialogProps} />
 
       <div className="flex w-full md:w-auto md:flex-1">
-        <div className="flex gap-4 border-b border-(--theme-border-subtle) dark:border-(--theme-border-default)">
-          <button
-            type="button"
-            onClick={() => setActiveTab('basic')}
-            aria-current={activeTab === 'basic' ? 'page' : undefined}
-            className={tabClass(activeTab === 'basic')}
-          >
-            <span className="inline-flex items-center gap-2">
-              <Settings2 className="size-4" aria-hidden="true" />
-              {t('admin_nodes_tab_basic')}
-            </span>
-          </button>
-          <button
-            type="button"
-            onClick={() => setActiveTab('advanced')}
-            aria-current={activeTab === 'advanced' ? 'page' : undefined}
-            className={tabClass(activeTab === 'advanced')}
-          >
-            <span className="inline-flex items-center gap-2">
-              <SlidersHorizontal className="size-4" aria-hidden="true" />
-              {t('admin_nodes_tab_advanced')}
-            </span>
-          </button>
-        </div>
+        <AdminSectionTabs tabs={tabs} activeKey={activeTab} onChange={setActiveTab} />
       </div>
 
       <div className="flex flex-col md:flex-row justify-between gap-3 md:gap-4">
         <div className="flex w-full md:w-auto md:flex-1 gap-2">
-          <Input
+          <SearchInput
             icon={Search}
             placeholder={t('admin_nodes_search_placeholder')}
             value={search}
             onChange={(event) => setSearch(event.target.value)}
-            data-search-input="true"
             wrapperClassName="flex-1 max-w-md"
           />
           <NodeFilterMenu
             groups={groups}
             selectedGroupIds={selectedGroupIds}
-            updateableOnly={updateableOnly}
+            updatableOnly={updatableOnly}
             showVersionFilter={activeTab === 'basic'}
             onGroupChange={setSelectedGroupIds}
-            onUpdateableOnlyChange={setUpdateableOnly}
+            onUpdatableOnlyChange={setUpdatableOnly}
           />
         </div>
 
@@ -588,6 +260,8 @@ const NodeManager: React.FC = () => {
             nodes={filteredNodes}
             updatableNodeIds={updatableNodeIds}
             manualUpdateNodeIds={manualUpdateNodeIds}
+            savingGuestVisibleNodeIds={savingGuestVisibleNodeIdSet}
+            upgradingNodeIds={upgradingNodeIdSet}
             bundledNodeVersion={bundledNodeVersion}
             draggingId={draggingId}
             dragOverId={dragOverId}
@@ -596,7 +270,7 @@ const NodeManager: React.FC = () => {
             onCopySecret={(secret) => void copyToClipboard(secret)}
             onDeployCopy={copyDeploy}
             onRequestUpgrade={(node) => void confirmUpgrade(node)}
-            onOpenSettings={setBasicSettingsNode}
+            onOpenSettings={(node) => setBasicSettingsNodeId(node.id)}
             onDelete={(node) => void confirmAndDelete(node)}
             onDragStart={dragStart}
             onDragOver={dragOver}
@@ -608,17 +282,18 @@ const NodeManager: React.FC = () => {
         <Card className="hidden md:block overflow-hidden">
           <NodeAdvancedTable
             nodes={filteredNodes}
-            selectedP95NodeIds={selectedP95NodeIds}
+            selectedP95NodeIds={selectedP95NodeIdSet}
             allVisibleP95Selected={allVisibleP95Selected}
             someVisibleP95Selected={someVisibleP95Selected}
-            savingP95NodeIds={savingP95NodeIds}
-            savingTrafficSettingsNodeIds={savingTrafficSettingsNodeIds}
+            savingP95NodeIds={savingP95NodeIdSet}
+            savingTrafficSettingsNodeIds={savingTrafficSettingsNodeIdSet}
+            trafficSettingsDisabled={trafficSettingsUnavailable}
             rebuildingTrafficNodeId={rebuildingTrafficNodeId}
             trafficRebuildBusy={trafficRebuildBusy}
             onToggleVisibleNodes={toggleVisibleP95Nodes}
             onToggleP95Node={toggleP95NodeSelection}
             onToggleTrafficP95={(node) => void toggleTrafficP95(node)}
-            onOpenTrafficSettings={setTrafficSettingsNode}
+            onOpenTrafficSettings={(node) => setTrafficSettingsNodeId(node.id)}
             onRebuildTraffic={(node) => void rebuildNodeTraffic(node)}
           />
           {selectedP95Ids.length > 0 && (
@@ -645,7 +320,7 @@ const NodeManager: React.FC = () => {
                     count: String(selectedP95Ids.length),
                   })}
                 </span>
-                <Button variant="ghost" onClick={() => setSelectedP95NodeIds(new Set())}>
+                <Button variant="ghost" onClick={clearP95Selection}>
                   {t('common_clear')}
                 </Button>
               </div>
@@ -663,7 +338,9 @@ const NodeManager: React.FC = () => {
               bundledNodeVersion={bundledNodeVersion}
               canRequestUpgrade={updatableNodeIds.has(node.id)}
               needsManualUpdate={manualUpdateNodeIds.has(node.id)}
-              onOpenSettings={setBasicSettingsNode}
+              savingGuestVisible={savingGuestVisibleNodeIdSet.has(node.id)}
+              upgrading={upgradingNodeIdSet.has(node.id)}
+              onOpenSettings={(node) => setBasicSettingsNodeId(node.id)}
               onToggleGuestVisible={(target) => void toggleGuestVisible(target)}
               onCopySecret={(secret) => void copyToClipboard(secret)}
               onDeployCopy={copyDeploy}
@@ -677,14 +354,15 @@ const NodeManager: React.FC = () => {
             <MobileAdvancedNodeCard
               key={node.id}
               node={node}
-              p95Selected={selectedP95NodeIds.has(node.id)}
-              savingP95={savingP95NodeIds.has(node.id)}
-              savingTrafficSettings={savingTrafficSettingsNodeIds.has(node.id)}
+              p95Selected={selectedP95NodeIdSet.has(node.id)}
+              savingP95={savingP95NodeIdSet.has(node.id)}
+              savingTrafficSettings={savingTrafficSettingsNodeIdSet.has(node.id)}
+              trafficSettingsDisabled={trafficSettingsUnavailable}
               rebuilding={rebuildingTrafficNodeId === node.id}
               trafficRebuildBusy={trafficRebuildBusy}
               onToggleP95Node={toggleP95NodeSelection}
               onToggleTrafficP95={(target) => void toggleTrafficP95(target)}
-              onOpenTrafficSettings={setTrafficSettingsNode}
+              onOpenTrafficSettings={(target) => setTrafficSettingsNodeId(target.id)}
               onRebuildTraffic={(target) => void rebuildNodeTraffic(target)}
             />
           ))}
@@ -712,7 +390,7 @@ const NodeManager: React.FC = () => {
                     count: String(selectedP95Ids.length),
                   })}
                 </span>
-                <Button variant="ghost" onClick={() => setSelectedP95NodeIds(new Set())}>
+                <Button variant="ghost" onClick={clearP95Selection}>
                   {t('common_clear')}
                 </Button>
               </div>
@@ -733,19 +411,20 @@ const NodeManager: React.FC = () => {
           node={basicSettingsNode}
           groups={groups}
           deploy={deploy}
-          onClose={() => setBasicSettingsNode(null)}
-          onSave={(input) => void saveSettings(basicSettingsNode.id, input)}
+          saving={savingSettingsNodeIdSet.has(basicSettingsNode.id)}
+          onClose={() => setBasicSettingsNodeId(null)}
+          onSave={(input) => saveSettings(basicSettingsNode.id, input)}
         />
       )}
 
-      {trafficSettingsNode && (
+      {trafficSettingsNode && trafficSettingsLoaded && (
         <NodeTrafficSettingsModal
           isOpen={!!trafficSettingsNode}
           node={trafficSettingsNode}
           globalSettings={trafficSettings}
-          saving={savingTrafficSettingsNodeIds.has(trafficSettingsNode.id)}
-          onClose={() => setTrafficSettingsNode(null)}
-          onSave={(patch) => saveNodeTrafficSettings(trafficSettingsNode, patch)}
+          saving={savingTrafficSettingsNodeIdSet.has(trafficSettingsNode.id)}
+          onClose={() => setTrafficSettingsNodeId(null)}
+          onSave={(patch) => saveNodeTrafficSettings(trafficSettingsNode.id, patch)}
         />
       )}
     </div>

@@ -8,14 +8,23 @@ export type ConfirmAction = (
 ) => Promise<void>;
 
 interface UseConfirmDialogResult {
-  dialog: ConfirmDialogState | null;
-  isLoading: boolean;
   dialogProps: ConfirmDialogProps;
   request: ConfirmRequest;
   run: ConfirmAction;
-  confirm: () => void;
-  cancel: () => void;
 }
+
+type PendingConfirm =
+  | {
+      kind: 'request';
+      resolve: (ok: boolean) => void;
+    }
+  | {
+      kind: 'action';
+      action: () => Promise<void>;
+      running: boolean;
+      resolve: () => void;
+      reject: (error: unknown) => void;
+    };
 
 const emptyDialogState: ConfirmDialogState = {
   title: '',
@@ -25,66 +34,98 @@ const emptyDialogState: ConfirmDialogState = {
   tone: 'default',
 };
 
+const resolveRequest = (pending: PendingConfirm | null, result: boolean): void => {
+  if (!pending) return;
+  if (pending.kind === 'request') {
+    pending.resolve(result);
+  }
+};
+
+const cancelPending = (pending: PendingConfirm | null): void => {
+  if (!pending) return;
+  if (pending.kind === 'request') {
+    pending.resolve(false);
+    return;
+  }
+  if (!pending.running) {
+    pending.resolve();
+  }
+};
+
 export const useConfirmDialog = (): UseConfirmDialogResult => {
   const [dialog, setDialog] = React.useState<ConfirmDialogState | null>(null);
   const [isLoading, setIsLoading] = React.useState(false);
-  const resolveRef = React.useRef<((ok: boolean) => void) | null>(null);
-  const actionRef = React.useRef<(() => Promise<void>) | null>(null);
-  const actionDoneRef = React.useRef<(() => void) | null>(null);
+  const pendingRef = React.useRef<PendingConfirm | null>(null);
+  const mountedRef = React.useRef(true);
 
   const reset = React.useCallback(() => {
-    resolveRef.current = null;
-    actionRef.current = null;
-    actionDoneRef.current = null;
+    pendingRef.current = null;
+    if (!mountedRef.current) return;
     setDialog(null);
     setIsLoading(false);
   }, []);
 
-  const request = React.useCallback<ConfirmRequest>(
-    (state) =>
-      new Promise<boolean>((resolve) => {
-        resolveRef.current = resolve;
-        setDialog(state);
-      }),
-    [],
-  );
+  React.useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      const pending = pendingRef.current;
+      if (!pending) return;
+      pendingRef.current = null;
+      cancelPending(pending);
+    };
+  }, []);
 
-  const run = React.useCallback<ConfirmAction>(
-    (state, action) =>
-      new Promise<void>((resolve) => {
-        actionRef.current = action;
-        actionDoneRef.current = resolve;
-        setDialog(state);
-      }),
-    [],
-  );
+  const request = React.useCallback<ConfirmRequest>((state) => {
+    if (pendingRef.current) return Promise.resolve(false);
+    return new Promise<boolean>((resolve) => {
+      pendingRef.current = { kind: 'request', resolve };
+      setDialog(state);
+    });
+  }, []);
+
+  const run = React.useCallback<ConfirmAction>((state, action) => {
+    if (pendingRef.current) return Promise.resolve();
+    return new Promise<void>((resolve, reject) => {
+      pendingRef.current = { kind: 'action', action, running: false, resolve, reject };
+      setDialog(state);
+    });
+  }, []);
 
   const cancel = React.useCallback(() => {
-    if (isLoading) return;
-    const resolve = resolveRef.current;
-    const actionDone = actionDoneRef.current;
+    const pending = pendingRef.current;
+    if (isLoading || (pending?.kind === 'action' && pending.running)) return;
     reset();
-    resolve?.(false);
-    actionDone?.();
+    cancelPending(pending);
   }, [isLoading, reset]);
 
   const confirm = React.useCallback(() => {
-    const action = actionRef.current;
-    if (!action) {
-      const resolve = resolveRef.current;
+    const pending = pendingRef.current;
+    if (!pending) {
       reset();
-      resolve?.(true);
+      return;
+    }
+    if (pending.kind === 'request') {
+      reset();
+      resolveRequest(pending, true);
       return;
     }
 
+    if (pending.running) return;
+    pending.running = true;
     setIsLoading(true);
     void (async () => {
       try {
-        await action();
-      } finally {
-        const actionDone = actionDoneRef.current;
-        reset();
-        actionDone?.();
+        await pending.action();
+        if (pendingRef.current === pending) {
+          reset();
+        }
+        pending.resolve();
+      } catch (error) {
+        if (pendingRef.current === pending) {
+          reset();
+        }
+        pending.reject(error);
       }
     })();
   }, [reset]);
@@ -105,12 +146,8 @@ export const useConfirmDialog = (): UseConfirmDialogResult => {
   );
 
   return {
-    dialog,
-    isLoading,
     dialogProps,
     request,
     run,
-    confirm,
-    cancel,
   };
 };

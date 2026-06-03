@@ -1,5 +1,5 @@
 import React from 'react';
-import { useSiteBrand } from '@context/SiteBrandContext';
+import { useSiteBrandStore } from '@stores/siteBrandStore';
 
 interface Props {
   className?: string;
@@ -7,7 +7,7 @@ interface Props {
 }
 
 const BrandLogo: React.FC<Props> = ({ className = '', alt }) => {
-  const { brand } = useSiteBrand();
+  const brand = useSiteBrandStore((state) => state.brand);
   const resolvedAlt = alt ?? `${brand.topbar_text} logo`;
 
   return (

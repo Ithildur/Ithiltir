@@ -2,9 +2,12 @@ import React from 'react';
 import type { NodeTrafficRebuildStatus } from '@lib/adminApi';
 import {
   runningRebuildNodeId,
+  startingRebuildNodeId,
+  startTrafficRebuild,
   useTrafficRebuildStore,
+  watchedRebuildNodeId,
   type TrafficRebuildStartOutcome,
-} from '../stores/trafficRebuildStore';
+} from '@stores/trafficRebuildStore';
 
 interface UseTrafficRebuildOptions {
   nodeId?: number | null;
@@ -23,9 +26,8 @@ const watchedFinishedKey = (status: NodeTrafficRebuildStatus): string =>
 export const useTrafficRebuild = (options: UseTrafficRebuildOptions = {}) => {
   const nodeId = normalizedNodeId(options.nodeId);
   const status = useTrafficRebuildStore((state) => state.status);
-  const startingNodeId = useTrafficRebuildStore((state) => state.startingNodeId);
-  const startedNodeId = useTrafficRebuildStore((state) => state.startedNodeId);
-  const start = useTrafficRebuildStore((state) => state.start);
+  const startingNodeId = useTrafficRebuildStore((state) => startingRebuildNodeId(state.local));
+  const watchedNodeId = useTrafficRebuildStore((state) => watchedRebuildNodeId(state.local));
   const [finishedKey, setFinishedKey] = React.useState<string | null>(null);
   const observedNodeRef = React.useRef<number | null>(null);
 
@@ -52,24 +54,24 @@ export const useTrafficRebuild = (options: UseTrafficRebuildOptions = {}) => {
     setFinishedKey((current) => (current === nextKey ? current : nextKey));
   }, [status, nodeId]);
 
-  const rebuildingNodeId = runningRebuildNodeId(status) ?? startingNodeId ?? startedNodeId;
+  const rebuildingNodeId = runningRebuildNodeId(status) ?? startingNodeId ?? watchedNodeId;
   const rebuildRunning = status.running;
-  const busy = rebuildRunning || startingNodeId !== null || startedNodeId !== null;
+  const busy = rebuildRunning || startingNodeId !== null || watchedNodeId !== null;
   const nodeRebuildActive = nodeId !== null && status.running && status.server_id === nodeId;
   const nodeRebuildBusy =
-    nodeId !== null && (nodeRebuildActive || startingNodeId === nodeId || startedNodeId === nodeId);
+    nodeId !== null && (nodeRebuildActive || startingNodeId === nodeId || watchedNodeId === nodeId);
   const actionBusy = nodeId === null ? busy : nodeRebuildBusy;
 
   return {
     rebuildingNodeId,
     startingNodeId,
-    startedNodeId,
+    startedNodeId: watchedNodeId,
     rebuildRunning,
     busy,
     nodeRebuildActive,
     nodeRebuildBusy,
     actionBusy,
     finishedKey,
-    start,
+    start: startTrafficRebuild,
   };
 };

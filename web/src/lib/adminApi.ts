@@ -1,57 +1,67 @@
 import type { Group, NodeDeploy, ManagedNode, UpdateNodeInput } from '@app-types/api';
 import type {
   AlertChannel,
-  AlertChannelType,
-  ChannelConfigInput,
   AlertRule,
   AlertRuleInput,
   AlertMounts,
+  EmailConfig,
   SystemSettings,
+  TelegramBotConfig,
+  TelegramMtprotoConfig,
   ThemePackage,
+  WebhookConfig,
 } from '@app-types/admin';
 import { apiFetch } from './api';
 
-export const fetchGroupList = () =>
+export const fetchGroupList = (params: { signal?: AbortSignal } = {}) =>
   apiFetch<Group[]>('/admin/groups', {
     method: 'GET',
+    signal: params.signal,
   });
 
 export const createGroup = (input: { name: string; remark?: string }) =>
-  apiFetch<void>('/admin/groups', {
+  apiFetch('/admin/groups', {
     method: 'POST',
     json: input,
+    responseType: 'empty',
   });
 
 export const updateGroup = (id: number, input: { name?: string; remark?: string }) =>
-  apiFetch<void>(`/admin/groups/${id}`, {
+  apiFetch(`/admin/groups/${id}`, {
     method: 'PATCH',
     json: input,
+    responseType: 'empty',
   });
 
 export const deleteGroup = (id: number) =>
-  apiFetch<void>(`/admin/groups/${id}`, {
+  apiFetch(`/admin/groups/${id}`, {
     method: 'DELETE',
+    responseType: 'empty',
   });
 
-export const fetchNodes = () =>
+export const fetchNodes = (params: { signal?: AbortSignal } = {}) =>
   apiFetch<ManagedNode[]>('/admin/nodes', {
     method: 'GET',
+    signal: params.signal,
   });
 
 export const createNode = () =>
-  apiFetch<void>('/admin/nodes', {
+  apiFetch('/admin/nodes', {
     method: 'POST',
+    responseType: 'empty',
   });
 
 export const updateNode = (id: number, input: UpdateNodeInput) =>
-  apiFetch<void>(`/admin/nodes/${id}`, {
+  apiFetch(`/admin/nodes/${id}`, {
     method: 'PATCH',
     json: input,
+    responseType: 'empty',
   });
 
 export const requestNodeUpgrade = (id: number) =>
-  apiFetch<void>(`/admin/nodes/${id}/upgrade`, {
+  apiFetch(`/admin/nodes/${id}/upgrade`, {
     method: 'POST',
+    responseType: 'empty',
   });
 
 export interface NodeTrafficRebuildStatus {
@@ -77,55 +87,64 @@ export const rebuildNodeTraffic = (id: number, signal?: AbortSignal) =>
   });
 
 export const deleteNode = (id: number) =>
-  apiFetch<void>(`/admin/nodes/${id}`, {
+  apiFetch(`/admin/nodes/${id}`, {
     method: 'DELETE',
+    responseType: 'empty',
   });
 
-export const fetchNodeDeploy = () =>
+export const fetchNodeDeploy = (params: { signal?: AbortSignal } = {}) =>
   apiFetch<NodeDeploy>('/admin/nodes/deploy', {
     method: 'GET',
+    signal: params.signal,
   });
 
 export const updateNodesDisplayOrder = (ids: number[]) =>
-  apiFetch<void>('/admin/nodes/display-order', {
+  apiFetch('/admin/nodes/display-order', {
     method: 'PUT',
     json: { ids },
+    responseType: 'empty',
   });
 
 export const updateNodesTrafficP95 = (ids: number[], enabled: boolean) =>
-  apiFetch<void>('/admin/nodes/traffic-p95', {
+  apiFetch('/admin/nodes/traffic-p95', {
     method: 'PATCH',
     json: { ids, enabled },
+    responseType: 'empty',
   });
 
-export const fetchAlertRules = () =>
+export const fetchAlertRules = (params: { signal?: AbortSignal } = {}) =>
   apiFetch<AlertRule[]>('/admin/alerts/rules', {
     method: 'GET',
+    signal: params.signal,
   });
 
 export type CreateAlertRuleInput = AlertRuleInput;
 export type UpdateAlertRuleInput = Partial<AlertRuleInput>;
 
 export const createAlertRule = (input: CreateAlertRuleInput) =>
-  apiFetch<void>('/admin/alerts/rules', {
+  apiFetch('/admin/alerts/rules', {
     method: 'POST',
     json: input,
+    responseType: 'empty',
   });
 
 export const updateAlertRule = (id: number, input: UpdateAlertRuleInput) =>
-  apiFetch<void>(`/admin/alerts/rules/${id}`, {
+  apiFetch(`/admin/alerts/rules/${id}`, {
     method: 'PATCH',
     json: input,
+    responseType: 'empty',
   });
 
 export const deleteAlertRule = (id: number) =>
-  apiFetch<void>(`/admin/alerts/rules/${id}`, {
+  apiFetch(`/admin/alerts/rules/${id}`, {
     method: 'DELETE',
+    responseType: 'empty',
   });
 
-export const fetchAlertMounts = () =>
+export const fetchAlertMounts = (params: { signal?: AbortSignal } = {}) =>
   apiFetch<AlertMounts>('/admin/alerts/mounts', {
     method: 'GET',
+    signal: params.signal,
   });
 
 export const updateAlertMounts = (input: {
@@ -133,55 +152,69 @@ export const updateAlertMounts = (input: {
   server_ids: number[];
   mounted: boolean;
 }) =>
-  apiFetch<void>('/admin/alerts/mounts', {
+  apiFetch('/admin/alerts/mounts', {
     method: 'PUT',
     json: input,
+    responseType: 'empty',
   });
 
-export interface AlertChannelInput {
+interface BaseAlertChannelInput {
   name: string;
-  type: AlertChannelType;
-  config: ChannelConfigInput;
   enabled: boolean;
 }
 
-export const fetchAlertChannels = () =>
+export type AlertChannelInput =
+  | (BaseAlertChannelInput & {
+      type: 'telegram';
+      config: TelegramBotConfig | TelegramMtprotoConfig;
+    })
+  | (BaseAlertChannelInput & {
+      type: 'email';
+      config: EmailConfig;
+    })
+  | (BaseAlertChannelInput & {
+      type: 'webhook';
+      config: WebhookConfig;
+    });
+
+export const fetchAlertChannels = (params: { signal?: AbortSignal } = {}) =>
   apiFetch<AlertChannel[]>('/admin/alerts/channels', {
     method: 'GET',
-  });
-
-export const fetchAlertChannel = (id: number) =>
-  apiFetch<AlertChannel>(`/admin/alerts/channels/${id}`, {
-    method: 'GET',
+    signal: params.signal,
   });
 
 export const createAlertChannel = (input: AlertChannelInput) =>
-  apiFetch<void>('/admin/alerts/channels', {
+  apiFetch('/admin/alerts/channels', {
     method: 'POST',
     json: input,
+    responseType: 'empty',
   });
 
 export const updateAlertChannel = (id: number, input: AlertChannelInput) =>
-  apiFetch<void>(`/admin/alerts/channels/${id}`, {
+  apiFetch(`/admin/alerts/channels/${id}`, {
     method: 'PUT',
     json: input,
+    responseType: 'empty',
   });
 
 export const updateAlertChannelEnabled = (id: number, input: { enabled: boolean }) =>
-  apiFetch<void>(`/admin/alerts/channels/${id}/enabled`, {
+  apiFetch(`/admin/alerts/channels/${id}/enabled`, {
     method: 'PUT',
     json: input,
+    responseType: 'empty',
   });
 
 export const testAlertChannel = (id: number, input: { title?: string; message?: string } = {}) =>
-  apiFetch<void>(`/admin/alerts/channels/${id}/test`, {
+  apiFetch(`/admin/alerts/channels/${id}/test`, {
     method: 'POST',
     json: input,
+    responseType: 'empty',
   });
 
 export const deleteAlertChannel = (id: number) =>
-  apiFetch<void>(`/admin/alerts/channels/${id}`, {
+  apiFetch(`/admin/alerts/channels/${id}`, {
     method: 'DELETE',
+    responseType: 'empty',
   });
 
 export interface AlertMtprotoCodeResult {
@@ -205,15 +238,17 @@ export const requestAlertMtprotoCode = (channelId: number) =>
   });
 
 export const verifyAlertMtprotoCode = (input: { login_id: string; code: string }) =>
-  apiFetch<AlertMtprotoVerifyResult | void>('/admin/alerts/channels/telegram/mtproto/verify', {
+  apiFetch<AlertMtprotoVerifyResult>('/admin/alerts/channels/telegram/mtproto/verify', {
     method: 'POST',
     json: input,
+    responseType: 'jsonOrEmpty',
   });
 
 export const submitAlertMtprotoPassword = (input: { login_id: string; password: string }) =>
-  apiFetch<void>('/admin/alerts/channels/telegram/mtproto/password', {
+  apiFetch('/admin/alerts/channels/telegram/mtproto/password', {
     method: 'POST',
     json: input,
+    responseType: 'empty',
   });
 
 export const pingAlertMtproto = (channelId: number) =>
@@ -222,20 +257,23 @@ export const pingAlertMtproto = (channelId: number) =>
     json: { channel_id: channelId },
   });
 
-export const fetchSystemSettings = () =>
+export const fetchSystemSettings = (params: { signal?: AbortSignal } = {}) =>
   apiFetch<SystemSettings>('/admin/system/settings', {
     method: 'GET',
+    signal: params.signal,
   });
 
 export const updateSystemSettings = (input: Partial<SystemSettings>) =>
-  apiFetch<void>('/admin/system/settings', {
+  apiFetch('/admin/system/settings', {
     method: 'PATCH',
     json: input,
+    responseType: 'empty',
   });
 
-export const fetchThemePackages = () =>
+export const fetchThemePackages = (params: { signal?: AbortSignal } = {}) =>
   apiFetch<ThemePackage[]>('/admin/system/themes', {
     method: 'GET',
+    signal: params.signal,
   });
 
 export const uploadThemePackage = (file: File) => {
@@ -248,11 +286,13 @@ export const uploadThemePackage = (file: File) => {
 };
 
 export const applyThemePackage = (id: string) =>
-  apiFetch<void>(`/admin/system/themes/${id}/apply`, {
+  apiFetch(`/admin/system/themes/${id}/apply`, {
     method: 'POST',
+    responseType: 'empty',
   });
 
 export const deleteThemePackage = (id: string) =>
-  apiFetch<void>(`/admin/system/themes/${id}`, {
+  apiFetch(`/admin/system/themes/${id}`, {
     method: 'DELETE',
+    responseType: 'empty',
   });

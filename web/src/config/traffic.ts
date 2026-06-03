@@ -1,0 +1,1 @@
+export const TRAFFIC_MONTHLY_HISTORY_MONTHS = 12;

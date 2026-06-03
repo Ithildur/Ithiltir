@@ -1,20 +1,23 @@
 import React from 'react';
 import { useI18n } from '@i18n';
-import { useTopBanner } from '@components/ui/TopBannerStack';
-import { updateNodesDisplayOrder } from '@lib/adminApi';
+import { pushTopBanner } from '@runtime/topBannerRuntime';
 import type { NodeRow } from '@app-types/admin';
 import { useApiErrorHandler } from '@hooks/useApiErrorHandler';
+import {
+  commitAdminNodeOrder,
+  previewAdminNodeOrder,
+  rollbackAdminNodeOrder,
+  saveAdminNodeOrder,
+} from '@stores/adminNodesStore';
 
-export const useReorder = ({
+export const useNodeOrder = ({
   token,
   nodes,
-  setNodes,
   filteredNodeIds,
   refreshNodes,
 }: {
   token: string | null;
   nodes: NodeRow[];
-  setNodes: React.Dispatch<React.SetStateAction<NodeRow[]>>;
   filteredNodeIds: number[];
   refreshNodes: () => Promise<void>;
 }): {
@@ -26,7 +29,6 @@ export const useReorder = ({
   dragEnd: () => void;
 } => {
   const { t } = useI18n();
-  const pushBanner = useTopBanner();
   const apiError = useApiErrorHandler();
 
   const [draggingId, setDraggingId] = React.useState<number | null>(null);
@@ -35,6 +37,7 @@ export const useReorder = ({
   type DragSession = {
     sourceId: number;
     originalIds: number[];
+    originalVisibleIds: number[];
     originalDisplayOrders: Map<number, number>;
     allIds: number[];
     visibleIds: number[];
@@ -43,11 +46,19 @@ export const useReorder = ({
 
   const sessionRef = React.useRef<DragSession | null>(null);
 
-  const resetDragState = React.useCallback(() => {
+  const clearDragState = React.useCallback(() => {
     sessionRef.current = null;
     setDraggingId(null);
     setDragOverId(null);
   }, []);
+
+  const cancelDrag = React.useCallback(() => {
+    const session = sessionRef.current;
+    if (session?.didChange) {
+      rollbackAdminNodeOrder(session.originalIds, session.originalDisplayOrders);
+    }
+    clearDragState();
+  }, [clearDragState]);
 
   const reorderWithinVisible = React.useCallback(
     (visibleIds: number[], sourceId: number, targetId: number): number[] => {
@@ -72,27 +83,33 @@ export const useReorder = ({
     [],
   );
 
-  const reorderNodesByIds = React.useCallback((prev: NodeRow[], orderedIds: number[]) => {
-    const lookup = new Map(prev.map((node) => [node.id, node]));
-    const next: NodeRow[] = [];
-    for (const id of orderedIds) {
-      const item = lookup.get(id);
-      if (item) next.push(item);
-    }
-    if (next.length !== prev.length) {
-      const seen = new Set(orderedIds);
-      for (const item of prev) {
-        if (!seen.has(item.id)) next.push(item);
-      }
-    }
-    return next;
+  const idsEqual = React.useCallback((left: number[], right: number[]): boolean => {
+    if (left.length !== right.length) return false;
+    return left.every((id, index) => id === right[index]);
   }, []);
+
+  const finalIdsForDrop = React.useCallback(
+    (session: DragSession, targetId: number): number[] => {
+      const nextVisibleIds = reorderWithinVisible(
+        session.originalVisibleIds,
+        session.sourceId,
+        targetId,
+      );
+      if (nextVisibleIds === session.originalVisibleIds) return session.originalIds;
+      return mergeVisibleBackIntoAll(
+        session.originalIds,
+        session.originalVisibleIds,
+        nextVisibleIds,
+      );
+    },
+    [mergeVisibleBackIntoAll, reorderWithinVisible],
+  );
 
   const persistReorder = React.useCallback(
     async (orderedIds: number[]): Promise<boolean> => {
       if (!token) return false;
       try {
-        await updateNodesDisplayOrder(orderedIds);
+        await saveAdminNodeOrder(orderedIds);
         return true;
       } catch (error) {
         apiError(error, t('admin_reorder_sync_failed'));
@@ -104,15 +121,13 @@ export const useReorder = ({
 
   React.useEffect(() => {
     const clearGlobalDrag = () => {
-      resetDragState();
+      cancelDrag();
     };
     document.addEventListener('dragend', clearGlobalDrag);
-    document.addEventListener('drop', clearGlobalDrag);
     return () => {
       document.removeEventListener('dragend', clearGlobalDrag);
-      document.removeEventListener('drop', clearGlobalDrag);
     };
-  }, [resetDragState]);
+  }, [cancelDrag]);
 
   const dragStart = React.useCallback(
     (id: number) => (event: React.DragEvent) => {
@@ -121,6 +136,7 @@ export const useReorder = ({
       sessionRef.current = {
         sourceId: id,
         originalIds: nodes.map((node) => node.id),
+        originalVisibleIds: filteredNodeIds.slice(),
         originalDisplayOrders: new Map(nodes.map((node) => [node.id, node.displayOrder])),
         allIds: nodes.map((node) => node.id),
         visibleIds: filteredNodeIds.slice(),
@@ -157,64 +173,50 @@ export const useReorder = ({
         visibleIds: nextVisibleIds,
         didChange: true,
       };
-      setNodes((prev) => reorderNodesByIds(prev, nextAllIds));
+      previewAdminNodeOrder(nextAllIds);
     },
-    [mergeVisibleBackIntoAll, reorderNodesByIds, reorderWithinVisible, setNodes],
+    [mergeVisibleBackIntoAll, reorderWithinVisible],
   );
 
   const drop = React.useCallback(
     (targetId: number) => async (event: React.DragEvent) => {
       event.preventDefault();
       const session = sessionRef.current;
-      resetDragState();
+      clearDragState();
       if (!session) return;
 
       const shouldPersist = session.didChange || session.sourceId !== targetId;
       if (!shouldPersist) {
         return;
       }
-      const finalIds = session.allIds;
+      const finalIds = finalIdsForDrop(session, targetId);
+      if (idsEqual(finalIds, session.originalIds)) {
+        if (session.didChange) {
+          rollbackAdminNodeOrder(session.originalIds, session.originalDisplayOrders);
+        }
+        return;
+      }
 
-      setNodes((prev) => {
-        const next = reorderNodesByIds(prev, finalIds);
-        return next.map((node, index, arr) => ({
-          ...node,
-          displayOrder: arr.length - index,
-        }));
-      });
+      commitAdminNodeOrder(finalIds);
 
       const success = await persistReorder(finalIds);
       if (success) {
-        pushBanner(t('admin_node_order_updated'), { tone: 'info' });
+        pushTopBanner(t('admin_node_order_updated'), { tone: 'info' });
       } else {
         try {
           await refreshNodes();
         } catch (error) {
           apiError(error, t('admin_fetch_nodes_failed'));
-          setNodes((prev) =>
-            reorderNodesByIds(prev, session.originalIds).map((node) => ({
-              ...node,
-              displayOrder: session.originalDisplayOrders.get(node.id) ?? node.displayOrder,
-            })),
-          );
+          rollbackAdminNodeOrder(session.originalIds, session.originalDisplayOrders);
         }
       }
     },
-    [
-      apiError,
-      persistReorder,
-      pushBanner,
-      refreshNodes,
-      reorderNodesByIds,
-      resetDragState,
-      setNodes,
-      t,
-    ],
+    [apiError, clearDragState, finalIdsForDrop, idsEqual, persistReorder, refreshNodes, t],
   );
 
   const dragEnd = React.useCallback(() => {
-    resetDragState();
-  }, [resetDragState]);
+    cancelDrag();
+  }, [cancelDrag]);
 
   return { draggingId, dragOverId, dragStart, dragOver, drop, dragEnd };
 };

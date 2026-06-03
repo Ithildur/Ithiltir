@@ -11,6 +11,7 @@ export interface Props {
   someVisibleP95Selected: boolean;
   savingP95NodeIds: Set<number>;
   savingTrafficSettingsNodeIds: Set<number>;
+  trafficSettingsDisabled: boolean;
   rebuildingTrafficNodeId: number | null;
   trafficRebuildBusy: boolean;
   onToggleVisibleNodes: () => void;
@@ -27,6 +28,7 @@ const NodeAdvancedTable: React.FC<Props> = ({
   someVisibleP95Selected,
   savingP95NodeIds,
   savingTrafficSettingsNodeIds,
+  trafficSettingsDisabled,
   rebuildingTrafficNodeId,
   trafficRebuildBusy,
   onToggleVisibleNodes,
@@ -96,7 +98,7 @@ const NodeAdvancedTable: React.FC<Props> = ({
                 <td className="px-3 py-2 text-xs w-44">
                   <TrafficSettingsButton
                     node={node}
-                    disabled={savingTrafficSettingsNodeIds.has(node.id)}
+                    disabled={trafficSettingsDisabled || savingTrafficSettingsNodeIds.has(node.id)}
                     onOpen={onOpenTrafficSettings}
                   />
                 </td>
