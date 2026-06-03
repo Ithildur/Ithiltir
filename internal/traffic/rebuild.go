@@ -75,7 +75,14 @@ func newRebuildRunner(ctx context.Context, store rebuildStore, gate trafficWrite
 		retain = trafficRetention(0)
 	}
 	runCtx, stop := context.WithCancel(ctx)
-	return &RebuildRunner{store: store, gate: gate, ctx: runCtx, stop: stop, retain: retain, now: time.Now}
+	return &RebuildRunner{
+		store:  store,
+		gate:   gate,
+		ctx:    runCtx,
+		stop:   stop,
+		retain: retain,
+		now:    time.Now,
+	}
 }
 
 func (r *RebuildRunner) Current() RebuildState {
@@ -123,7 +130,7 @@ func (r *RebuildRunner) Start(serverID int64) (RebuildState, error) {
 		return r.currentLocked(), ErrRebuildRunning
 	}
 
-	startedAt := time.Now().UTC()
+	startedAt := r.now().UTC()
 	state := RebuildState{
 		ServerID:  serverID,
 		Status:    RebuildRunning,
@@ -201,7 +208,7 @@ func (r *RebuildRunner) finish(serverID int64, err error) {
 	}
 
 	state := r.state
-	finishedAt := time.Now().UTC()
+	finishedAt := r.now().UTC()
 	state.Running = false
 	state.FinishedAt = &finishedAt
 	if err != nil {
