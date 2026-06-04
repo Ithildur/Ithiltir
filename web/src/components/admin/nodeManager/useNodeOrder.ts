@@ -88,7 +88,7 @@ export const useNodeOrder = ({
     return left.every((id, index) => id === right[index]);
   }, []);
 
-  const finalIdsForDrop = React.useCallback(
+  const idsFromDropTarget = React.useCallback(
     (session: DragSession, targetId: number): number[] => {
       const nextVisibleIds = reorderWithinVisible(
         session.originalVisibleIds,
@@ -189,7 +189,9 @@ export const useNodeOrder = ({
       if (!shouldPersist) {
         return;
       }
-      const finalIds = finalIdsForDrop(session, targetId);
+      const finalIds = session.didChange
+        ? session.allIds
+        : idsFromDropTarget(session, targetId);
       if (idsEqual(finalIds, session.originalIds)) {
         if (session.didChange) {
           rollbackAdminNodeOrder(session.originalIds, session.originalDisplayOrders);
@@ -211,7 +213,7 @@ export const useNodeOrder = ({
         }
       }
     },
-    [apiError, clearDragState, finalIdsForDrop, idsEqual, persistReorder, refreshNodes, t],
+    [apiError, clearDragState, idsEqual, idsFromDropTarget, persistReorder, refreshNodes, t],
   );
 
   const dragEnd = React.useCallback(() => {
