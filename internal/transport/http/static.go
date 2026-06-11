@@ -2,6 +2,7 @@ package transporthttp
 
 import (
 	"net/http"
+	"time"
 
 	"dash/internal/config"
 	systemstore "dash/internal/store/system"
@@ -22,7 +23,7 @@ func Register(router chi.Router, cfg *config.Config, st *systemstore.Store, them
 		return nil, err
 	}
 	registerInstallScriptRoutes(router, cfg)
-	if err := kitstatic.Mount(router, "/deploy", "deploy", opts); err != nil {
+	if err := mountDeployRoute(router, opts); err != nil {
 		return nil, err
 	}
 	return kitstatic.MountSPA(router, "/", "dist", opts)
@@ -47,4 +48,22 @@ func mountInstallScriptRoute(router chi.Router, cfg *config.Config, routePath, p
 
 	router.Get(routePath, handler)
 	router.Head(routePath, handler)
+}
+
+func mountDeployRoute(router chi.Router, opts kitstatic.Options) error {
+	dir, err := kitstatic.ResolveDir("deploy", opts)
+	if err != nil {
+		return err
+	}
+
+	handler := clearWriteDeadline(http.StripPrefix("/deploy", http.FileServer(http.Dir(dir))))
+	router.Handle("/deploy/*", handler)
+	return nil
+}
+
+func clearWriteDeadline(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = http.NewResponseController(w).SetWriteDeadline(time.Time{})
+		next.ServeHTTP(w, r)
+	})
 }
