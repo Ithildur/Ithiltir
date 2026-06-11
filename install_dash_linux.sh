@@ -383,11 +383,11 @@ kill_listeners_on_port() {
 		return 0
 	fi
 	if port_has_redis_listener "$port" "$pids"; then
-		say "检测到端口 ${port} 已由 Redis 监听，跳过结束进程。" "Port ${port} is already owned by Redis; skipping listener termination."
-		return 10
+		say "检测到端口 ${port} 已由 Redis 监听，先停止旧 Redis 进程：${pids}" "Port ${port} is already owned by Redis; stopping old Redis listeners: ${pids}"
+	else
+		say "检测到端口 ${port} 已被占用，尝试结束占用进程：${pids}" "Port ${port} is in use; terminating listeners: ${pids}"
 	fi
 
-	say "检测到端口 ${port} 已被占用，尝试结束占用进程：${pids}" "Port ${port} is in use; terminating listeners: ${pids}"
 	as_root systemctl stop redis-server.service >/dev/null 2>&1 || true
 	as_root systemctl stop redis.service >/dev/null 2>&1 || true
 
@@ -995,10 +995,6 @@ install_redis_build_deps() {
 
 install_redis_from_source() {
 	local ver="${1:-8.2.5}"
-	if port_has_redis_listener 6379; then
-		say "检测到端口 6379 已由 Redis 监听，跳过源码安装。" "Redis is already listening on port 6379; skipping source installation."
-		return 10
-	fi
 	ensure_pkg_prereqs
 	install_redis_build_deps
 
@@ -1022,16 +1018,7 @@ install_redis_from_source() {
 
 	write_redis_service
 
-	if kill_listeners_on_port 6379; then
-		:
-	else
-		local stop_status=$?
-		if [[ "$stop_status" -eq 10 ]]; then
-			say "检测到端口 6379 已由 Redis 监听，跳过源码安装。" "Redis is already listening on port 6379; skipping source installation."
-			return 10
-		fi
-		return "$stop_status"
-	fi
+	kill_listeners_on_port 6379
 
 	as_root systemctl daemon-reload
 	as_root systemctl enable --now redis-server.service
@@ -1040,33 +1027,21 @@ install_redis_from_source() {
 ensure_redis_82plus() {
 	local want="8.2.3"
 	local v
+	local tried_pkg=0
 
 	case "${REDIS_INSTALL_METHOD}" in
 	package | apt)
 		v="$(redis_version)"
 		if [[ -z "$v" ]]; then
-			if ! prompt_yes_no "$(txt "未检测到 Redis，是否先尝试使用系统包管理器安装兼容的 Redis？" "Redis not detected. Try installing a compatible Redis via the system package manager?")"; then
-				die "$(txt "Redis 未安装，无法继续" "Redis is required")"
-			fi
-			if ! install_redis_via_package_manager; then
-				say "系统包管理器未提供可直接使用的 redis-server，改为源码安装。" "No usable redis-server package was found in the system repositories. Falling back to source install."
-				local target_ver_missing
-				target_ver_missing="$(prompt_string "$(txt "请输入要源码安装的 Redis 版本" "Redis version to install from source")" "8.2.5")"
-				if install_redis_from_source "$target_ver_missing"; then
-					:
-				else
-					local install_status=$?
-					if [[ "$install_status" -eq 10 ]]; then
-						return 0
-					fi
-					return "$install_status"
+			if prompt_yes_no "$(txt "未检测到 Redis，是否先尝试使用系统包管理器安装兼容的 Redis？" "Redis not detected. Try installing a compatible Redis via the system package manager?")"; then
+				tried_pkg=1
+				if ! install_redis_via_package_manager; then
+					say "系统包管理器未提供可直接使用的 redis-server。" "No usable redis-server package was found in the system repositories."
 				fi
 				v="$(redis_version)"
-				[[ -n "$v" ]] || die "$(txt "Redis 安装失败：未检测到 redis-server" "Redis install failed: redis-server was not detected")"
-				version_ge "$v" "$want" || die "$(txt "Redis 版本仍不足（当前 ${v}，需要 >=8.2）" "Redis version is still too old (current ${v}, need >=8.2)")"
-				return 0
+			else
+				say "已跳过系统包管理器安装 Redis。" "Skipped Redis installation via the system package manager."
 			fi
-			v="$(redis_version)"
 		fi
 
 		if [[ -n "$v" ]] && version_ge "$v" "$want"; then
@@ -1077,23 +1052,20 @@ ensure_redis_82plus() {
 
 		if [[ -n "$v" ]]; then
 			say "检测到 Redis ${v}，但需要 >=8.2。" "Detected Redis ${v}, but >=8.2 is required."
-		else
+		elif [[ "$tried_pkg" -eq 1 ]]; then
 			say "系统包管理器安装后仍未检测到可用的 redis-server。" "A usable redis-server binary is still not available after the package-manager attempt."
+		else
+			say "未检测到 Redis。" "Redis was not detected."
 		fi
 		if ! prompt_yes_no "$(txt "是否源码安装/升级 Redis（默认 8.2.5）？" "Install or upgrade Redis from source instead? (default 8.2.5)")"; then
-			die "$(txt "Redis 版本不足，无法继续" "Redis version is insufficient")"
+			if [[ -n "$v" ]]; then
+				die "$(txt "Redis 版本不足，无法继续" "Redis version is insufficient")"
+			fi
+			die "$(txt "Redis 未安装，无法继续" "Redis is required")"
 		fi
 		local target_ver_pkg
 		target_ver_pkg="$(prompt_string "$(txt "请输入要源码安装的 Redis 版本" "Redis version to install from source")" "8.2.5")"
-		if install_redis_from_source "$target_ver_pkg"; then
-			:
-		else
-			local install_status=$?
-			if [[ "$install_status" -eq 10 ]]; then
-				return 0
-			fi
-			return "$install_status"
-		fi
+		install_redis_from_source "$target_ver_pkg"
 		v="$(redis_version)"
 		[[ -n "$v" ]] || die "$(txt "Redis 安装失败：未检测到 redis-server" "Redis install failed: redis-server not found")"
 		version_ge "$v" "$want" || die "$(txt "Redis 版本仍不足（当前 ${v}，需要 >=8.2）" "Redis version still too old (current ${v}, need >=8.2)")"
@@ -1105,7 +1077,7 @@ ensure_redis_82plus() {
 		fi
 
 		if [[ -z "$v" ]]; then
-				if ! prompt_yes_no "$(txt "未检测到 Redis，是否源码安装 Redis（默认 8.2.5）？" "Redis not detected. Install Redis (default 8.2.5) from source?")"; then
+			if ! prompt_yes_no "$(txt "未检测到 Redis，是否源码安装 Redis（默认 8.2.5）？" "Redis not detected. Install Redis (default 8.2.5) from source?")"; then
 				die "$(txt "Redis 未安装，无法继续" "Redis is required")"
 			fi
 		else
@@ -1116,15 +1088,7 @@ ensure_redis_82plus() {
 
 		local target_ver
 		target_ver="$(prompt_string "$(txt "请输入要源码安装的 Redis 版本" "Redis version to install (source build)")" "8.2.5")"
-		if install_redis_from_source "$target_ver"; then
-			:
-		else
-			local install_status=$?
-			if [[ "$install_status" -eq 10 ]]; then
-				return 0
-			fi
-			return "$install_status"
-		fi
+		install_redis_from_source "$target_ver"
 
 		v="$(redis_version)"
 		[[ -n "$v" ]] || die "$(txt "Redis 安装失败：未检测到 redis-server" "Redis install failed: redis-server not found")"
