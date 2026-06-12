@@ -54,6 +54,9 @@ func TestIntegrationSaveMetricsCurrentProjection(t *testing.T) {
 	if !current.CollectedAt.Equal(newerAt) || current.CPUUsageRatio != 0.8 {
 		t.Fatalf("current metric = collected_at %v cpu %v, want newer sample", current.CollectedAt, current.CPUUsageRatio)
 	}
+	if current.PSIMemFullAvg300 == nil || *current.PSIMemFullAvg300 != 1.5 {
+		t.Fatalf("current memory PSI full avg300 = %v, want 1.5", current.PSIMemFullAvg300)
+	}
 
 	var nic model.ServerCurrentNICMetric
 	if err := st.db.WithContext(ctx).First(&nic, "server_id = ?", srv.ID).Error; err != nil {
@@ -94,13 +97,15 @@ func createMetricTestServer(t *testing.T, st *Store, name string) model.Server {
 }
 
 func testServerMetric(serverID int64, collectedAt time.Time, cpuUsageRatio float64) model.ServerMetric {
+	pressure := cpuUsageRatio + 0.7
 	return model.ServerMetric{
 		ServerID:    serverID,
 		CollectedAt: collectedAt,
 		MetricsSnapshot: model.MetricsSnapshot{
-			CPUUsageRatio: cpuUsageRatio,
-			MemTotal:      1000,
-			MemUsed:       int64(cpuUsageRatio * 1000),
+			CPUUsageRatio:    cpuUsageRatio,
+			MemTotal:         1000,
+			MemUsed:          int64(cpuUsageRatio * 1000),
+			PSIMemFullAvg300: &pressure,
 		},
 	}
 }

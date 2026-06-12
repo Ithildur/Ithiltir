@@ -82,16 +82,17 @@ Optional bearer endpoints treat a missing, malformed, expired, revoked, or other
 
 ## Node Metrics Runtime Fields
 
-- `POST /api/node/metrics` accepts optional `metrics.disk.smart` and `metrics.thermal`. Older agents may omit both fields.
+- `POST /api/node/metrics` accepts optional `metrics.disk.smart`, `metrics.thermal`, and `metrics.pressure`. Older agents may omit these fields.
 - `metrics.disk.smart` is disk SMART runtime state. It is kept in a separate hot cache and is not written to PostgreSQL metrics snapshots. SMART temperature for confirmed physical disks may be reduced into per-device `disk.temp_c` history. `metrics.thermal` stores hardware temperature sensors at the metrics root; thermal data is written to PostgreSQL metrics snapshots but kept as a separate field cache in the frontend cache.
+- `metrics.pressure` is Linux PSI (Pressure Stall Information). It may contain `cpu`, `memory`, and `io`, each with optional `some` and `full` numeric groups. Each group has `avg10`, `avg60`, `avg300` percentages and cumulative `total` microseconds. Dashboard stores these values as fixed numeric time-series columns; collection status/reason strings are not persisted. Missing groups remain `NULL` and are treated as unavailable, not as zero pressure.
 - `disk.smart.devices` and `thermal.sensors` are arrays. Empty results are `[]`, not `null`, when the field is present.
 - Optional numeric fields such as `temp_c`, `power_on_hours`, `lifetime_used_percent`, `critical_warning`, `high_c`, and `critical_c` are omitted when unavailable. Missing values are not converted to `0`.
 - `disk.smart.devices[].critical_warning` is the raw NVMe critical warning bitset. `disk.smart.devices[].failing_attrs[]` contains ATA SMART attributes currently reported as `FAILING_NOW`.
 - SMART and thermal `status` values are open strings. Known values include `ok`, `partial`, `unsupported`, `not_found`, `no_permission`, `timeout`, `error`, `no_cache`, `stale`, `no_tool`, and `standby`.
 - `disk.smart.status` is collection state. `disk.smart.devices[].health` is disk health. `status=ok` with `health=failed` means collection succeeded and the disk health check failed.
 - `status=no_cache`, `no_tool`, or `unsupported` is not a disk failure. `status=stale` preserves the last `devices[]` while marking the cache expired.
-- `GET /api/front/metrics` combines the latest hot node snapshot with the SMART and thermal field caches and returns `disk.smart`, `disk.temperature_devices`, and top-level `thermal` in each node view when present. `disk.temperature_devices` is the backend-derived list of physical disk names that can be used as `device` for `disk.temp_c` history.
-- `/api/metrics/history` supports `cpu.temp_c` and `disk.temp_c`. CPU temperature comes from thermal CPU sensors. Disk temperature comes from SMART devices that are confirmed physical disks; virtual disks and RAID devices are not persisted. Passing `device` scopes `disk.temp_c` to one physical disk from `disk.temperature_devices`; omitting it aggregates the persisted physical disk rows.
+- `GET /api/front/metrics` combines the latest hot node snapshot with the SMART and thermal field caches and returns `disk.smart`, `disk.temperature_devices`, top-level `thermal`, and top-level `pressure` in each node view when present. `disk.temperature_devices` is the backend-derived list of physical disk names that can be used as `device` for `disk.temp_c` history.
+- `/api/metrics/history` supports `cpu.temp_c`, `disk.temp_c`, and PSI average metrics: `pressure.cpu.some_avg10|avg60|avg300`, `pressure.memory.some_avg10|avg60|avg300`, `pressure.memory.full_avg10|avg60|avg300`, `pressure.io.some_avg10|avg60|avg300`, and `pressure.io.full_avg10|avg60|avg300`. CPU temperature comes from thermal CPU sensors. Disk temperature comes from SMART devices that are confirmed physical disks; virtual disks and RAID devices are not persisted. Passing `device` scopes `disk.temp_c` to one physical disk from `disk.temperature_devices`; omitting it aggregates the persisted physical disk rows.
 
 ## Alert Metrics
 
@@ -100,6 +101,7 @@ Optional bearer endpoints treat a missing, malformed, expired, revoked, or other
 - `disk.smart.failed` counts devices whose SMART health is `failed`. It does not count `no_cache`, `no_tool`, `unsupported`, or other collection states as disk failures.
 - `disk.smart.nvme.critical_warning` counts devices whose `critical_warning` bitset is non-zero. `disk.smart.attribute_failing` counts current `FAILING_NOW` SMART attributes.
 - Missing `disk.smart` data is not a SMART failure. Built-in SMART rules do not trigger when a node has no SMART report.
+- PSI pressure data is currently stored and exposed for history queries only; it is not an alert metric yet and no built-in PSI alerts are enabled.
 
 ## Traffic Statistics
 

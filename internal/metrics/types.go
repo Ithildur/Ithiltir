@@ -25,6 +25,7 @@ type Metrics struct {
 	Connections ConnectionMetrics `json:"connections"`
 	Raid        RaidMetrics       `json:"raid"`
 	Thermal     *Thermal          `json:"thermal,omitempty"`
+	Pressure    *Pressure         `json:"pressure,omitempty"`
 }
 
 // CPUMetrics describes CPU usage and load.
@@ -255,4 +256,22 @@ type ThermalSensor struct {
 	TempC     *float64 `json:"temp_c,omitempty"`
 	HighC     *float64 `json:"high_c,omitempty"`
 	CriticalC *float64 `json:"critical_c,omitempty"`
+}
+
+type Pressure struct {
+	CPU    *PressureResource `json:"cpu,omitempty"`
+	Memory *PressureResource `json:"memory,omitempty"`
+	IO     *PressureResource `json:"io,omitempty"`
+}
+
+type PressureResource struct {
+	Some *PressureStats `json:"some,omitempty"`
+	Full *PressureStats `json:"full,omitempty"`
+}
+
+type PressureStats struct {
+	Avg10  float64 `json:"avg10"`
+	Avg60  float64 `json:"avg60"`
+	Avg300 float64 `json:"avg300"`
+	Total  uint64  `json:"total"`
 }

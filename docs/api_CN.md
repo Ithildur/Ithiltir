@@ -82,16 +82,17 @@ Bearer 可选端点会把缺失、格式错误、过期、已撤销或其他无�
 
 ## 节点运行时指标字段
 
-- `POST /api/node/metrics` 接受可选的 `metrics.disk.smart` 和 `metrics.thermal`。旧 Agent 可以不带这两个字段。
+- `POST /api/node/metrics` 接受可选的 `metrics.disk.smart`、`metrics.thermal` 和 `metrics.pressure`。旧 Agent 可以不带这些字段。
 - `metrics.disk.smart` 是磁盘 SMART 运行时状态，进入独立热点缓存，不写入 PostgreSQL 指标快照。确认是物理盘的 SMART 温度可归约成按设备区分的 `disk.temp_c` 历史值。`metrics.thermal` 保存硬件温度传感器，位置在 metrics 根级；thermal 会写入 PostgreSQL 指标快照，但在前台缓存中作为独立字段缓存保存。
+- `metrics.pressure` 是 Linux PSI（Pressure Stall Information）。它可以包含 `cpu`、`memory`、`io`，每项可带 `some` 和 `full` 数值组。每个组包含 `avg10`、`avg60`、`avg300` 百分比和累计 `total` 微秒。Dashboard 会把这些值保存成固定数值时序列；采集状态/原因字符串不持久化。缺失的组保持 `NULL`，表示不可用，不会当成 0 压力。
 - `disk.smart.devices` 和 `thermal.sensors` 是数组。字段存在但结果为空时使用 `[]`，不是 `null`。
 - `temp_c`、`power_on_hours`、`lifetime_used_percent`、`critical_warning`、`high_c`、`critical_c` 等可选数值读不到时省略，不转换成 `0`。
 - `disk.smart.devices[].critical_warning` 是 NVMe 的原始 critical warning bitset。`disk.smart.devices[].failing_attrs[]` 只包含当前 `FAILING_NOW` 的 ATA SMART 属性。
 - SMART 和 thermal 的 `status` 是开放字符串。已知值包括 `ok`、`partial`、`unsupported`、`not_found`、`no_permission`、`timeout`、`error`、`no_cache`、`stale`、`no_tool`、`standby`。
 - `disk.smart.status` 是采集状态，`disk.smart.devices[].health` 是磁盘健康结果。`status=ok` 且 `health=failed` 表示采集成功但磁盘健康失败。
 - `status=no_cache`、`no_tool` 或 `unsupported` 不表示磁盘故障。`status=stale` 会保留最后一次 `devices[]`，同时标记缓存过期。
-- `GET /api/front/metrics` 会把节点最新热点快照、SMART 字段缓存和 thermal 字段缓存组合成节点视图，返回 `disk.smart`、`disk.temperature_devices` 和顶层 `thermal`。`disk.temperature_devices` 是后端推导出的物理盘名称列表，可作为 `disk.temp_c` 历史查询的 `device`。
-- `/api/metrics/history` 支持 `cpu.temp_c` 和 `disk.temp_c`。CPU 温度来自 thermal 的 CPU 传感器。硬盘温度来自确认是物理盘的 SMART 设备；虚拟盘和 RAID 设备不会持久化。带 `device` 时查询 `disk.temperature_devices` 中的单块物理盘；不带 `device` 时聚合已持久化的物理盘记录。
+- `GET /api/front/metrics` 会把节点最新热点快照、SMART 字段缓存和 thermal 字段缓存组合成节点视图，返回 `disk.smart`、`disk.temperature_devices`、顶层 `thermal` 和顶层 `pressure`。`disk.temperature_devices` 是后端推导出的物理盘名称列表，可作为 `disk.temp_c` 历史查询的 `device`。
+- `/api/metrics/history` 支持 `cpu.temp_c`、`disk.temp_c` 和 PSI 平均值指标：`pressure.cpu.some_avg10|avg60|avg300`、`pressure.memory.some_avg10|avg60|avg300`、`pressure.memory.full_avg10|avg60|avg300`、`pressure.io.some_avg10|avg60|avg300`、`pressure.io.full_avg10|avg60|avg300`。CPU 温度来自 thermal 的 CPU 传感器。硬盘温度来自确认是物理盘的 SMART 设备；虚拟盘和 RAID 设备不会持久化。带 `device` 时查询 `disk.temperature_devices` 中的单块物理盘；不带 `device` 时聚合已持久化的物理盘记录。
 
 ## 告警指标
 
@@ -100,6 +101,7 @@ Bearer 可选端点会把缺失、格式错误、过期、已撤销或其他无�
 - `disk.smart.failed` 只统计 SMART 健康结果为 `failed` 的设备，不把 `no_cache`、`no_tool`、`unsupported` 或其他采集状态计为磁盘故障。
 - `disk.smart.nvme.critical_warning` 统计 `critical_warning` bitset 非 0 的设备数。`disk.smart.attribute_failing` 统计当前 `FAILING_NOW` 的 SMART 属性数。
 - 缺失 `disk.smart` 不表示 SMART 故障。节点没有 SMART 上报时，内置 SMART 规则不会触发。
+- PSI pressure 数据当前只保存并用于历史查询；它暂时不是告警指标，也没有启用内置 PSI 告警。
 
 ## 流量统计
 

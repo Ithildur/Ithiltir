@@ -61,6 +61,11 @@ func ValidateReport(report NodeReport) error {
 			return err
 		}
 	}
+	if m.Pressure != nil {
+		if err := validatePressure(*m.Pressure); err != nil {
+			return err
+		}
+	}
 
 	return nil
 }
@@ -184,6 +189,38 @@ func validateThermal(item Thermal) error {
 		if strings.TrimSpace(sensor.Status) == "" {
 			return fmt.Errorf("missing thermal sensors[%d].status", i)
 		}
+	}
+	return nil
+}
+
+func validatePressure(item Pressure) error {
+	if item.CPU != nil {
+		if err := validatePressureResource("pressure.cpu", item.CPU); err != nil {
+			return err
+		}
+	}
+	if item.Memory != nil {
+		if err := validatePressureResource("pressure.memory", item.Memory); err != nil {
+			return err
+		}
+	}
+	if item.IO != nil {
+		if err := validatePressureResource("pressure.io", item.IO); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validatePressureResource(path string, item *PressureResource) error {
+	if item == nil {
+		return nil
+	}
+	if !validPressureStats(item.Some) {
+		return fmt.Errorf("invalid %s.some", path)
+	}
+	if !validPressureStats(item.Full) {
+		return fmt.Errorf("invalid %s.full", path)
 	}
 	return nil
 }

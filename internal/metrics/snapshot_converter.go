@@ -29,7 +29,7 @@ func ToSnapshot(m Metrics) (model.MetricsSnapshot, error) {
 	mem := m.Memory
 	conn := m.Connections
 	processes := m.Processes
-	return model.MetricsSnapshot{
+	snap := model.MetricsSnapshot{
 		CPUUsageRatio:     m.CPU.UsageRatio,
 		Load1:             m.CPU.Load1,
 		Load5:             m.CPU.Load5,
@@ -63,7 +63,9 @@ func ToSnapshot(m Metrics) (model.MetricsSnapshot, error) {
 		RaidOverallHealth: raidHealth,
 		Raid:              raidJSON,
 		Thermal:           thermalJSON,
-	}, nil
+	}
+	applyPressureSnapshot(&snap, m.Pressure)
+	return snap, nil
 }
 
 func metricsFromSnapshot(snap model.MetricsSnapshot) (Metrics, error) {
@@ -122,6 +124,7 @@ func metricsFromSnapshot(snap model.MetricsSnapshot) (Metrics, error) {
 		Connections: ConnectionMetrics{TCPCount: int(snap.TCPConn), UDPCount: int(snap.UDPConn)},
 		Raid:        raid,
 		Thermal:     thermal,
+		Pressure:    pressureFromSnapshot(snap),
 	}
 
 	return m, nil

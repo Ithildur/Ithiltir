@@ -50,6 +50,24 @@ export type Thermal = {
   }>;
 };
 
+export type PressureStats = {
+  avg10: number;
+  avg60: number;
+  avg300: number;
+  total: number;
+};
+
+export type PressureResource = {
+  some?: PressureStats;
+  full?: PressureStats;
+};
+
+export type Pressure = {
+  cpu?: PressureResource;
+  memory?: PressureResource;
+  io?: PressureResource;
+};
+
 export type NodeView = {
   node: {
     id: string;
@@ -175,4 +193,5 @@ export type NodeView = {
   };
 
   thermal?: Thermal;
+  pressure?: Pressure;
 };

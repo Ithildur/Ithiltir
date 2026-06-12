@@ -162,6 +162,30 @@ type MetricsSnapshot struct {
 	RaidOverallHealth string         `gorm:"column:raid_overall_health;default:''"`
 	Raid              datatypes.JSON `gorm:"column:raid"`
 	Thermal           datatypes.JSON `gorm:"column:thermal"`
+	PSICPUSomeAvg10   *float64       `gorm:"column:psi_cpu_some_avg10"`
+	PSICPUSomeAvg60   *float64       `gorm:"column:psi_cpu_some_avg60"`
+	PSICPUSomeAvg300  *float64       `gorm:"column:psi_cpu_some_avg300"`
+	PSICPUSomeTotal   *int64         `gorm:"column:psi_cpu_some_total"`
+	PSICPUFullAvg10   *float64       `gorm:"column:psi_cpu_full_avg10"`
+	PSICPUFullAvg60   *float64       `gorm:"column:psi_cpu_full_avg60"`
+	PSICPUFullAvg300  *float64       `gorm:"column:psi_cpu_full_avg300"`
+	PSICPUFullTotal   *int64         `gorm:"column:psi_cpu_full_total"`
+	PSIMemSomeAvg10   *float64       `gorm:"column:psi_memory_some_avg10"`
+	PSIMemSomeAvg60   *float64       `gorm:"column:psi_memory_some_avg60"`
+	PSIMemSomeAvg300  *float64       `gorm:"column:psi_memory_some_avg300"`
+	PSIMemSomeTotal   *int64         `gorm:"column:psi_memory_some_total"`
+	PSIMemFullAvg10   *float64       `gorm:"column:psi_memory_full_avg10"`
+	PSIMemFullAvg60   *float64       `gorm:"column:psi_memory_full_avg60"`
+	PSIMemFullAvg300  *float64       `gorm:"column:psi_memory_full_avg300"`
+	PSIMemFullTotal   *int64         `gorm:"column:psi_memory_full_total"`
+	PSIIOSomeAvg10    *float64       `gorm:"column:psi_io_some_avg10"`
+	PSIIOSomeAvg60    *float64       `gorm:"column:psi_io_some_avg60"`
+	PSIIOSomeAvg300   *float64       `gorm:"column:psi_io_some_avg300"`
+	PSIIOSomeTotal    *int64         `gorm:"column:psi_io_some_total"`
+	PSIIOFullAvg10    *float64       `gorm:"column:psi_io_full_avg10"`
+	PSIIOFullAvg60    *float64       `gorm:"column:psi_io_full_avg60"`
+	PSIIOFullAvg300   *float64       `gorm:"column:psi_io_full_avg300"`
+	PSIIOFullTotal    *int64         `gorm:"column:psi_io_full_total"`
 }
 
 var metricsSnapshotColumns = []string{
@@ -198,6 +222,30 @@ var metricsSnapshotColumns = []string{
 	"raid_overall_health",
 	"raid",
 	"thermal",
+	"psi_cpu_some_avg10",
+	"psi_cpu_some_avg60",
+	"psi_cpu_some_avg300",
+	"psi_cpu_some_total",
+	"psi_cpu_full_avg10",
+	"psi_cpu_full_avg60",
+	"psi_cpu_full_avg300",
+	"psi_cpu_full_total",
+	"psi_memory_some_avg10",
+	"psi_memory_some_avg60",
+	"psi_memory_some_avg300",
+	"psi_memory_some_total",
+	"psi_memory_full_avg10",
+	"psi_memory_full_avg60",
+	"psi_memory_full_avg300",
+	"psi_memory_full_total",
+	"psi_io_some_avg10",
+	"psi_io_some_avg60",
+	"psi_io_some_avg300",
+	"psi_io_some_total",
+	"psi_io_full_avg10",
+	"psi_io_full_avg60",
+	"psi_io_full_avg300",
+	"psi_io_full_total",
 }
 
 // ServerMetric represents table server_metrics (time-series history).

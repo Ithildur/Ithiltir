@@ -26,6 +26,7 @@ type NodeView struct {
 	Connections Connections `json:"connections"`
 	Raid        *RAID       `json:"raid,omitempty"`
 	Thermal     *Thermal    `json:"thermal,omitempty"`
+	Pressure    *Pressure   `json:"pressure,omitempty"`
 }
 
 type NodeMeta struct {
@@ -261,6 +262,7 @@ func BuildNodeView(server model.Server, report NodeReport, staleAfterSec int) (N
 		Processes:   processes,
 		Connections: connections,
 		Thermal:     normalizeThermal(report.Metrics.Thermal),
+		Pressure:    normalizePressure(report.Metrics.Pressure),
 	}
 
 	if raid := report.Metrics.Raid; raid.Supported || raid.Available || len(raid.Arrays) > 0 {
