@@ -19,6 +19,7 @@ const (
 	BuiltinRaidID          int64 = -2
 	BuiltinSmartFailedID   int64 = -3
 	BuiltinSmartCriticalID int64 = -4
+	// -5 was used by a retired built-in rule; do not reuse it.
 )
 
 type BuiltinRule struct {
