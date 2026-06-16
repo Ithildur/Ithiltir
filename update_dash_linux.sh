@@ -30,6 +30,8 @@ CHECK_ONLY="false"
 TEST_CHANNEL="false"
 SCRIPT_LANG="${SCRIPT_LANG:-}"
 SHOW_HELP="false"
+ACTION="update"
+ACTION_SET="false"
 SELF_TMP_ROOT="${DASH_UPDATE_SELF_TMP_ROOT:-}"
 INSTALL_TMP_ROOT=""
 KEEP_INSTALL_TMP="false"
@@ -273,10 +275,15 @@ usage() {
   if [[ "${SCRIPT_LANG:-$(default_script_lang)}" == "zh" ]]; then
     cat <<EOF
 用法：
-  update_dash_linux.sh [--check] [--test] [-y|--yes] [--lang zh|en]
+  update_dash_linux.sh [update] [--check] [--test] [-y|--yes] [--lang zh|en]
+  update_dash_linux.sh reinstall [--check] [--test] [-y|--yes] [--lang zh|en]
+
+命令：
+  update       默认命令；仅当目标通道有更高版本时安装
+  reinstall   重新安装目标通道最新包，即使 Dash 版本号不变
 
 选项：
-  --check      只检查目标通道是否存在更新的 Git tag
+  --check      只检查目标通道是否存在可用的 Git tag，不安装
   --test       更新到最新 prerelease；不带该参数时只更新到最新 release
   -y|--yes     不交互确认，直接更新
   --lang       设置脚本语言：zh 或 en
@@ -291,10 +298,15 @@ EOF
 
   cat <<EOF
 Usage:
-  update_dash_linux.sh [--check] [--test] [-y|--yes] [--lang zh|en]
+  update_dash_linux.sh [update] [--check] [--test] [-y|--yes] [--lang zh|en]
+  update_dash_linux.sh reinstall [--check] [--test] [-y|--yes] [--lang zh|en]
+
+Commands:
+  update       Default command; install only when the target channel has a higher version
+  reinstall   Install the latest target-channel package again even when the Dash version is unchanged
 
 Options:
-  --check      Only check whether a newer Git tag exists in the target channel
+  --check      Only check whether a target Git tag exists; do not install
   --test       Update to the latest prerelease; without it, only update to the latest release
   -y|--yes     Update without an interactive confirmation
   --lang       Set script language: zh or en
@@ -539,7 +551,11 @@ confirm_update() {
   if [[ "$ASSUME_YES" == "true" ]]; then
     return 0
   fi
-  printf '%s' "$(txt "是否将 Dash 从 ${current} 更新到 ${latest}？[y/N] " "Update Dash from ${current} to ${latest}? [y/N] ")"
+  if [[ "$ACTION" == "reinstall" ]]; then
+    printf '%s' "$(txt "是否重新安装 Dash ${latest}（当前 ${current}）？[y/N] " "Reinstall Dash ${latest} over current ${current}? [y/N] ")"
+  else
+    printf '%s' "$(txt "是否将 Dash 从 ${current} 更新到 ${latest}？[y/N] " "Update Dash from ${current} to ${latest}? [y/N] ")"
+  fi
   read -r answer
   [[ "$answer" =~ ^[Yy]([Ee][Ss])?$ ]]
 }
@@ -608,6 +624,15 @@ install_release() {
 parse_args() {
   while [[ $# -gt 0 ]]; do
     case "$1" in
+      update|reinstall)
+        if [[ "$ACTION_SET" == "true" ]]; then
+          say_err "只能指定一个子命令" "only one command can be specified"
+          return 2
+        fi
+        ACTION="$1"
+        ACTION_SET="true"
+        shift
+        ;;
       --check)
         CHECK_ONLY="true"
         shift
@@ -633,8 +658,13 @@ parse_args() {
         SHOW_HELP="true"
         shift
         ;;
-      *)
+      -*)
         say_err "未知选项：$1" "unknown option: $1"
+        SHOW_HELP="true"
+        return 2
+        ;;
+      *)
+        say_err "未知子命令：$1" "unknown command: $1"
         SHOW_HELP="true"
         return 2
         ;;
@@ -666,6 +696,11 @@ say "当前版本：${current:-unknown}" "current: ${current:-unknown}"
 say "当前通道：$current_channel" "current channel: $current_channel"
 say "目标通道：$target_channel" "target channel:  $target_channel"
 say "最新版本：$latest" "latest:  $latest"
+if [[ "$ACTION" == "reinstall" ]]; then
+  say "操作：重新安装目标版本" "action: reinstall target version"
+else
+  say "操作：更新" "action: update"
+fi
 
 if [[ "$TEST_CHANNEL" != "true" && "$current_channel" == "prerelease" ]] && version_gt "$current" "$latest"; then
   say_err \
@@ -674,18 +709,25 @@ if [[ "$TEST_CHANNEL" != "true" && "$current_channel" == "prerelease" ]] && vers
   exit 1
 fi
 
-if ! version_gt "$latest" "$current"; then
-  say "Dash 已是最新版本。" "Dash is up to date."
-  exit 0
-fi
+if [[ "$ACTION" == "update" ]]; then
+  if ! version_gt "$latest" "$current"; then
+    say "Dash 已是最新版本。" "Dash is up to date."
+    exit 0
+  fi
 
-say "发现新的 Dash release。" "A newer Dash release is available."
-if [[ "$CHECK_ONLY" == "true" ]]; then
-  exit 0
+  say "发现新的 Dash release。" "A newer Dash release is available."
+  if [[ "$CHECK_ONLY" == "true" ]]; then
+    exit 0
+  fi
+else
+  say "将重新安装目标 Dash release。" "Target Dash release will be reinstalled."
+  if [[ "$CHECK_ONLY" == "true" ]]; then
+    exit 0
+  fi
 fi
 
 if ! confirm_update "${current:-unknown}" "$latest"; then
-  say "已取消更新" "update canceled"
+  say "已取消操作" "operation canceled"
   exit 0
 fi
 

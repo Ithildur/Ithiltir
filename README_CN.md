@@ -139,9 +139,11 @@ powershell -File scripts/package.ps1 -Version 1.2.3-alpha.1 -NodeVersion 1.2.3-a
 bash update_dash_linux.sh --check
 bash update_dash_linux.sh
 bash update_dash_linux.sh --test
+bash update_dash_linux.sh reinstall --test
 ```
 
 默认更新到最新 release。加 `--test` 时更新到最新 prerelease。如果当前部署的是高于最新 release 的 prerelease，默认 release 更新会警告并停止。
+`reinstall` 会在 Dash 版本号不变时重新安装所选通道的最新包，适合测试发布包只更新了内置 node 资产的情况。
 
 ## 仓库结构
 

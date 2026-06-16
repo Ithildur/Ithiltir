@@ -139,9 +139,11 @@ Update an installed Linux service:
 bash update_dash_linux.sh --check
 bash update_dash_linux.sh
 bash update_dash_linux.sh --test
+bash update_dash_linux.sh reinstall --test
 ```
 
 By default the updater installs the latest release. Pass `--test` to install the latest prerelease. If the installed Dash is a prerelease newer than the latest release, the default release update stops with a warning.
+Use `reinstall` to install the selected latest package again even when the Dash version is unchanged, for example after repacking a test release with newer bundled node assets.
 
 ## Repository Layout
 
