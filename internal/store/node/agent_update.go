@@ -61,11 +61,11 @@ func (s *Store) ResolveAgentUpdate(_ context.Context, id int64, current string) 
 	target := state.target
 	target.Version = strings.TrimSpace(target.Version)
 	if target.Version != "" {
-		cmp, err := appversion.Compare(strings.TrimSpace(current), target.Version)
+		ok, err := appversion.IsNodeUpdateTarget(current, target.Version)
 		if err != nil {
 			return AgentUpdateTarget{}, false, err
 		}
-		if cmp < 0 {
+		if ok {
 			return target, true, nil
 		}
 	}

@@ -73,6 +73,33 @@ func TestCompare(t *testing.T) {
 	}
 }
 
+func TestIsNodeUpdateTarget(t *testing.T) {
+	tests := []struct {
+		name    string
+		current string
+		target  string
+		want    bool
+	}{
+		{name: "new patch", current: "1.0.0", target: "1.0.1", want: true},
+		{name: "same version", current: "1.0.0", target: "1.0.0", want: false},
+		{name: "different build metadata", current: "1.0.0+build.1", target: "1.0.0+build.2", want: true},
+		{name: "older target", current: "1.0.1", target: "1.0.0", want: false},
+		{name: "release target from prerelease", current: "1.0.0-rc.1", target: "1.0.0", want: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := IsNodeUpdateTarget(tt.current, tt.target)
+			if err != nil {
+				t.Fatalf("IsNodeUpdateTarget(%q, %q) error = %v", tt.current, tt.target, err)
+			}
+			if got != tt.want {
+				t.Fatalf("IsNodeUpdateTarget(%q, %q) = %t, want %t", tt.current, tt.target, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestLatest(t *testing.T) {
 	versions := []string{
 		"bad",

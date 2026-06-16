@@ -82,6 +82,19 @@ func SupportsNodeSelfUpdate(version string) (bool, error) {
 	return cmp >= 0, nil
 }
 
+func IsNodeUpdateTarget(current, target string) (bool, error) {
+	current = strings.TrimSpace(current)
+	target = strings.TrimSpace(target)
+	cmp, err := Compare(current, target)
+	if err != nil {
+		return false, err
+	}
+	if current == target {
+		return false, nil
+	}
+	return cmp <= 0, nil
+}
+
 func ChannelFor(version string) (Channel, error) {
 	v, err := normalize(version)
 	if err != nil {

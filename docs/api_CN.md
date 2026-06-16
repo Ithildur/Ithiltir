@@ -78,7 +78,7 @@ Bearer 可选端点会把缺失、格式错误、过期、已撤销或其他无�
 - `POST /api/node/metrics` 成功响应包含 `update`。
 - 无待升级任务时，`update` 为 `null`。
 - 有待升级任务时，`update` 包含 `id`、`version`、`url`、`sha256` 和 `size`。
-- 待升级任务是易失状态，Agent 上报目标版本或更新版本后清除。
+- 待升级任务是易失状态，Agent 上报完全相同的目标版本或 SemVer 优先级更高的版本后清除。同一 SemVer 优先级但 build metadata 不同的版本视为不同节点二进制，仍可下发。
 
 ## 节点运行时指标字段
 

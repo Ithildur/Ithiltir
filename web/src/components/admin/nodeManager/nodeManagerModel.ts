@@ -1,24 +1,24 @@
 import type { NodeRow } from '@app-types/admin';
 import type { TranslationKey } from '@i18n';
-import { isVersionOlder } from '@utils/version';
+import { isVersionUpdateTarget } from '@utils/version';
 import { nodeTrafficCycleLabelKey, nodeTrafficDirectionLabelKey } from '@lib/trafficSettingsModel';
 
 type Translate = (key: TranslationKey, vars?: Record<string, string | number>) => string;
 
-export const nodeHasNewerBundledVersion = (node: NodeRow, bundledNodeVersion: string): boolean => {
+export const nodeHasBundledUpdate = (node: NodeRow, bundledNodeVersion: string): boolean => {
   if (!bundledNodeVersion) return false;
-  return isVersionOlder(node.version.version, bundledNodeVersion);
+  return isVersionUpdateTarget(node.version.version, bundledNodeVersion);
 };
 
 export const nodeCanRequestUpgrade = (node: NodeRow, bundledNodeVersion: string): boolean =>
   !node.version.is_outdated &&
   node.version.supports_auto_update &&
-  nodeHasNewerBundledVersion(node, bundledNodeVersion);
+  nodeHasBundledUpdate(node, bundledNodeVersion);
 
 export const nodeNeedsManualUpdate = (node: NodeRow, bundledNodeVersion: string): boolean =>
   !node.version.is_outdated &&
   !node.version.supports_auto_update &&
-  nodeHasNewerBundledVersion(node, bundledNodeVersion);
+  nodeHasBundledUpdate(node, bundledNodeVersion);
 
 const nodeNeedsUpdate = (node: NodeRow, bundledNodeVersion: string): boolean =>
   node.version.is_outdated ||

@@ -78,7 +78,7 @@ Optional bearer endpoints treat a missing, malformed, expired, revoked, or other
 - Successful `POST /api/node/metrics` responses include `update`.
 - `update` is `null` when no upgrade is pending.
 - A pending update contains `id`, `version`, `url`, `sha256`, and `size`.
-- Pending updates are volatile and clear when the agent reports the target version or newer.
+- Pending updates are volatile and clear when the agent reports the exact target version or a higher SemVer precedence. Different build metadata at the same SemVer precedence is treated as a distinct node binary and can still be delivered.
 
 ## Node Metrics Runtime Fields
 
