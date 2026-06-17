@@ -73,7 +73,7 @@ Optional bearer endpoints treat a missing, malformed, expired, revoked, or other
 - Node cycle normalization is stable: `default` inherits the global billing cycle and clears stored node cycle fields; `calendar_month` stores `traffic_billing_start_day=1`; non-`whmcs_compatible` modes store an empty `traffic_billing_anchor_date`; non-default modes with an empty `traffic_billing_timezone` use the application timezone at read time.
 - Node direction normalization is stable: `default` inherits the global traffic direction; `out`, `both`, and `max` override it for that node.
 - Invalid node traffic fields return `400 invalid_traffic_cycle_mode`, `invalid_traffic_cycle_settings`, `invalid_traffic_billing_start_day`, `invalid_traffic_billing_anchor_date`, `invalid_traffic_billing_timezone`, or `invalid_traffic_direction_mode`.
-- `POST /api/admin/nodes/{id}/upgrade` returns `204`. It returns `409 node_upgrade_unsupported` when the node cannot receive automatic update delivery, or `409` when the bundled version, platform, or asset is unavailable.
+- `POST /api/admin/nodes/{id}/upgrade` returns `204`. It returns `409 node_upgrade_unsupported` when the node cannot receive automatic update delivery, `409` when the bundled version, platform, or asset is unavailable, or `503 node_upgrade_grant_error` when Dash cannot prepare the temporary legacy download grant.
 
 ## Agent Updates
 
