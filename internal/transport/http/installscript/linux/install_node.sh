@@ -808,7 +808,7 @@ connections_compiler() {
 write_connections_cache_c_helper() {
   local cc src bin
   cc="$(connections_compiler)" || return 1
-  src="$(mktemp)" || return 1
+  src="$(mktemp "${TMPDIR:-/tmp}/ithiltir-connections-cache.XXXXXX.c")" || return 1
   bin="$(mktemp)" || { rm -f "$src"; return 1; }
   cat > "$src" <<'EOF'
 #include <ctype.h>

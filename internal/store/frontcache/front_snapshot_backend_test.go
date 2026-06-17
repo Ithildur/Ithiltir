@@ -40,7 +40,7 @@ func TestIntegrationFetchFrontNodesReadsCurrentMetrics(t *testing.T) {
 	db := pgtest.NewDB(t)
 	st := New(db, nil)
 
-	collectedAt := time.Date(2026, 4, 28, 12, 0, 0, 0, time.UTC)
+	collectedAt := recentCollectedAt()
 	srv := model.Server{
 		Name:           "node-a",
 		Hostname:       "node-a.local",
@@ -116,7 +116,7 @@ func TestIntegrationFrontNodesComposeRuntimeFields(t *testing.T) {
 	t.Cleanup(func() { _ = client.Close() })
 	st := New(db, client)
 
-	collectedAt := time.Date(2026, 5, 16, 12, 0, 0, 0, time.UTC)
+	collectedAt := recentCollectedAt()
 	thermalTemp := 64.25
 	thermalRaw, err := json.Marshal(metrics.Thermal{
 		Status: "ok",
@@ -252,6 +252,10 @@ func TestApplyRuntimeMatchesReceivedAtInstant(t *testing.T) {
 	})
 
 	assertRuntimeFields(t, node, temp, thermalTemp)
+}
+
+func recentCollectedAt() time.Time {
+	return time.Now().UTC().Add(-time.Hour).Truncate(time.Microsecond)
 }
 
 func TestReplaceFrontSnapshotRejectsMissingID(t *testing.T) {
