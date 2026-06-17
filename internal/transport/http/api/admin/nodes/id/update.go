@@ -124,6 +124,9 @@ func (h *handler) updateHandler(w http.ResponseWriter, r *http.Request) {
 		} else if errors.Is(err, nodestore.ErrInvalidSecret) {
 			httperr.Write(w, http.StatusBadRequest, "invalid_secret", "invalid secret")
 			return
+		} else if errors.Is(err, nodestore.ErrDuplicateSecret) {
+			httperr.Write(w, http.StatusConflict, "duplicate_secret", "secret already exists")
+			return
 		} else if errors.Is(err, nodestore.ErrInvalidGroupIDs) {
 			httperr.Write(w, http.StatusBadRequest, "invalid_group_ids", "invalid group ids")
 			return

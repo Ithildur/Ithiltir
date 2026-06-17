@@ -205,7 +205,10 @@ func isDuplicateError(err error) bool {
 
 func (s *Store) UpdateNode(ctx context.Context, id int64, upd NodeUpdate) error {
 	if err := s.patchNode(ctx, id, upd); err != nil {
-		if isForeignKeyViolation(err) {
+		switch {
+		case isDuplicateError(err):
+			return ErrDuplicateSecret
+		case isForeignKeyViolation(err):
 			return ErrInvalidGroupIDs
 		}
 		return err
