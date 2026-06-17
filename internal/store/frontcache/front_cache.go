@@ -24,7 +24,7 @@ func (s *Store) EnsureSnapshot(ctx context.Context, opts FrontSnapshotOptions) (
 		return nodes, nil
 	}
 
-	nodes, err = singleflightDo(ctx, &s.snapshotSF, "rebuild", func(rebuildCtx context.Context) ([]metrics.NodeView, error) {
+	nodes, err = singleflightDetached(ctx, &s.snapshotSF, "rebuild", func(rebuildCtx context.Context) ([]metrics.NodeView, error) {
 		return s.rebuildSnapshot(rebuildCtx, opts.BuildTimeout, opts.CacheTimeout, opts.StaleAfterSec)
 	})
 	if err != nil {

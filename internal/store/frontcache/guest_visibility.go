@@ -44,7 +44,7 @@ func (s *Store) EnsureGuestVisibleIDs(ctx context.Context, ids []int64, opts Gue
 		return allowed, nil
 	}
 
-	allowed, err = singleflightDo(ctx, &s.guestVisibilitySF, "rebuild", func(rebuildCtx context.Context) (map[int64]struct{}, error) {
+	allowed, err = singleflightDetached(ctx, &s.guestVisibilitySF, "rebuild", func(rebuildCtx context.Context) (map[int64]struct{}, error) {
 		return s.rebuildGuestVisibility(rebuildCtx, opts.BuildTimeout, opts.CacheTimeout)
 	})
 	if err != nil {

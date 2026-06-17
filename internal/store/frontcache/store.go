@@ -40,11 +40,19 @@ func New(db *gorm.DB, redisClient *redis.Client) *Store {
 	}
 }
 
-func singleflightDo[T any](ctx context.Context, sf *singleflight.Group, key string, fn func(context.Context) (T, error)) (T, error) {
-	ch := sf.DoChan(key, func() (any, error) {
-		return fn(context.WithoutCancel(ctx))
-	})
+func singleflightDetached[T any](ctx context.Context, sf *singleflight.Group, key string, fn func(context.Context) (T, error)) (T, error) {
 	var zero T
+	if err := ctx.Err(); err != nil {
+		return zero, err
+	}
+	// Cache rebuilds are shared work: once one caller starts the rebuild, do not
+	// let that caller's cancellation fail every waiter. Each waiter still returns
+	// on its own ctx cancellation below, while rebuild I/O is bounded by the
+	// rebuild function's own timeouts.
+	rebuildCtx := context.WithoutCancel(ctx)
+	ch := sf.DoChan(key, func() (any, error) {
+		return fn(rebuildCtx)
+	})
 	select {
 	case res := <-ch:
 		if res.Err != nil {
