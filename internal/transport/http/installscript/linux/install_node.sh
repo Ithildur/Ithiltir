@@ -28,6 +28,12 @@ SMART_SERVICE_NAME="ithiltir-node-smart-cache.service"
 SMART_TIMER_NAME="ithiltir-node-smart-cache.timer"
 SMART_SERVICE_FILE="/etc/systemd/system/${SMART_SERVICE_NAME}"
 SMART_TIMER_FILE="/etc/systemd/system/${SMART_TIMER_NAME}"
+CONNECTIONS_CACHE_FILE="${CACHE_DIR}/connections.json"
+CONNECTIONS_HELPER_FILE="/usr/local/libexec/ithiltir-node/connections-cache"
+CONNECTIONS_SERVICE_NAME="ithiltir-node-connections-cache.service"
+CONNECTIONS_TIMER_NAME="ithiltir-node-connections-cache.timer"
+CONNECTIONS_SERVICE_FILE="/etc/systemd/system/${CONNECTIONS_SERVICE_NAME}"
+CONNECTIONS_TIMER_FILE="/etc/systemd/system/${CONNECTIONS_TIMER_NAME}"
 
 COLLECTOR="${INSTALL_DIR}/collect_thinpool.sh"
 CRON_FILE="/etc/cron.d/ithiltir-node-thinpool"
@@ -788,6 +794,160 @@ enable_smart_cache_timer() {
   as_root systemctl start "${SMART_SERVICE_NAME}" >/dev/null 2>&1 || true
 }
 
+write_connections_cache_helper() {
+  local tmp
+  tmp="$(mktemp)"
+  cat > "$tmp" <<'EOF'
+#!/usr/bin/env bash
+set -u
+
+CACHE_DIR="${CACHE_DIR:-/run/ithiltir-node}"
+CACHE_FILE="${CONNECTIONS_CACHE_FILE:-${CACHE_DIR}/connections.json}"
+RUN_GROUP="${RUN_GROUP:-__RUN_GROUP__}"
+TTL_SECONDS="${CONNECTIONS_TTL_SECONDS:-3}"
+PROC_ROOT="${PROC_ROOT:-/proc}"
+SCHEMA=1
+
+TMP="$(mktemp)"
+SEEN="$(mktemp)"
+trap 'rm -f "$TMP" "$SEEN"' EXIT
+
+count_file() {
+  local file="$1" lines
+  [[ -r "$file" ]] || { echo 0; return; }
+  lines="$(wc -l < "$file" 2>/dev/null || echo 0)"
+  [[ "$lines" =~ ^[0-9]+$ ]] || lines=0
+  if (( lines > 0 )); then
+    echo $((lines - 1))
+  else
+    echo 0
+  fi
+}
+
+count_net_dir() {
+  local dir="$1" f path n tcp=0 udp=0 ok=0
+  for f in tcp tcp6; do
+    path="${dir}/${f}"
+    if [[ -r "$path" ]]; then
+      n="$(count_file "$path")"
+      tcp=$((tcp + n))
+      ok=1
+    fi
+  done
+  for f in udp udp6; do
+    path="${dir}/${f}"
+    if [[ -r "$path" ]]; then
+      n="$(count_file "$path")"
+      udp=$((udp + n))
+      ok=1
+    fi
+  done
+  echo "$tcp $udp $ok"
+}
+
+seen_ns() {
+  local ns="$1"
+  grep -Fxq "$ns" "$SEEN" 2>/dev/null
+}
+
+mark_ns() {
+  local ns="$1"
+  printf '%s\n' "$ns" >> "$SEEN"
+}
+
+total_tcp=0
+total_udp=0
+read_count=0
+
+read -r tcp udp ok < <(count_net_dir "${PROC_ROOT}/net")
+total_tcp=$((total_tcp + tcp))
+total_udp=$((total_udp + udp))
+if (( ok == 1 )); then
+  read_count=$((read_count + 1))
+  if [[ -e "${PROC_ROOT}/self/ns/net" ]]; then
+    ns="$(readlink "${PROC_ROOT}/self/ns/net" 2>/dev/null || true)"
+    [[ -n "$ns" ]] && mark_ns "$ns"
+  fi
+fi
+
+for pid_dir in "${PROC_ROOT}"/[0-9]*; do
+  [[ -d "$pid_dir" ]] || continue
+  ns_path="${pid_dir}/ns/net"
+  [[ -e "$ns_path" ]] || continue
+  ns="$(readlink "$ns_path" 2>/dev/null || true)"
+  [[ -n "$ns" ]] || continue
+  if seen_ns "$ns"; then
+    continue
+  fi
+
+  read -r tcp udp ok < <(count_net_dir "${pid_dir}/net")
+  (( ok == 1 )) || continue
+
+  mark_ns "$ns"
+  read_count=$((read_count + 1))
+  total_tcp=$((total_tcp + tcp))
+  total_udp=$((total_udp + udp))
+done
+
+status="ok"
+if (( read_count == 0 )); then
+  status="error"
+fi
+
+now="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+install -d -m 0750 -o root -g "$RUN_GROUP" "$CACHE_DIR" 2>/dev/null || install -d -m 0750 "$CACHE_DIR"
+printf '{"schema":%d,"updated_at":"%s","ttl_seconds":%d,"status":"%s","tcp_count":%d,"udp_count":%d}\n' \
+  "$SCHEMA" "$now" "$TTL_SECONDS" "$status" "$total_tcp" "$total_udp" > "$TMP"
+install -m 0640 -o root -g "$RUN_GROUP" "$TMP" "$CACHE_FILE" 2>/dev/null || install -m 0640 "$TMP" "$CACHE_FILE"
+EOF
+  sed -i "s/__RUN_GROUP__/${RUN_GROUP}/g" "$tmp"
+  as_root install -d -m 0755 "$(dirname "${CONNECTIONS_HELPER_FILE}")"
+  as_root install -m 0755 "$tmp" "${CONNECTIONS_HELPER_FILE}"
+  rm -f "$tmp"
+}
+
+write_connections_cache_service() {
+  as_root bash -c "cat > '${CONNECTIONS_SERVICE_FILE}' <<EOF
+[Unit]
+Description=Ithiltir node TCP/UDP connections cache refresh
+
+[Service]
+Type=oneshot
+User=root
+Group=${RUN_GROUP}
+UMask=0027
+ExecStart=${CONNECTIONS_HELPER_FILE}
+EOF"
+}
+
+write_connections_cache_timer() {
+  as_root bash -c "cat > '${CONNECTIONS_TIMER_FILE}' <<EOF
+[Unit]
+Description=Refresh Ithiltir node TCP/UDP connections cache
+
+[Timer]
+OnBootSec=1s
+OnUnitActiveSec=1s
+AccuracySec=200ms
+Unit=${CONNECTIONS_SERVICE_NAME}
+
+[Install]
+WantedBy=timers.target
+EOF"
+}
+
+enable_connections_cache_timer() {
+  if ! need_cmd systemctl; then
+    echo "[!] systemctl not found; skipping connections cache timer" >&2
+    return 0
+  fi
+  if ! as_root systemctl enable --now "${CONNECTIONS_TIMER_NAME}" >/dev/null 2>&1; then
+    echo "[!] could not enable ${CONNECTIONS_TIMER_NAME}; node service install continues" >&2
+    return 0
+  fi
+  as_root systemctl start "${CONNECTIONS_SERVICE_NAME}" >/dev/null 2>&1 || true
+}
+
 main() {
   if [[ $# -lt 2 ]]; then
     usage
@@ -890,15 +1050,20 @@ main() {
   write_smart_cache_helper
   write_smart_cache_service
   write_smart_cache_timer
+  write_connections_cache_helper
+  write_connections_cache_service
+  write_connections_cache_timer
 
   as_root systemctl daemon-reload
   enable_smart_cache_timer
+  enable_connections_cache_timer
   as_root systemctl enable --now "${APP}.service"
 
   echo "[OK] Done: ${APP}.service is running and enabled on boot"
   echo "     Status: systemctl status ${APP}.service"
   echo "     Logs:   journalctl -u ${APP}.service -f"
   echo "     SMART cache timer: ${SMART_TIMER_NAME}"
+  echo "     Connections cache timer: ${CONNECTIONS_TIMER_NAME}"
   if [[ "${lvm_detected}" -eq 1 ]]; then
     echo "     LVM cache: ${CACHE_FILE}"
   fi
