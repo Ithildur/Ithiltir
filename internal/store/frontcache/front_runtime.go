@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"dash/internal/metrics"
 )
@@ -86,7 +87,7 @@ func applySmartRuntime(node *metrics.NodeView, runtime *frontSmartRuntime) {
 	if runtime == nil {
 		return
 	}
-	if node.Observation.ReceivedAt != runtime.ReceivedAt {
+	if !sameReceivedAt(node.Observation.ReceivedAt, runtime.ReceivedAt) {
 		return
 	}
 	node.Disk.Smart = runtime.Smart
@@ -97,10 +98,30 @@ func applyThermalRuntime(node *metrics.NodeView, runtime *frontThermalRuntime) {
 	if runtime == nil {
 		return
 	}
-	if node.Observation.ReceivedAt != runtime.ReceivedAt {
+	if !sameReceivedAt(node.Observation.ReceivedAt, runtime.ReceivedAt) {
 		return
 	}
 	node.Thermal = runtime.Thermal
+}
+
+func sameReceivedAt(a, b string) bool {
+	a = strings.TrimSpace(a)
+	b = strings.TrimSpace(b)
+	if a == "" || b == "" {
+		return false
+	}
+	if a == b {
+		return true
+	}
+	at, err := time.Parse(time.RFC3339, a)
+	if err != nil {
+		return false
+	}
+	bt, err := time.Parse(time.RFC3339, b)
+	if err != nil {
+		return false
+	}
+	return at.Equal(bt)
 }
 
 func applyFrontRuntime(node *metrics.NodeView, smartRaw, thermalRaw []byte) error {

@@ -57,7 +57,7 @@ func TestIntegrationSaveMetricsCurrentProjection(t *testing.T) {
 	st := New(pgtest.NewDB(t))
 	srv := createMetricTestServer(t, st, "metric-node")
 
-	newerAt := time.Date(2026, 4, 28, 12, 0, 0, 0, time.UTC)
+	newerAt := time.Now().UTC().Add(-time.Hour).Truncate(time.Microsecond)
 	olderAt := newerAt.Add(-time.Minute)
 	diskTemp := 41.0
 	if err := st.SaveMetrics(ctx, MetricsSample{

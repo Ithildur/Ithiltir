@@ -226,6 +226,34 @@ func assertRuntimeFields(t *testing.T, node metrics.NodeView, smartTemp, thermal
 	}
 }
 
+func TestApplyRuntimeMatchesReceivedAtInstant(t *testing.T) {
+	temp := 51.5
+	thermalTemp := 64.25
+	node := metrics.NodeView{
+		Observation: metrics.Observation{
+			ReceivedAt: "2026-05-16T20:00:00+08:00",
+		},
+	}
+
+	applySmartRuntime(&node, &frontSmartRuntime{
+		ReceivedAt: "2026-05-16T12:00:00Z",
+		Smart: &metrics.DiskSmart{Devices: []metrics.DiskSmartDevice{{
+			Name:       "nvme0n1",
+			DeviceType: "nvme",
+			Protocol:   "NVMe",
+			TempC:      &temp,
+		}}},
+	})
+	applyThermalRuntime(&node, &frontThermalRuntime{
+		ReceivedAt: "2026-05-16T12:00:00Z",
+		Thermal: &metrics.Thermal{Sensors: []metrics.ThermalSensor{{
+			TempC: &thermalTemp,
+		}}},
+	})
+
+	assertRuntimeFields(t, node, temp, thermalTemp)
+}
+
 func TestReplaceFrontSnapshotRejectsMissingID(t *testing.T) {
 	ctx := context.Background()
 	st := New(nil, nil)
