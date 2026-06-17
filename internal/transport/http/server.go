@@ -105,6 +105,9 @@ func (s *HTTPServer) Run(ctx context.Context) error {
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		shutdownErr := s.server.Shutdown(shutdownCtx)
+		if shutdownErr != nil && !errors.Is(shutdownErr, http.ErrServerClosed) {
+			_ = s.server.Close()
+		}
 		serveErr := <-errCh
 		if shutdownErr != nil && !errors.Is(shutdownErr, http.ErrServerClosed) {
 			if serveErr != nil {
