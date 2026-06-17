@@ -794,116 +794,410 @@ enable_smart_cache_timer() {
   as_root systemctl start "${SMART_SERVICE_NAME}" >/dev/null 2>&1 || true
 }
 
-write_connections_cache_helper() {
-  local tmp
-  tmp="$(mktemp)"
-  cat > "$tmp" <<'EOF'
-#!/usr/bin/env bash
-set -u
-
-CACHE_DIR="${CACHE_DIR:-/run/ithiltir-node}"
-CACHE_FILE="${CONNECTIONS_CACHE_FILE:-${CACHE_DIR}/connections.json}"
-RUN_GROUP="${RUN_GROUP:-__RUN_GROUP__}"
-TTL_SECONDS="${CONNECTIONS_TTL_SECONDS:-3}"
-PROC_ROOT="${PROC_ROOT:-/proc}"
-SCHEMA=1
-
-TMP="$(mktemp)"
-trap 'rm -f "$TMP"' EXIT
-declare -A SEEN_NS
-
-count_file() {
-  local file="$1" lines
-  [[ -r "$file" ]] || { echo 0; return; }
-  lines="$(wc -l < "$file" 2>/dev/null || echo 0)"
-  [[ "$lines" =~ ^[0-9]+$ ]] || lines=0
-  if (( lines > 0 )); then
-    echo $((lines - 1))
-  else
-    echo 0
-  fi
-}
-
-count_net_dir() {
-  local dir="$1" f path n tcp=0 udp=0 ok=0
-  for f in tcp tcp6; do
-    path="${dir}/${f}"
-    if [[ -r "$path" ]]; then
-      n="$(count_file "$path")"
-      tcp=$((tcp + n))
-      ok=1
+connections_compiler() {
+  local cc
+  for cc in cc gcc clang; do
+    if need_cmd "$cc"; then
+      echo "$cc"
+      return 0
     fi
   done
-  for f in udp udp6; do
-    path="${dir}/${f}"
-    if [[ -r "$path" ]]; then
-      n="$(count_file "$path")"
-      udp=$((udp + n))
-      ok=1
-    fi
-  done
-  echo "$tcp $udp $ok"
+  return 1
 }
 
-seen_ns() {
-  local ns="$1"
-  [[ -n "${SEEN_NS[$ns]+x}" ]]
+write_connections_cache_c_helper() {
+  local cc src bin
+  cc="$(connections_compiler)" || return 1
+  src="$(mktemp)" || return 1
+  bin="$(mktemp)" || { rm -f "$src"; return 1; }
+  cat > "$src" <<'EOF'
+#include <ctype.h>
+#include <dirent.h>
+#include <errno.h>
+#include <fcntl.h>
+#include <grp.h>
+#include <limits.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <time.h>
+#include <unistd.h>
+
+#ifndef PATH_MAX
+#define PATH_MAX 4096
+#endif
+
+#define SCHEMA 1
+#define DEFAULT_RUN_GROUP "__RUN_GROUP__"
+
+struct seen {
+  char **items;
+  size_t len;
+  size_t cap;
+};
+
+static const char *env_or(const char *key, const char *fallback) {
+  const char *value = getenv(key);
+  if (value == NULL || value[0] == '\0') {
+    return fallback;
+  }
+  return value;
 }
 
-mark_ns() {
-  local ns="$1"
-  SEEN_NS["$ns"]=1
+static long positive_env(const char *key, long fallback) {
+  const char *raw = getenv(key);
+  char *end = NULL;
+  long value;
+  if (raw == NULL || raw[0] == '\0') {
+    return fallback;
+  }
+  errno = 0;
+  value = strtol(raw, &end, 10);
+  if (errno != 0 || end == raw || *end != '\0' || value <= 0) {
+    return fallback;
+  }
+  return value;
 }
 
-total_tcp=0
-total_udp=0
-read_count=0
+static int copy_string(char *out, size_t size, const char *value) {
+  size_t len = strlen(value);
+  if (len >= size) {
+    return -1;
+  }
+  memcpy(out, value, len + 1);
+  return 0;
+}
 
-read -r tcp udp ok < <(count_net_dir "${PROC_ROOT}/net")
-total_tcp=$((total_tcp + tcp))
-total_udp=$((total_udp + udp))
-if (( ok == 1 )); then
-  read_count=$((read_count + 1))
-  if [[ -e "${PROC_ROOT}/self/ns/net" ]]; then
-    ns="$(readlink "${PROC_ROOT}/self/ns/net" 2>/dev/null || true)"
-    [[ -n "$ns" ]] && mark_ns "$ns"
-  fi
-fi
+static int join_path(char *out, size_t size, const char *left, const char *right) {
+  int written = snprintf(out, size, "%s/%s", left, right);
+  if (written < 0 || (size_t)written >= size) {
+    return -1;
+  }
+  return 0;
+}
 
-for pid_dir in "${PROC_ROOT}"/[0-9]*; do
-  [[ -d "$pid_dir" ]] || continue
-  ns_path="${pid_dir}/ns/net"
-  [[ -e "$ns_path" ]] || continue
-  ns="$(readlink "$ns_path" 2>/dev/null || true)"
-  [[ -n "$ns" ]] || continue
-  if seen_ns "$ns"; then
-    continue
-  fi
+static int cache_file_path(char *out, size_t size, const char *cache_dir) {
+  const char *custom = getenv("CONNECTIONS_CACHE_FILE");
+  if (custom != NULL && custom[0] != '\0') {
+    return copy_string(out, size, custom);
+  }
+  return join_path(out, size, cache_dir, "connections.json");
+}
 
-  read -r tcp udp ok < <(count_net_dir "${pid_dir}/net")
-  (( ok == 1 )) || continue
+static int all_digits(const char *value) {
+  const unsigned char *p = (const unsigned char *)value;
+  if (*p == '\0') {
+    return 0;
+  }
+  while (*p != '\0') {
+    if (!isdigit(*p)) {
+      return 0;
+    }
+    p++;
+  }
+  return 1;
+}
 
-  mark_ns "$ns"
-  read_count=$((read_count + 1))
-  total_tcp=$((total_tcp + tcp))
-  total_udp=$((total_udp + udp))
-done
+static char *copy_alloc(const char *value) {
+  size_t len = strlen(value);
+  char *out = malloc(len + 1);
+  if (out == NULL) {
+    return NULL;
+  }
+  memcpy(out, value, len + 1);
+  return out;
+}
 
-status="ok"
-if (( read_count == 0 )); then
-  status="error"
-fi
+static int seen_has(const struct seen *seen, const char *ns) {
+  size_t i;
+  for (i = 0; i < seen->len; i++) {
+    if (strcmp(seen->items[i], ns) == 0) {
+      return 1;
+    }
+  }
+  return 0;
+}
 
-now="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-install -d -m 0750 -o root -g "$RUN_GROUP" "$CACHE_DIR" 2>/dev/null || install -d -m 0750 "$CACHE_DIR"
-printf '{"schema":%d,"updated_at":"%s","ttl_seconds":%d,"status":"%s","tcp_count":%d,"udp_count":%d}\n' \
-  "$SCHEMA" "$now" "$TTL_SECONDS" "$status" "$total_tcp" "$total_udp" > "$TMP"
-install -m 0640 -o root -g "$RUN_GROUP" "$TMP" "$CACHE_FILE" 2>/dev/null || install -m 0640 "$TMP" "$CACHE_FILE"
+static int seen_add(struct seen *seen, const char *ns) {
+  char **items;
+  if (seen_has(seen, ns)) {
+    return 0;
+  }
+  if (seen->len == seen->cap) {
+    size_t next = seen->cap == 0 ? 8 : seen->cap * 2;
+    items = realloc(seen->items, next * sizeof(*items));
+    if (items == NULL) {
+      return -1;
+    }
+    seen->items = items;
+    seen->cap = next;
+  }
+  seen->items[seen->len] = copy_alloc(ns);
+  if (seen->items[seen->len] == NULL) {
+    return -1;
+  }
+  seen->len++;
+  return 0;
+}
+
+static int read_link_string(const char *path, char *out, size_t size) {
+  ssize_t n = readlink(path, out, size - 1);
+  if (n <= 0) {
+    return -1;
+  }
+  out[n] = '\0';
+  return 0;
+}
+
+static long long count_file_lines(const char *path, int *ok) {
+  char buf[8192];
+  long long lines = 0;
+  size_t n;
+  FILE *file = fopen(path, "r");
+  if (file == NULL) {
+    return 0;
+  }
+  *ok = 1;
+  while ((n = fread(buf, 1, sizeof(buf), file)) > 0) {
+    size_t i;
+    for (i = 0; i < n; i++) {
+      if (buf[i] == '\n') {
+        lines++;
+      }
+    }
+  }
+  fclose(file);
+  if (lines <= 0) {
+    return 0;
+  }
+  return lines - 1;
+}
+
+static void count_net_dir(const char *dir, long long *tcp, long long *udp, int *ok) {
+  const char *tcp_files[] = {"tcp", "tcp6"};
+  const char *udp_files[] = {"udp", "udp6"};
+  char path[PATH_MAX];
+  size_t i;
+  *tcp = 0;
+  *udp = 0;
+  *ok = 0;
+  for (i = 0; i < sizeof(tcp_files) / sizeof(tcp_files[0]); i++) {
+    int file_ok = 0;
+    if (join_path(path, sizeof(path), dir, tcp_files[i]) == 0) {
+      *tcp += count_file_lines(path, &file_ok);
+      if (file_ok) {
+        *ok = 1;
+      }
+    }
+  }
+  for (i = 0; i < sizeof(udp_files) / sizeof(udp_files[0]); i++) {
+    int file_ok = 0;
+    if (join_path(path, sizeof(path), dir, udp_files[i]) == 0) {
+      *udp += count_file_lines(path, &file_ok);
+      if (file_ok) {
+        *ok = 1;
+      }
+    }
+  }
+}
+
+static int mkdir_p(const char *path, mode_t mode) {
+  char tmp[PATH_MAX];
+  char *p;
+  size_t len;
+  if (copy_string(tmp, sizeof(tmp), path) != 0) {
+    return -1;
+  }
+  len = strlen(tmp);
+  while (len > 1 && tmp[len - 1] == '/') {
+    tmp[--len] = '\0';
+  }
+  for (p = tmp + 1; *p != '\0'; p++) {
+    if (*p != '/') {
+      continue;
+    }
+    *p = '\0';
+    if (mkdir(tmp, mode) != 0 && errno != EEXIST) {
+      return -1;
+    }
+    *p = '/';
+  }
+  if (mkdir(tmp, mode) != 0 && errno != EEXIST) {
+    return -1;
+  }
+  return 0;
+}
+
+static int group_id(const char *group, gid_t *gid) {
+  struct group *entry = getgrnam(group);
+  if (entry == NULL) {
+    return 0;
+  }
+  *gid = entry->gr_gid;
+  return 1;
+}
+
+static void prepare_cache_dir(const char *cache_dir, const char *run_group, int *has_gid, gid_t *gid) {
+  *has_gid = group_id(run_group, gid);
+  if (mkdir_p(cache_dir, 0750) != 0) {
+    return;
+  }
+  chmod(cache_dir, 0750);
+  if (*has_gid) {
+    chown(cache_dir, 0, *gid);
+  }
+}
+
+static int write_cache(const char *cache_dir, const char *cache_file, const char *run_group,
+                       long ttl, const char *status, long long tcp, long long udp) {
+  char now[32];
+  char tmp_path[PATH_MAX];
+  time_t t = time(NULL);
+  struct tm tm;
+  int has_gid = 0;
+  gid_t gid = 0;
+  int fd;
+  int written;
+
+  prepare_cache_dir(cache_dir, run_group, &has_gid, &gid);
+  if (gmtime_r(&t, &tm) == NULL) {
+    return 1;
+  }
+  if (strftime(now, sizeof(now), "%Y-%m-%dT%H:%M:%SZ", &tm) == 0) {
+    return 1;
+  }
+  written = snprintf(tmp_path, sizeof(tmp_path), "%s.tmp.%ld", cache_file, (long)getpid());
+  if (written < 0 || (size_t)written >= sizeof(tmp_path)) {
+    return 1;
+  }
+
+  fd = open(tmp_path, O_WRONLY | O_CREAT | O_TRUNC, 0640);
+  if (fd < 0) {
+    return 1;
+  }
+  if (dprintf(fd,
+              "{\"schema\":%d,\"updated_at\":\"%s\",\"ttl_seconds\":%ld,\"status\":\"%s\",\"tcp_count\":%lld,\"udp_count\":%lld}\n",
+              SCHEMA, now, ttl, status, tcp, udp) < 0) {
+    close(fd);
+    unlink(tmp_path);
+    return 1;
+  }
+  fchmod(fd, 0640);
+  if (has_gid) {
+    fchown(fd, 0, gid);
+  }
+  if (close(fd) != 0) {
+    unlink(tmp_path);
+    return 1;
+  }
+  if (rename(tmp_path, cache_file) != 0) {
+    unlink(tmp_path);
+    return 1;
+  }
+  return 0;
+}
+
+int main(void) {
+  const char *cache_dir = env_or("CACHE_DIR", "/run/ithiltir-node");
+  const char *run_group = env_or("RUN_GROUP", DEFAULT_RUN_GROUP);
+  const char *proc_root = env_or("PROC_ROOT", "/proc");
+  long ttl = positive_env("CONNECTIONS_TTL_SECONDS", 3);
+  char cache_file[PATH_MAX];
+  char path[PATH_MAX];
+  char ns[PATH_MAX];
+  struct seen seen = {0};
+  long long total_tcp = 0;
+  long long total_udp = 0;
+  int read_count = 0;
+  DIR *dir;
+  struct dirent *entry;
+
+  if (cache_file_path(cache_file, sizeof(cache_file), cache_dir) != 0) {
+    return 1;
+  }
+
+  if (join_path(path, sizeof(path), proc_root, "net") == 0) {
+    long long tcp = 0, udp = 0;
+    int ok = 0;
+    count_net_dir(path, &tcp, &udp, &ok);
+    total_tcp += tcp;
+    total_udp += udp;
+    if (ok) {
+      read_count++;
+      if (join_path(path, sizeof(path), proc_root, "self/ns/net") == 0 &&
+          read_link_string(path, ns, sizeof(ns)) == 0) {
+        seen_add(&seen, ns);
+      }
+    }
+  }
+
+  dir = opendir(proc_root);
+  if (dir != NULL) {
+    while ((entry = readdir(dir)) != NULL) {
+      long long tcp = 0, udp = 0;
+      int ok = 0;
+      int written;
+      if (!all_digits(entry->d_name)) {
+        continue;
+      }
+      written = snprintf(path, sizeof(path), "%s/%s/ns/net", proc_root, entry->d_name);
+      if (written < 0 || (size_t)written >= sizeof(path)) {
+        continue;
+      }
+      if (read_link_string(path, ns, sizeof(ns)) != 0 || seen_has(&seen, ns)) {
+        continue;
+      }
+      written = snprintf(path, sizeof(path), "%s/%s/net", proc_root, entry->d_name);
+      if (written < 0 || (size_t)written >= sizeof(path)) {
+        continue;
+      }
+      count_net_dir(path, &tcp, &udp, &ok);
+      if (!ok) {
+        continue;
+      }
+      seen_add(&seen, ns);
+      read_count++;
+      total_tcp += tcp;
+      total_udp += udp;
+    }
+    closedir(dir);
+  }
+
+  return write_cache(cache_dir, cache_file, run_group, ttl,
+                     read_count == 0 ? "error" : "ok", total_tcp, total_udp);
+}
 EOF
-  sed -i "s/__RUN_GROUP__/${RUN_GROUP}/g" "$tmp"
-  as_root install -d -m 0755 "$(dirname "${CONNECTIONS_HELPER_FILE}")"
-  as_root install -m 0755 "$tmp" "${CONNECTIONS_HELPER_FILE}"
-  rm -f "$tmp"
+  if ! sed -i "s/__RUN_GROUP__/${RUN_GROUP}/g" "$src"; then
+    rm -f "$src" "$bin"
+    return 1
+  fi
+  if ! "$cc" -O2 "$src" -o "$bin" >/dev/null 2>&1; then
+    rm -f "$src" "$bin"
+    return 1
+  fi
+  if ! as_root install -d -m 0755 "$(dirname "${CONNECTIONS_HELPER_FILE}")"; then
+    rm -f "$src" "$bin"
+    return 1
+  fi
+  if ! as_root install -m 0755 "$bin" "${CONNECTIONS_HELPER_FILE}"; then
+    rm -f "$src" "$bin"
+    return 1
+  fi
+  rm -f "$src" "$bin" || true
+}
+
+write_connections_cache_helper() {
+  write_connections_cache_c_helper
+}
+
+disable_connections_cache_timer() {
+  if need_cmd systemctl; then
+    as_root systemctl disable --now "${CONNECTIONS_TIMER_NAME}" >/dev/null 2>&1 || true
+    as_root systemctl stop "${CONNECTIONS_SERVICE_NAME}" >/dev/null 2>&1 || true
+  fi
+  as_root rm -f "${CONNECTIONS_SERVICE_FILE}" "${CONNECTIONS_TIMER_FILE}" "${CONNECTIONS_HELPER_FILE}" >/dev/null 2>&1 || true
 }
 
 write_connections_cache_service() {
@@ -1050,20 +1344,32 @@ main() {
   write_smart_cache_helper
   write_smart_cache_service
   write_smart_cache_timer
-  write_connections_cache_helper
-  write_connections_cache_service
-  write_connections_cache_timer
+  local connections_cache_enabled=0
+  if write_connections_cache_helper; then
+    connections_cache_enabled=1
+    write_connections_cache_service
+    write_connections_cache_timer
+  else
+    echo "[!] C compiler not found or failed; disabling connections cache timer and using node fallback" >&2
+    disable_connections_cache_timer
+  fi
 
   as_root systemctl daemon-reload
   enable_smart_cache_timer
-  enable_connections_cache_timer
+  if [[ "${connections_cache_enabled}" -eq 1 ]]; then
+    enable_connections_cache_timer
+  fi
   as_root systemctl enable --now "${APP}.service"
 
   echo "[OK] Done: ${APP}.service is running and enabled on boot"
   echo "     Status: systemctl status ${APP}.service"
   echo "     Logs:   journalctl -u ${APP}.service -f"
   echo "     SMART cache timer: ${SMART_TIMER_NAME}"
-  echo "     Connections cache timer: ${CONNECTIONS_TIMER_NAME}"
+  if [[ "${connections_cache_enabled}" -eq 1 ]]; then
+    echo "     Connections cache timer: ${CONNECTIONS_TIMER_NAME}"
+  else
+    echo "     Connections cache timer: skipped (node fallback active)"
+  fi
   if [[ "${lvm_detected}" -eq 1 ]]; then
     echo "     LVM cache: ${CACHE_FILE}"
   fi
