@@ -60,14 +60,14 @@ function Detect-Arch {
   }
 }
 
-function Download-File([string]$Url, [string]$OutFile) {
+function Download-File([string]$Url, [string]$OutFile, [string]$Secret) {
   $tmpDir = Split-Path -Parent $OutFile
   if ($tmpDir -and !(Test-Path $tmpDir)) {
     New-Item -ItemType Directory -Force -Path $tmpDir | Out-Null
   }
 
   try {
-    Invoke-WebRequest -Uri $Url -OutFile $OutFile -UseBasicParsing -TimeoutSec 60
+    Invoke-WebRequest -Uri $Url -OutFile $OutFile -UseBasicParsing -TimeoutSec 60 -Headers @{ "X-Node-Secret" = $Secret }
   } catch {
     throw "Download failed: $Url ($($_.Exception.Message))"
   }
@@ -168,9 +168,9 @@ New-Item -ItemType Directory -Force -Path $NodeBinDir | Out-Null
 $tmpFile = Join-Path $env:TEMP ("{0}-{1}.tmp" -f $App, [Guid]::NewGuid().ToString("n"))
 $runnerTmpFile = Join-Path $env:TEMP ("ithiltir-runner-{0}.tmp" -f [Guid]::NewGuid().ToString("n"))
 try {
-  Download-File -Url $url -OutFile $tmpFile
+  Download-File -Url $url -OutFile $tmpFile -Secret $resolvedSecret
   Copy-Item -Force -Path $tmpFile -Destination $BinPath
-  Download-File -Url $runnerUrl -OutFile $runnerTmpFile
+  Download-File -Url $runnerUrl -OutFile $runnerTmpFile -Secret $resolvedSecret
   Copy-Item -Force -Path $runnerTmpFile -Destination $RunnerPath
 } finally {
   Remove-Item -Force -ErrorAction SilentlyContinue $tmpFile

@@ -68,11 +68,11 @@ detect_arch() {
 }
 
 download_file() {
-  local url="$1" out="$2"
+  local url="$1" out="$2" secret="$3"
   if need_cmd curl; then
-    curl -fL --retry 3 --connect-timeout 10 --max-time 300 -o "$out" "$url"
+    curl -fL --retry 3 --connect-timeout 10 --max-time 300 -H "X-Node-Secret: ${secret}" -o "$out" "$url"
   elif need_cmd wget; then
-    wget -O "$out" "$url"
+    wget --header="X-Node-Secret: ${secret}" -O "$out" "$url"
   else
     echo "Missing download tool: please install curl or wget" >&2
     exit 1
@@ -809,6 +809,10 @@ main() {
     secret="$3"
     shift 3
   fi
+  if [[ -z "$secret" ]]; then
+    echo "Secret is required." >&2
+    exit 1
+  fi
 
   local interval=""
   if [[ $# -gt 0 && "$1" =~ ^[0-9]+$ ]]; then
@@ -846,7 +850,7 @@ main() {
 
   tmp="$(mktemp)"
   trap "rm -f '$tmp'" EXIT
-  download_file "${url}" "${tmp}"
+  download_file "${url}" "${tmp}" "${secret}"
   chmod +x "${tmp}"
   node_version="$("${tmp}" --version | head -n1 | tr -d '\r')"
   release_dir="${RELEASES_DIR}/${node_version}"

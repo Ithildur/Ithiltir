@@ -17,6 +17,7 @@ import (
 	"dash/internal/store/metricdata"
 	nodestore "dash/internal/store/node"
 	"dash/internal/transport/http/httperr"
+	"dash/internal/transport/http/request"
 	"dash/internal/version"
 	"github.com/Ithildur/EiluneKit/contextutil"
 	"github.com/Ithildur/EiluneKit/http/decoder"
@@ -98,7 +99,7 @@ type updateManifest struct {
 }
 
 func readSecret(r *http.Request) (string, bool) {
-	secret := r.Header.Get("X-Node-Secret")
+	secret := r.Header.Get(request.NodeSecretHeader)
 	if secret == "" {
 		return "", false
 	}

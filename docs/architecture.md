@@ -67,6 +67,7 @@ Node IP is an observation from authenticated agent requests: Dash reads the firs
 | `/api/front/*`, `/api/metrics/*`, `/api/statistics/*` | optional bearer; anonymous requests are filtered by visibility settings |
 | `/api/node/*`                                         | `X-Node-Secret`                                                         |
 | `/api/admin/*`                                        | `Authorization: Bearer <access_token>`                                  |
+| `/deploy/*` packaged assets                           | `X-Node-Secret`; install script templates remain public                 |
 
 ## Frontend And Reverse Proxies
 

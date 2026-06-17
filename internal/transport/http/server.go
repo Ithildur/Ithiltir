@@ -75,7 +75,7 @@ func (s *HTTPServer) registerRoutes() error {
 		return err
 	}
 
-	pageHandler, err := Register(s.router, s.cfg, s.deps.Stores.System, s.deps.Theme)
+	pageHandler, err := Register(s.router, s.cfg, s.deps.Stores.System, s.deps.Stores.Node, s.deps.Theme)
 	if err != nil {
 		return err
 	}

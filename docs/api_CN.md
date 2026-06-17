@@ -19,7 +19,7 @@
 | 管理员密码                             | `POST /api/auth/login`                            |
 | refresh cookie + `X-CSRF-Token`        | `POST /api/auth/refresh`、`POST /api/auth/logout` |
 | `Authorization: Bearer <access_token>` | 管理 API 和可选鉴权读取                           |
-| `X-Node-Secret`                        | Agent 上报和节点身份读取                          |
+| `X-Node-Secret`                        | Agent 上报、节点身份读取和 deploy 资产下载        |
 
 Bearer 可选端点会把缺失、格式错误、过期、已撤销或其他无法通过校验的 Bearer token 当作匿名请求处理。这是有意保留的兼容行为：需要管理视图的客户端必须自行区分响应是已鉴权视图还是游客过滤视图。
 
@@ -127,7 +127,7 @@ Bearer 可选端点会把缺失、格式错误、过期、已撤销或其他无�
 | `/deploy/linux/install.sh`    | Linux Agent 安装脚本                    |
 | `/deploy/macos/install.sh`    | macOS Agent 安装脚本                    |
 | `/deploy/windows/install.ps1` | Windows Agent 安装脚本                  |
-| `/deploy/*`                   | 打包携带的节点发布资产                  |
+| `/deploy/*`                   | 打包携带的节点发布资产；需要 `X-Node-Secret` |
 | `/`                           | SPA                                     |
 
 ## 兼容性规则

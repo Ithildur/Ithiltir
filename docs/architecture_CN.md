@@ -67,6 +67,7 @@ Ithiltir Dash 是单实例应用。根入口只启动一个 HTTP 进程，该进
 | `/api/front/*`、`/api/metrics/*`、`/api/statistics/*` | Bearer 可选；匿名请求按系统可见性设置过滤 |
 | `/api/node/*`                                         | `X-Node-Secret`                           |
 | `/api/admin/*`                                        | `Authorization: Bearer <access_token>`    |
+| `/deploy/*` 打包资产                                  | `X-Node-Secret`；安装脚本模板仍公开       |
 
 ## 前端和反向代理
 

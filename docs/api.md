@@ -19,7 +19,7 @@ This document summarizes the stable HTTP contract. Public paths, methods, and fi
 | admin password                         | `POST /api/auth/login`                            |
 | refresh cookie + `X-CSRF-Token`        | `POST /api/auth/refresh`, `POST /api/auth/logout` |
 | `Authorization: Bearer <access_token>` | admin APIs and optional authenticated reads       |
-| `X-Node-Secret`                        | agent pushes and node identity reads              |
+| `X-Node-Secret`                        | agent pushes, node identity reads, and deploy asset downloads |
 
 Optional bearer endpoints treat a missing, malformed, expired, revoked, or otherwise invalid bearer token as an anonymous request. This is intentional compatibility behavior: clients that need admin data must check whether the response is the authenticated view or the guest-filtered view.
 
@@ -127,7 +127,7 @@ Optional bearer endpoints treat a missing, malformed, expired, revoked, or other
 | `/deploy/linux/install.sh`    | Linux agent install script                              |
 | `/deploy/macos/install.sh`    | macOS agent install script                              |
 | `/deploy/windows/install.ps1` | Windows agent install script                            |
-| `/deploy/*`                   | packaged node release assets                            |
+| `/deploy/*`                   | packaged node release assets; requires `X-Node-Secret` |
 | `/`                           | SPA                                                     |
 
 ## Compatibility Rules
