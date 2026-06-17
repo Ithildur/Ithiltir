@@ -809,8 +809,8 @@ PROC_ROOT="${PROC_ROOT:-/proc}"
 SCHEMA=1
 
 TMP="$(mktemp)"
-SEEN="$(mktemp)"
-trap 'rm -f "$TMP" "$SEEN"' EXIT
+trap 'rm -f "$TMP"' EXIT
+declare -A SEEN_NS
 
 count_file() {
   local file="$1" lines
@@ -847,12 +847,12 @@ count_net_dir() {
 
 seen_ns() {
   local ns="$1"
-  grep -Fxq "$ns" "$SEEN" 2>/dev/null
+  [[ -n "${SEEN_NS[$ns]+x}" ]]
 }
 
 mark_ns() {
   local ns="$1"
-  printf '%s\n' "$ns" >> "$SEEN"
+  SEEN_NS["$ns"]=1
 }
 
 total_tcp=0
