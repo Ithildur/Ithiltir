@@ -125,70 +125,79 @@ type ServerGroup struct {
 
 func (ServerGroup) TableName() string { return "server_groups" }
 
-// MetricsSnapshot contains all metrics fields shared by ServerMetric.
-// This eliminates field duplication and centralizes the metrics schema.
+// MetricValues contains scalar metric fields stored in both history and current rows.
 // Adding a field also requires ingest, history rebuild, frontend snapshot conversion, and migration updates.
-type MetricsSnapshot struct {
-	CPUUsageRatio     float64        `gorm:"column:cpu_usage_ratio;default:0"`
-	Load1             float64        `gorm:"column:load1;default:0"`
-	Load5             float64        `gorm:"column:load5;default:0"`
-	Load15            float64        `gorm:"column:load15;default:0"`
-	CPUUser           float64        `gorm:"column:cpu_user;default:0"`
-	CPUSystem         float64        `gorm:"column:cpu_system;default:0"`
-	CPUIdle           float64        `gorm:"column:cpu_idle;default:0"`
-	CPUIowait         float64        `gorm:"column:cpu_iowait;default:0"`
-	CPUSteal          float64        `gorm:"column:cpu_steal;default:0"`
-	CPUTempC          *float64       `gorm:"column:cpu_temp_c"`
-	MemTotal          int64          `gorm:"column:mem_total;default:0"`
-	MemUsed           int64          `gorm:"column:mem_used;default:0"`
-	MemAvailable      int64          `gorm:"column:mem_available;default:0"`
-	MemBuffers        int64          `gorm:"column:mem_buffers;default:0"`
-	MemCached         int64          `gorm:"column:mem_cached;default:0"`
-	MemUsedRatio      float64        `gorm:"column:mem_used_ratio;default:0"`
-	SwapTotal         int64          `gorm:"column:swap_total;default:0"`
-	SwapUsed          int64          `gorm:"column:swap_used;default:0"`
-	SwapFree          int64          `gorm:"column:swap_free;default:0"`
-	SwapUsedRatio     float64        `gorm:"column:swap_used_ratio;default:0"`
-	NetInBytes        int64          `gorm:"column:net_in_bytes;default:0"`
-	NetOutBytes       int64          `gorm:"column:net_out_bytes;default:0"`
-	NetInBps          float64        `gorm:"column:net_in_bps;default:0"`
-	NetOutBps         float64        `gorm:"column:net_out_bps;default:0"`
-	ProcessCount      int32          `gorm:"column:process_count;default:0"`
-	TCPConn           int32          `gorm:"column:tcp_conn;default:0"`
-	UDPConn           int32          `gorm:"column:udp_conn;default:0"`
-	UptimeSeconds     int64          `gorm:"column:uptime_seconds;default:0"`
-	RaidSupported     bool           `gorm:"column:raid_supported;default:false"`
-	RaidAvailable     bool           `gorm:"column:raid_available;default:false"`
-	RaidOverallHealth string         `gorm:"column:raid_overall_health;default:''"`
-	Raid              datatypes.JSON `gorm:"column:raid"`
-	Thermal           datatypes.JSON `gorm:"column:thermal"`
-	PSICPUSomeAvg10   *float64       `gorm:"column:psi_cpu_some_avg10"`
-	PSICPUSomeAvg60   *float64       `gorm:"column:psi_cpu_some_avg60"`
-	PSICPUSomeAvg300  *float64       `gorm:"column:psi_cpu_some_avg300"`
-	PSICPUSomeTotal   *int64         `gorm:"column:psi_cpu_some_total"`
-	PSICPUFullAvg10   *float64       `gorm:"column:psi_cpu_full_avg10"`
-	PSICPUFullAvg60   *float64       `gorm:"column:psi_cpu_full_avg60"`
-	PSICPUFullAvg300  *float64       `gorm:"column:psi_cpu_full_avg300"`
-	PSICPUFullTotal   *int64         `gorm:"column:psi_cpu_full_total"`
-	PSIMemSomeAvg10   *float64       `gorm:"column:psi_memory_some_avg10"`
-	PSIMemSomeAvg60   *float64       `gorm:"column:psi_memory_some_avg60"`
-	PSIMemSomeAvg300  *float64       `gorm:"column:psi_memory_some_avg300"`
-	PSIMemSomeTotal   *int64         `gorm:"column:psi_memory_some_total"`
-	PSIMemFullAvg10   *float64       `gorm:"column:psi_memory_full_avg10"`
-	PSIMemFullAvg60   *float64       `gorm:"column:psi_memory_full_avg60"`
-	PSIMemFullAvg300  *float64       `gorm:"column:psi_memory_full_avg300"`
-	PSIMemFullTotal   *int64         `gorm:"column:psi_memory_full_total"`
-	PSIIOSomeAvg10    *float64       `gorm:"column:psi_io_some_avg10"`
-	PSIIOSomeAvg60    *float64       `gorm:"column:psi_io_some_avg60"`
-	PSIIOSomeAvg300   *float64       `gorm:"column:psi_io_some_avg300"`
-	PSIIOSomeTotal    *int64         `gorm:"column:psi_io_some_total"`
-	PSIIOFullAvg10    *float64       `gorm:"column:psi_io_full_avg10"`
-	PSIIOFullAvg60    *float64       `gorm:"column:psi_io_full_avg60"`
-	PSIIOFullAvg300   *float64       `gorm:"column:psi_io_full_avg300"`
-	PSIIOFullTotal    *int64         `gorm:"column:psi_io_full_total"`
+type MetricValues struct {
+	CPUUsageRatio     float64  `gorm:"column:cpu_usage_ratio;default:0"`
+	Load1             float64  `gorm:"column:load1;default:0"`
+	Load5             float64  `gorm:"column:load5;default:0"`
+	Load15            float64  `gorm:"column:load15;default:0"`
+	CPUUser           float64  `gorm:"column:cpu_user;default:0"`
+	CPUSystem         float64  `gorm:"column:cpu_system;default:0"`
+	CPUIdle           float64  `gorm:"column:cpu_idle;default:0"`
+	CPUIowait         float64  `gorm:"column:cpu_iowait;default:0"`
+	CPUSteal          float64  `gorm:"column:cpu_steal;default:0"`
+	CPUTempC          *float64 `gorm:"column:cpu_temp_c"`
+	MemTotal          int64    `gorm:"column:mem_total;default:0"`
+	MemUsed           int64    `gorm:"column:mem_used;default:0"`
+	MemAvailable      int64    `gorm:"column:mem_available;default:0"`
+	MemBuffers        int64    `gorm:"column:mem_buffers;default:0"`
+	MemCached         int64    `gorm:"column:mem_cached;default:0"`
+	MemUsedRatio      float64  `gorm:"column:mem_used_ratio;default:0"`
+	SwapTotal         int64    `gorm:"column:swap_total;default:0"`
+	SwapUsed          int64    `gorm:"column:swap_used;default:0"`
+	SwapFree          int64    `gorm:"column:swap_free;default:0"`
+	SwapUsedRatio     float64  `gorm:"column:swap_used_ratio;default:0"`
+	NetInBytes        int64    `gorm:"column:net_in_bytes;default:0"`
+	NetOutBytes       int64    `gorm:"column:net_out_bytes;default:0"`
+	NetInBps          float64  `gorm:"column:net_in_bps;default:0"`
+	NetOutBps         float64  `gorm:"column:net_out_bps;default:0"`
+	ProcessCount      int32    `gorm:"column:process_count;default:0"`
+	TCPConn           int32    `gorm:"column:tcp_conn;default:0"`
+	UDPConn           int32    `gorm:"column:udp_conn;default:0"`
+	UptimeSeconds     int64    `gorm:"column:uptime_seconds;default:0"`
+	RaidSupported     bool     `gorm:"column:raid_supported;default:false"`
+	RaidAvailable     bool     `gorm:"column:raid_available;default:false"`
+	RaidOverallHealth string   `gorm:"column:raid_overall_health;default:''"`
+	PSICPUSomeAvg10   *float64 `gorm:"column:psi_cpu_some_avg10"`
+	PSICPUSomeAvg60   *float64 `gorm:"column:psi_cpu_some_avg60"`
+	PSICPUSomeAvg300  *float64 `gorm:"column:psi_cpu_some_avg300"`
+	PSICPUSomeTotal   *int64   `gorm:"column:psi_cpu_some_total"`
+	PSICPUFullAvg10   *float64 `gorm:"column:psi_cpu_full_avg10"`
+	PSICPUFullAvg60   *float64 `gorm:"column:psi_cpu_full_avg60"`
+	PSICPUFullAvg300  *float64 `gorm:"column:psi_cpu_full_avg300"`
+	PSICPUFullTotal   *int64   `gorm:"column:psi_cpu_full_total"`
+	PSIMemSomeAvg10   *float64 `gorm:"column:psi_memory_some_avg10"`
+	PSIMemSomeAvg60   *float64 `gorm:"column:psi_memory_some_avg60"`
+	PSIMemSomeAvg300  *float64 `gorm:"column:psi_memory_some_avg300"`
+	PSIMemSomeTotal   *int64   `gorm:"column:psi_memory_some_total"`
+	PSIMemFullAvg10   *float64 `gorm:"column:psi_memory_full_avg10"`
+	PSIMemFullAvg60   *float64 `gorm:"column:psi_memory_full_avg60"`
+	PSIMemFullAvg300  *float64 `gorm:"column:psi_memory_full_avg300"`
+	PSIMemFullTotal   *int64   `gorm:"column:psi_memory_full_total"`
+	PSIIOSomeAvg10    *float64 `gorm:"column:psi_io_some_avg10"`
+	PSIIOSomeAvg60    *float64 `gorm:"column:psi_io_some_avg60"`
+	PSIIOSomeAvg300   *float64 `gorm:"column:psi_io_some_avg300"`
+	PSIIOSomeTotal    *int64   `gorm:"column:psi_io_some_total"`
+	PSIIOFullAvg10    *float64 `gorm:"column:psi_io_full_avg10"`
+	PSIIOFullAvg60    *float64 `gorm:"column:psi_io_full_avg60"`
+	PSIIOFullAvg300   *float64 `gorm:"column:psi_io_full_avg300"`
+	PSIIOFullTotal    *int64   `gorm:"column:psi_io_full_total"`
 }
 
-var metricsSnapshotColumns = []string{
+// MetricRuntime contains current runtime payloads that should not be written to history.
+type MetricRuntime struct {
+	Raid    datatypes.JSON `gorm:"column:raid"`
+	Thermal datatypes.JSON `gorm:"column:thermal"`
+}
+
+// MetricsSnapshot contains the full current metric snapshot.
+type MetricsSnapshot struct {
+	MetricValues  `gorm:"embedded"`
+	MetricRuntime `gorm:"embedded"`
+}
+
+var metricValueColumns = []string{
 	"cpu_usage_ratio",
 	"load1",
 	"load5",
@@ -220,8 +229,6 @@ var metricsSnapshotColumns = []string{
 	"raid_supported",
 	"raid_available",
 	"raid_overall_health",
-	"raid",
-	"thermal",
 	"psi_cpu_some_avg10",
 	"psi_cpu_some_avg60",
 	"psi_cpu_some_avg300",
@@ -248,24 +255,31 @@ var metricsSnapshotColumns = []string{
 	"psi_io_full_total",
 }
 
+var metricRuntimeColumns = []string{
+	"raid",
+	"thermal",
+}
+
+var metricsSnapshotColumns = append(append([]string{}, metricValueColumns...), metricRuntimeColumns...)
+
 // ServerMetric represents table server_metrics (time-series history).
 type ServerMetric struct {
-	ServerID    int64      `gorm:"column:server_id;not null;primaryKey"`
-	CollectedAt time.Time  `gorm:"column:collected_at;not null;primaryKey"` // 服务端接收并归档的时间，历史主时间轴。
-	ReportedAt  *time.Time `gorm:"column:reported_at"`                      // agent 原始观测时间；告警 duration 用它，不能替代主键时间。
-	MetricsSnapshot
+	ServerID     int64      `gorm:"column:server_id;not null;primaryKey"`
+	CollectedAt  time.Time  `gorm:"column:collected_at;not null;primaryKey"` // 服务端接收并归档的时间，历史主时间轴。
+	ReportedAt   *time.Time `gorm:"column:reported_at"`                      // agent 原始观测时间；告警 duration 用它，不能替代主键时间。
+	MetricValues `gorm:"embedded"`
 }
 
 func (ServerMetric) TableName() string { return "server_metrics" }
 
 // ServerCurrentMetric represents table server_current_metrics (latest server metrics).
 type ServerCurrentMetric struct {
-	ServerID    int64      `gorm:"column:server_id;not null;primaryKey"`
-	CollectedAt time.Time  `gorm:"column:collected_at;not null"` // 当前态对应的历史采集时间，用于拒绝旧上报覆盖。
-	ReportedAt  *time.Time `gorm:"column:reported_at"`           // agent 原始观测时间；告警 duration 用它，不能替代 CollectedAt。
-	MetricsSnapshot
-	CreatedAt time.Time `gorm:"column:created_at;autoCreateTime"`
-	UpdatedAt time.Time `gorm:"column:updated_at;autoUpdateTime"`
+	ServerID        int64      `gorm:"column:server_id;not null;primaryKey"`
+	CollectedAt     time.Time  `gorm:"column:collected_at;not null"` // 当前态对应的历史采集时间，用于拒绝旧上报覆盖。
+	ReportedAt      *time.Time `gorm:"column:reported_at"`           // agent 原始观测时间；告警 duration 用它，不能替代 CollectedAt。
+	MetricsSnapshot `gorm:"embedded"`
+	CreatedAt       time.Time `gorm:"column:created_at;autoCreateTime"`
+	UpdatedAt       time.Time `gorm:"column:updated_at;autoUpdateTime"`
 }
 
 func (ServerCurrentMetric) TableName() string { return "server_current_metrics" }
@@ -273,15 +287,6 @@ func (ServerCurrentMetric) TableName() string { return "server_current_metrics" 
 func ServerCurrentMetricUpdateColumns() []string {
 	columns := append([]string{"collected_at", "reported_at"}, metricsSnapshotColumns...)
 	return append(columns, "updated_at")
-}
-
-func (m ServerCurrentMetric) ToServerMetric() ServerMetric {
-	return ServerMetric{
-		ServerID:        m.ServerID,
-		CollectedAt:     m.CollectedAt,
-		ReportedAt:      m.ReportedAt,
-		MetricsSnapshot: m.MetricsSnapshot,
-	}
 }
 
 // DiskMetric represents table disk_metrics (per base_io time series).

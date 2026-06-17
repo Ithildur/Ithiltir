@@ -30,39 +30,43 @@ func ToSnapshot(m Metrics) (model.MetricsSnapshot, error) {
 	conn := m.Connections
 	processes := m.Processes
 	snap := model.MetricsSnapshot{
-		CPUUsageRatio:     m.CPU.UsageRatio,
-		Load1:             m.CPU.Load1,
-		Load5:             m.CPU.Load5,
-		Load15:            m.CPU.Load15,
-		CPUUser:           m.CPU.Times.User,
-		CPUSystem:         m.CPU.Times.System,
-		CPUIdle:           m.CPU.Times.Idle,
-		CPUIowait:         m.CPU.Times.Iowait,
-		CPUSteal:          m.CPU.Times.Steal,
-		CPUTempC:          maxThermalTempC(m.Thermal, isCPUSensor),
-		MemTotal:          int64(mem.Total),
-		MemUsed:           int64(mem.Used),
-		MemAvailable:      int64(mem.Available),
-		MemBuffers:        int64(mem.Buffers),
-		MemCached:         int64(mem.Cached),
-		MemUsedRatio:      mem.UsedRatio,
-		SwapTotal:         int64(mem.SwapTotal),
-		SwapUsed:          int64(mem.SwapUsed),
-		SwapFree:          int64(mem.SwapFree),
-		SwapUsedRatio:     mem.SwapUsedRatio,
-		NetInBytes:        int64(netInBytes),
-		NetOutBytes:       int64(netOutBytes),
-		NetInBps:          netInBps,
-		NetOutBps:         netOutBps,
-		ProcessCount:      int32(processes.ProcessCount),
-		TCPConn:           int32(conn.TCPCount),
-		UDPConn:           int32(conn.UDPCount),
-		UptimeSeconds:     int64(m.System.UptimeSeconds),
-		RaidSupported:     m.Raid.Supported,
-		RaidAvailable:     m.Raid.Available,
-		RaidOverallHealth: raidHealth,
-		Raid:              raidJSON,
-		Thermal:           thermalJSON,
+		MetricValues: model.MetricValues{
+			CPUUsageRatio:     m.CPU.UsageRatio,
+			Load1:             m.CPU.Load1,
+			Load5:             m.CPU.Load5,
+			Load15:            m.CPU.Load15,
+			CPUUser:           m.CPU.Times.User,
+			CPUSystem:         m.CPU.Times.System,
+			CPUIdle:           m.CPU.Times.Idle,
+			CPUIowait:         m.CPU.Times.Iowait,
+			CPUSteal:          m.CPU.Times.Steal,
+			CPUTempC:          maxThermalTempC(m.Thermal, isCPUSensor),
+			MemTotal:          int64(mem.Total),
+			MemUsed:           int64(mem.Used),
+			MemAvailable:      int64(mem.Available),
+			MemBuffers:        int64(mem.Buffers),
+			MemCached:         int64(mem.Cached),
+			MemUsedRatio:      mem.UsedRatio,
+			SwapTotal:         int64(mem.SwapTotal),
+			SwapUsed:          int64(mem.SwapUsed),
+			SwapFree:          int64(mem.SwapFree),
+			SwapUsedRatio:     mem.SwapUsedRatio,
+			NetInBytes:        int64(netInBytes),
+			NetOutBytes:       int64(netOutBytes),
+			NetInBps:          netInBps,
+			NetOutBps:         netOutBps,
+			ProcessCount:      int32(processes.ProcessCount),
+			TCPConn:           int32(conn.TCPCount),
+			UDPConn:           int32(conn.UDPCount),
+			UptimeSeconds:     int64(m.System.UptimeSeconds),
+			RaidSupported:     m.Raid.Supported,
+			RaidAvailable:     m.Raid.Available,
+			RaidOverallHealth: raidHealth,
+		},
+		MetricRuntime: model.MetricRuntime{
+			Raid:    raidJSON,
+			Thermal: thermalJSON,
+		},
 	}
 	applyPressureSnapshot(&snap, m.Pressure)
 	return snap, nil
@@ -130,7 +134,7 @@ func metricsFromSnapshot(snap model.MetricsSnapshot) (Metrics, error) {
 	return m, nil
 }
 
-func BuildNodeReport(server model.Server, metric model.ServerMetric) (NodeReport, error) {
+func BuildNodeReport(server model.Server, metric model.ServerCurrentMetric) (NodeReport, error) {
 	m, err := metricsFromSnapshot(metric.MetricsSnapshot)
 	if err != nil {
 		return NodeReport{}, err

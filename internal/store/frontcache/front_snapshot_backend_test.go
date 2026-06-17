@@ -54,7 +54,7 @@ func TestIntegrationFetchFrontNodesReadsCurrentMetrics(t *testing.T) {
 	if err := db.Create(&model.ServerMetric{
 		ServerID:    srv.ID,
 		CollectedAt: collectedAt.Add(time.Hour),
-		MetricsSnapshot: model.MetricsSnapshot{
+		MetricValues: model.MetricValues{
 			CPUUsageRatio: 0.99,
 			MemTotal:      1000,
 			MemUsed:       900,
@@ -66,9 +66,11 @@ func TestIntegrationFetchFrontNodesReadsCurrentMetrics(t *testing.T) {
 		ServerID:    srv.ID,
 		CollectedAt: collectedAt,
 		MetricsSnapshot: model.MetricsSnapshot{
-			CPUUsageRatio: 0.25,
-			MemTotal:      1000,
-			MemUsed:       250,
+			MetricValues: model.MetricValues{
+				CPUUsageRatio: 0.25,
+				MemTotal:      1000,
+				MemUsed:       250,
+			},
 		},
 	}).Error; err != nil {
 		t.Fatalf("Create(ServerCurrentMetric) error = %v", err)
@@ -143,10 +145,14 @@ func TestIntegrationFrontNodesComposeRuntimeFields(t *testing.T) {
 		ServerID:    server.ID,
 		CollectedAt: collectedAt,
 		MetricsSnapshot: model.MetricsSnapshot{
-			CPUUsageRatio: 0.25,
-			MemTotal:      1000,
-			MemUsed:       250,
-			Thermal:       thermalRaw,
+			MetricValues: model.MetricValues{
+				CPUUsageRatio: 0.25,
+				MemTotal:      1000,
+				MemUsed:       250,
+			},
+			MetricRuntime: model.MetricRuntime{
+				Thermal: thermalRaw,
+			},
 		},
 	}).Error; err != nil {
 		t.Fatalf("Create(ServerCurrentMetric) error = %v", err)

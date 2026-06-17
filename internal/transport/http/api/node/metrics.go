@@ -82,6 +82,7 @@ type validatedMetrics struct {
 	server     model.Server
 	report     metrics.NodeReport
 	metric     model.ServerMetric
+	runtime    model.MetricRuntime
 	receivedAt time.Time
 }
 
@@ -146,7 +147,7 @@ func (h *handler) validateMetrics(ctx context.Context, r *http.Request, received
 		return nil, httperr.ServiceUnavailable(err)
 	}
 	report, reportedAtRaw := metrics.NormalizeReport(server.ID, server.DisplayOrder, report, receivedAt)
-	metric, err := metrics.BuildMetric(server.ID, report.Metrics, receivedAt, reportedAtRaw)
+	metric, runtime, err := metrics.BuildMetric(server.ID, report.Metrics, receivedAt, reportedAtRaw)
 	if err != nil {
 		return nil, httperr.InvalidMetrics(err)
 	}
@@ -155,6 +156,7 @@ func (h *handler) validateMetrics(ctx context.Context, r *http.Request, received
 		server:     server,
 		report:     report,
 		metric:     metric,
+		runtime:    runtime,
 		receivedAt: receivedAt,
 	}, nil
 }
@@ -174,6 +176,7 @@ func (h *handler) persistMetrics(ctx context.Context, validated *validatedMetric
 	if err := h.saveMetrics(ctx, metricdata.MetricsSample{
 		ServerID:  validated.server.ID,
 		Metric:    validated.metric,
+		Runtime:   validated.runtime,
 		Updates:   updates,
 		DiskIO:    validated.report.Metrics.Disk.BaseIO,
 		DiskSmart: validated.report.Metrics.Disk.Smart,

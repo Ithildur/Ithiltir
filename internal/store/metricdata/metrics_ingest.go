@@ -18,6 +18,7 @@ import (
 type MetricsSample struct {
 	ServerID  int64
 	Metric    model.ServerMetric
+	Runtime   model.MetricRuntime
 	Updates   map[string]any
 	DiskIO    []metrics.DiskBaseIOMetrics
 	DiskSmart *metrics.DiskSmart
@@ -36,7 +37,7 @@ func (s *Store) SaveMetrics(ctx context.Context, sample MetricsSample) error {
 	nicRows := buildNICRows(sample.ServerID, sample.Metric.CollectedAt, sample.Network)
 
 	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		if err := tx.Create(&sample.Metric).Error; err != nil {
+		if err := insertServerMetric(tx, sample.Metric); err != nil {
 			return err
 		}
 		if err := insertDiskIO(tx, diskIORows); err != nil {
@@ -51,7 +52,7 @@ func (s *Store) SaveMetrics(ctx context.Context, sample MetricsSample) error {
 		if err := insertNICs(tx, nicRows); err != nil {
 			return err
 		}
-		if err := saveCurrentMetrics(tx, sample.ServerID, sample.Metric, diskIORows, diskUsageRows, nicRows); err != nil {
+		if err := saveCurrentMetrics(tx, sample.ServerID, sample.Metric, sample.Runtime, diskIORows, diskUsageRows, nicRows); err != nil {
 			return err
 		}
 		if len(sample.Updates) > 0 {
@@ -61,6 +62,13 @@ func (s *Store) SaveMetrics(ctx context.Context, sample MetricsSample) error {
 		}
 		return nil
 	})
+}
+
+func insertServerMetric(tx *gorm.DB, metric model.ServerMetric) error {
+	if tx == nil {
+		return nil
+	}
+	return tx.Create(&metric).Error
 }
 
 func buildDiskIORows(serverID int64, collectedAt time.Time, items []metrics.DiskBaseIOMetrics) []model.DiskMetric {
@@ -225,16 +233,19 @@ func insertNICs(tx *gorm.DB, rows []model.NICMetric) error {
 	return tx.Create(&rows).Error
 }
 
-func saveCurrentMetrics(tx *gorm.DB, serverID int64, metric model.ServerMetric, diskIO []model.DiskMetric, diskUsage []model.DiskUsageMetric, nics []model.NICMetric) error {
+func saveCurrentMetrics(tx *gorm.DB, serverID int64, metric model.ServerMetric, runtime model.MetricRuntime, diskIO []model.DiskMetric, diskUsage []model.DiskUsageMetric, nics []model.NICMetric) error {
 	if tx == nil || serverID <= 0 {
 		return nil
 	}
 
 	current := model.ServerCurrentMetric{
-		ServerID:        serverID,
-		CollectedAt:     metric.CollectedAt,
-		ReportedAt:      metric.ReportedAt,
-		MetricsSnapshot: metric.MetricsSnapshot,
+		ServerID:    serverID,
+		CollectedAt: metric.CollectedAt,
+		ReportedAt:  metric.ReportedAt,
+		MetricsSnapshot: model.MetricsSnapshot{
+			MetricValues:  metric.MetricValues,
+			MetricRuntime: runtime,
+		},
 	}
 	result := tx.Clauses(clause.OnConflict{
 		Columns:   []clause.Column{{Name: "server_id"}},

@@ -71,7 +71,7 @@ func (s *Store) FetchFrontNodes(ctx context.Context, staleAfterSec int, limit, o
 		if !ok {
 			continue
 		}
-		report, err := metrics.BuildNodeReport(srv, m.ToServerMetric())
+		report, err := metrics.BuildNodeReport(srv, m)
 		if err != nil {
 			logger.Warn("build front snapshot failed", err,
 				slog.Int64("server_id", m.ServerID),
