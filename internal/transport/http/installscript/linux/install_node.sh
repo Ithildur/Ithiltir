@@ -13,6 +13,7 @@ DOWNLOAD_SCHEME="${DOWNLOAD_SCHEME:-__DOWNLOAD_SCHEME__}"
 DOWNLOAD_HOST="${DOWNLOAD_HOST:-__DOWNLOAD_HOST__}"
 DOWNLOAD_PATH="${DOWNLOAD_PATH:-__DOWNLOAD_PATH__}"
 DOWNLOAD_PREFIX="${DOWNLOAD_PREFIX:-node_linux_}"
+APP_LANGUAGE="${APP_LANGUAGE:-__APP_LANGUAGE__}"
 
 RUN_USER="${RUN_USER:-ithiltir}"
 RUN_GROUP="${RUN_GROUP:-ithiltir}"
@@ -40,19 +41,113 @@ CRON_FILE="/etc/cron.d/ithiltir-node-thinpool"
 
 need_cmd() { command -v "$1" >/dev/null 2>&1; }
 
+is_zh() {
+  case "$APP_LANGUAGE" in
+    [eE][nN]|[eE][nN][gG][lL][iI][sS][hH]) return 1 ;;
+    *) return 0 ;;
+  esac
+}
+
+msg() {
+  local key="$1"
+  shift || true
+  if is_zh; then
+    case "$key" in
+      root_required) echo "此安装脚本需要 root 权限，且当前系统未安装 sudo。请使用 root 用户运行。" ;;
+      unsupported_arch) echo "仅支持 amd64/arm64，当前 uname -m=$1" ;;
+      missing_download_tool) echo "缺少下载工具：请安装 curl 或 wget" ;;
+      missing_user_tool) echo "缺少 useradd/adduser，无法创建用户 $1" ;;
+      enable_time_sync) echo "[+] 正在启用系统时间同步（NTP，非致命）" ;;
+      time_sync_enabled) echo "[+] 系统时间同步已启用" ;;
+      time_sync_started) echo "[+] 系统时间同步服务已启动：$1" ;;
+      time_sync_failed) echo "[Warn] 无法自动启用系统时间同步；请手动检查 NTP/chrony/systemd-timesyncd" ;;
+      no_cron_package_manager) echo "未找到支持的包管理器（apt/dnf/yum/pacman/apk），无法自动安装 cron。" ;;
+      smartctl_installed) echo "[+] smartctl 已安装" ;;
+      install_smartmontools) echo "[+] 正在安装 smartmontools 以启用 SMART 缓存（非致命）" ;;
+      apt_update_smart_failed) echo "[Warn] apt-get update 失败，未安装 smartctl" ;;
+      smartmontools_failed) echo "[Warn] smartmontools 安装失败，节点安装继续" ;;
+      smart_package_manager_unsupported) echo "[Warn] 不支持的包管理器，未安装 smartctl" ;;
+      systemctl_missing_smart) echo "[Warn] 未找到 systemctl，跳过 SMART 缓存 timer" ;;
+      enable_smart_failed) echo "[Warn] 无法启用 $1，节点服务安装继续" ;;
+      systemctl_missing_connections) echo "[Warn] 未找到 systemctl，跳过连接数缓存 timer" ;;
+      enable_connections_failed) echo "[Warn] 无法启用 $1，节点服务安装继续" ;;
+      secret_required) echo "Secret 不能为空。" ;;
+      lvm_detected) echo "[+] 检测到 LVM/LVM-thin，正在安装 cron 并启用 thinpool 缓存" ;;
+      lvm_missing) echo "[-] 未检测到 LVM，跳过 cron/collector" ;;
+      connections_helper_installed) echo "[+] 连接数缓存 helper 已安装，可完整统计主机/容器网络命名空间 TCP/UDP 连接数" ;;
+      connections_helper_failed) echo "[Warn] 完整统计主机/容器网络命名空间 TCP/UDP 连接数需要本机 C 编译器来构建 root 侧 helper；helper 配置失败，节点将使用自带连接数统计，可能缺失容器连接数据" ;;
+      connections_helper_solution) echo "       请通过系统包管理器安装 cc/gcc/clang 后重新运行此安装脚本，以启用连接数缓存 helper" ;;
+      done) echo "[OK] 完成：${APP}.service 已运行并设置为开机自启" ;;
+      status) echo "     状态：systemctl status ${APP}.service" ;;
+      logs) echo "     日志：journalctl -u ${APP}.service -f" ;;
+      smart_timer) echo "     SMART 缓存 timer：${SMART_TIMER_NAME}" ;;
+      connections_timer) echo "     连接数缓存 timer：${CONNECTIONS_TIMER_NAME}" ;;
+      connections_timer_skipped) echo "     连接数缓存 timer：已跳过（正在使用节点自带统计，容器连接数据可能不完整）" ;;
+      lvm_cache) echo "     LVM 缓存：${CACHE_FILE}" ;;
+      *) echo "$key" ;;
+    esac
+    return
+  fi
+
+  case "$key" in
+    root_required) echo "This installer requires root privileges, and sudo is not installed. Please run as root." ;;
+    unsupported_arch) echo "Only amd64/arm64 are supported; current uname -m=$1" ;;
+    missing_download_tool) echo "Missing download tool: please install curl or wget" ;;
+    missing_user_tool) echo "Missing useradd/adduser; cannot create user $1" ;;
+    enable_time_sync) echo "[+] enabling system time sync (NTP; non-fatal)" ;;
+    time_sync_enabled) echo "[+] system time sync is enabled" ;;
+    time_sync_started) echo "[+] system time sync service started: $1" ;;
+    time_sync_failed) echo "[Warn] could not enable system time sync automatically; please check NTP/chrony/systemd-timesyncd manually" ;;
+    no_cron_package_manager) echo "No supported package manager found (apt/dnf/yum/pacman/apk); cannot auto-install cron." ;;
+    smartctl_installed) echo "[+] smartctl already installed" ;;
+    install_smartmontools) echo "[+] installing smartmontools for SMART cache (non-fatal)" ;;
+    apt_update_smart_failed) echo "[Warn] apt-get update failed; smartctl not installed" ;;
+    smartmontools_failed) echo "[Warn] smartmontools install failed; node install continues" ;;
+    smart_package_manager_unsupported) echo "[Warn] unsupported package manager; smartctl not installed" ;;
+    systemctl_missing_smart) echo "[Warn] systemctl not found; skipping SMART cache timer" ;;
+    enable_smart_failed) echo "[Warn] could not enable $1; node service install continues" ;;
+    systemctl_missing_connections) echo "[Warn] systemctl not found; skipping connections cache timer" ;;
+    enable_connections_failed) echo "[Warn] could not enable $1; node service install continues" ;;
+    secret_required) echo "Secret is required." ;;
+    lvm_detected) echo "[+] LVM/LVM-thin detected; installing cron and enabling thinpool cache" ;;
+    lvm_missing) echo "[-] No LVM detected; skipping cron/collector" ;;
+    connections_helper_installed) echo "[+] Connections cache helper installed for full host/container network-namespace TCP/UDP counts" ;;
+    connections_helper_failed) echo "[Warn] Full host/container network-namespace TCP/UDP counting requires a local C compiler for the root-side helper; helper setup failed, so the node will use its built-in connection counting, which may miss container connections" ;;
+    connections_helper_solution) echo "       Install cc/gcc/clang with your system package manager and rerun this installer to enable the connections cache helper" ;;
+    done) echo "[OK] Done: ${APP}.service is running and enabled on boot" ;;
+    status) echo "     Status: systemctl status ${APP}.service" ;;
+    logs) echo "     Logs:   journalctl -u ${APP}.service -f" ;;
+    smart_timer) echo "     SMART cache timer: ${SMART_TIMER_NAME}" ;;
+    connections_timer) echo "     Connections cache timer: ${CONNECTIONS_TIMER_NAME}" ;;
+    connections_timer_skipped) echo "     Connections cache timer: skipped (node built-in counting active; container connections may be incomplete)" ;;
+    lvm_cache) echo "     LVM cache: ${CACHE_FILE}" ;;
+    *) echo "$key" ;;
+  esac
+}
+
 as_root() {
   if [[ "${EUID:-$(id -u)}" -eq 0 ]]; then
     "$@"
   else
     if need_cmd sudo; then sudo "$@"; else
-      echo "This installer requires root privileges, and sudo is not installed. Please run as root." >&2
+      msg root_required >&2
       exit 1
     fi
   fi
 }
 
 usage() {
-  cat >&2 <<EOF
+  if is_zh; then
+    cat >&2 <<EOF
+用法：sudo bash $0 <dash_ip> [dash_port] <secret> [interval_seconds] [--net iface1,iface2]
+
+示例：
+  sudo bash $0 10.0.0.2 8080 mysecret
+  sudo bash $0 dash.example.com mysecret
+  sudo bash $0 10.0.0.2 8080 'my secret with space' 3 --net eth0,eth1
+EOF
+  else
+    cat >&2 <<EOF
 Usage:  sudo bash $0 <dash_ip> [dash_port] <secret> [interval_seconds] [--net iface1,iface2]
 
 Examples:
@@ -60,6 +155,7 @@ Examples:
   sudo bash $0 dash.example.com mysecret
   sudo bash $0 10.0.0.2 8080 'my secret with space' 3 --net eth0,eth1
 EOF
+  fi
   exit 1
 }
 
@@ -69,7 +165,7 @@ detect_arch() {
   case "$m" in
     x86_64|amd64) echo "amd64" ;;
     aarch64|arm64) echo "arm64" ;;
-    *) echo "Only amd64/arm64 are supported; current uname -m=$m" >&2; exit 1 ;;
+    *) msg unsupported_arch "$m" >&2; exit 1 ;;
   esac
 }
 
@@ -80,7 +176,7 @@ download_file() {
   elif need_cmd wget; then
     wget --header="X-Node-Secret: ${secret}" -O "$out" "$url"
   else
-    echo "Missing download tool: please install curl or wget" >&2
+    msg missing_download_tool >&2
     exit 1
   fi
 }
@@ -94,16 +190,16 @@ ensure_user() {
   elif need_cmd adduser; then
     as_root adduser --system --no-create-home --disabled-login --group "${RUN_USER}"
   else
-    echo "Missing useradd/adduser; cannot create user ${RUN_USER}" >&2
+    msg missing_user_tool "${RUN_USER}" >&2
     exit 1
   fi
 }
 
 enable_time_sync() {
-  echo "[+] enabling system time sync (NTP; non-fatal)"
+  msg enable_time_sync
 
   if need_cmd timedatectl && as_root timedatectl set-ntp true >/dev/null 2>&1; then
-    echo "[+] system time sync is enabled"
+    msg time_sync_enabled
     return 0
   fi
 
@@ -111,13 +207,13 @@ enable_time_sync() {
     local unit
     for unit in systemd-timesyncd.service chronyd.service ntpd.service ntp.service; do
       if as_root systemctl enable --now "$unit" >/dev/null 2>&1; then
-        echo "[+] system time sync service started: ${unit}"
+        msg time_sync_started "${unit}"
         return 0
       fi
     done
   fi
 
-  echo "[!] could not enable system time sync automatically; please check NTP/chrony/systemd-timesyncd manually" >&2
+  msg time_sync_failed >&2
   return 0
 }
 
@@ -152,7 +248,7 @@ install_cron() {
     as_root apk add --no-cache dcron
     svc="dcron"
   else
-    echo "No supported package manager found (apt/dnf/yum/pacman/apk); cannot auto-install cron." >&2
+    msg no_cron_package_manager >&2
     return 1
   fi
 
@@ -165,26 +261,26 @@ install_cron() {
 
 install_smartmontools() {
   if need_cmd smartctl; then
-    echo "[+] smartctl already installed"
+    msg smartctl_installed
     return 0
   fi
 
-  echo "[+] installing smartmontools for SMART cache (non-fatal)"
+  msg install_smartmontools
   if need_cmd apt-get; then
-    as_root apt-get update || { echo "[!] apt-get update failed; smartctl not installed" >&2; return 0; }
-    as_root apt-get install -y smartmontools || echo "[!] smartmontools install failed; node install continues" >&2
+    as_root apt-get update || { msg apt_update_smart_failed >&2; return 0; }
+    as_root apt-get install -y smartmontools || msg smartmontools_failed >&2
   elif need_cmd dnf; then
-    as_root dnf install -y smartmontools || echo "[!] smartmontools install failed; node install continues" >&2
+    as_root dnf install -y smartmontools || msg smartmontools_failed >&2
   elif need_cmd yum; then
-    as_root yum install -y smartmontools || echo "[!] smartmontools install failed; node install continues" >&2
+    as_root yum install -y smartmontools || msg smartmontools_failed >&2
   elif need_cmd pacman; then
-    as_root pacman -Sy --noconfirm smartmontools || echo "[!] smartmontools install failed; node install continues" >&2
+    as_root pacman -Sy --noconfirm smartmontools || msg smartmontools_failed >&2
   elif need_cmd zypper; then
-    as_root zypper --non-interactive install smartmontools || echo "[!] smartmontools install failed; node install continues" >&2
+    as_root zypper --non-interactive install smartmontools || msg smartmontools_failed >&2
   elif need_cmd apk; then
-    as_root apk add --no-cache smartmontools || echo "[!] smartmontools install failed; node install continues" >&2
+    as_root apk add --no-cache smartmontools || msg smartmontools_failed >&2
   else
-    echo "[!] unsupported package manager; smartctl not installed" >&2
+    msg smart_package_manager_unsupported >&2
   fi
 }
 
@@ -784,11 +880,11 @@ EOF"
 
 enable_smart_cache_timer() {
   if ! need_cmd systemctl; then
-    echo "[!] systemctl not found; skipping SMART cache timer" >&2
+    msg systemctl_missing_smart >&2
     return 0
   fi
   if ! as_root systemctl enable --now "${SMART_TIMER_NAME}" >/dev/null 2>&1; then
-    echo "[!] could not enable ${SMART_TIMER_NAME}; node service install continues" >&2
+    msg enable_smart_failed "${SMART_TIMER_NAME}" >&2
     return 0
   fi
   as_root systemctl start "${SMART_SERVICE_NAME}" >/dev/null 2>&1 || true
@@ -1103,7 +1199,7 @@ int main(void) {
   const char *cache_dir = env_or("CACHE_DIR", "/run/ithiltir-node");
   const char *run_group = env_or("RUN_GROUP", DEFAULT_RUN_GROUP);
   const char *proc_root = env_or("PROC_ROOT", "/proc");
-  long ttl = positive_env("CONNECTIONS_TTL_SECONDS", 3);
+  long ttl = positive_env("CONNECTIONS_TTL_SECONDS", 5);
   char cache_file[PATH_MAX];
   char path[PATH_MAX];
   char ns[PATH_MAX];
@@ -1232,11 +1328,11 @@ EOF"
 
 enable_connections_cache_timer() {
   if ! need_cmd systemctl; then
-    echo "[!] systemctl not found; skipping connections cache timer" >&2
+    msg systemctl_missing_connections >&2
     return 0
   fi
   if ! as_root systemctl enable --now "${CONNECTIONS_TIMER_NAME}" >/dev/null 2>&1; then
-    echo "[!] could not enable ${CONNECTIONS_TIMER_NAME}; node service install continues" >&2
+    msg enable_connections_failed "${CONNECTIONS_TIMER_NAME}" >&2
     return 0
   fi
   as_root systemctl start "${CONNECTIONS_SERVICE_NAME}" >/dev/null 2>&1 || true
@@ -1251,9 +1347,9 @@ main() {
   local dash_port=""
   local secret=""
   if [[ $# -eq 2 ]]; then
-    case "${DOWNLOAD_SCHEME,,}" in
-      https) dash_port="443" ;;
-      http) dash_port="80" ;;
+    case "$DOWNLOAD_SCHEME" in
+      [hH][tT][tT][pP][sS]) dash_port="443" ;;
+      [hH][tT][tT][pP]) dash_port="80" ;;
       *) dash_port="80" ;;
     esac
     secret="$2"
@@ -1264,7 +1360,7 @@ main() {
     shift 3
   fi
   if [[ -z "$secret" ]]; then
-    echo "Secret is required." >&2
+    msg secret_required >&2
     exit 1
   fi
 
@@ -1330,13 +1426,13 @@ main() {
   local lvm_detected=0
   if has_lvm; then
     lvm_detected=1
-    echo "[+] LVM/LVM-thin detected; installing cron and enabling thinpool cache"
+    msg lvm_detected
     install_cron || true
     write_collector
     write_cron
     as_root "${COLLECTOR}" || true
   else
-    echo "[-] No LVM detected; skipping cron/collector"
+    msg lvm_missing
     as_root rm -f "${CRON_FILE}" >/dev/null 2>&1 || true
     as_root rm -f "${COLLECTOR}" >/dev/null 2>&1 || true
   fi
@@ -1347,10 +1443,12 @@ main() {
   local connections_cache_enabled=0
   if write_connections_cache_helper; then
     connections_cache_enabled=1
+    msg connections_helper_installed
     write_connections_cache_service
     write_connections_cache_timer
   else
-    echo "[!] C compiler not found or failed; disabling connections cache timer and using node fallback" >&2
+    msg connections_helper_failed >&2
+    msg connections_helper_solution >&2
     disable_connections_cache_timer
   fi
 
@@ -1361,17 +1459,17 @@ main() {
   fi
   as_root systemctl enable --now "${APP}.service"
 
-  echo "[OK] Done: ${APP}.service is running and enabled on boot"
-  echo "     Status: systemctl status ${APP}.service"
-  echo "     Logs:   journalctl -u ${APP}.service -f"
-  echo "     SMART cache timer: ${SMART_TIMER_NAME}"
+  msg done
+  msg status
+  msg logs
+  msg smart_timer
   if [[ "${connections_cache_enabled}" -eq 1 ]]; then
-    echo "     Connections cache timer: ${CONNECTIONS_TIMER_NAME}"
+    msg connections_timer
   else
-    echo "     Connections cache timer: skipped (node fallback active)"
+    msg connections_timer_skipped
   fi
   if [[ "${lvm_detected}" -eq 1 ]]; then
-    echo "     LVM cache: ${CACHE_FILE}"
+    msg lvm_cache
   fi
 }
 

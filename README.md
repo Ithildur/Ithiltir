@@ -75,6 +75,8 @@ Config lookup order:
 
 - Default deployment shape: `PostgreSQL 16+ + TimescaleDB + Redis`
 - `install_dash_linux.sh` requires Redis `8.2.3+`; when the OS repository cannot provide it, the installer builds Redis from source and installs `redis-server.service`
+- Node install script messages follow `app.language`.
+- Linux node installation compiles a small root-side connections helper when `cc`, `gcc`, or `clang` is available. This helper is required for full host/container network-namespace TCP/UDP counts because the node service runs with low privileges; without a compiler, the node uses its built-in connection counting, which may miss container connections. Install a C compiler with the system package manager and rerun the installer to enable the helper.
 - Recommended minimum: `1 vCPU / 2 GB RAM / 40 GB SSD/NVMe`
 - Setups below `4 GB RAM` should enable `SWAP`
 - Reverse proxies must preserve same-origin paths: proxy `/api`, `/theme`, and `/deploy` to Dash, and let Dash serve the SPA at `/`

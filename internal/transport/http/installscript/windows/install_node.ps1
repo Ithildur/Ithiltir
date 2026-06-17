@@ -30,6 +30,48 @@ $DOWNLOAD_SCHEME = if ($env:DOWNLOAD_SCHEME) { $env:DOWNLOAD_SCHEME } else { "__
 $DOWNLOAD_HOST = if ($env:DOWNLOAD_HOST) { $env:DOWNLOAD_HOST } else { "__DOWNLOAD_HOST__" }
 $DOWNLOAD_PATH = if ($env:DOWNLOAD_PATH) { $env:DOWNLOAD_PATH } else { "__DOWNLOAD_PATH__" }
 $DOWNLOAD_PREFIX = if ($env:DOWNLOAD_PREFIX) { $env:DOWNLOAD_PREFIX } else { "node_windows_" }
+$APP_LANGUAGE = if ($env:APP_LANGUAGE) { $env:APP_LANGUAGE } else { "__APP_LANGUAGE__" }
+
+function Use-Zh {
+  $lang = $APP_LANGUAGE.Trim().ToLowerInvariant()
+  return !($lang -eq "en" -or $lang -eq "english")
+}
+
+function Msg([string]$Key, [object[]]$Args = @()) {
+  if (Use-Zh) {
+    switch ($Key) {
+      "AdminRequired" { return "需要管理员权限。请以管理员身份运行 PowerShell。" }
+      "UnsupportedArch" { return "仅支持 amd64/arm64，当前 PROCESSOR_ARCHITECTURE=$($Args[0])" }
+      "DownloadFailed" { return "下载失败：$($Args[0]) ($($Args[1]))" }
+      "ReportConfigFailed" { return "上报配置失败。" }
+      "EnableTimeSync" { return "[+] 正在启用 Windows 时间同步（非致命）" }
+      "TimeServiceEnabled" { return "[+] Windows 时间服务已启用" }
+      "TimeResyncWarn" { return "Windows 时间服务已启用，但系统未接受立即同步请求。它会按 Windows 正常计划同步。" }
+      "TimeSyncFailed" { return "无法自动启用 Windows 时间同步；请手动检查 Windows Time 服务。$($Args[0])" }
+      "SecretRequired" { return "Secret 不能为空。" }
+      "Done" { return "[OK] 完成：Windows 服务 $ServiceName 已运行并设置为自动启动" }
+      "Status" { return "     状态：Get-Service $ServiceName" }
+      "Logs" { return "     日志：事件查看器 -> Windows 日志 -> 应用程序/系统" }
+      default { return $Key }
+    }
+  }
+
+  switch ($Key) {
+    "AdminRequired" { return "Administrator privileges are required. Please run PowerShell as Administrator." }
+    "UnsupportedArch" { return "Only amd64/arm64 are supported; current PROCESSOR_ARCHITECTURE=$($Args[0])" }
+    "DownloadFailed" { return "Download failed: $($Args[0]) ($($Args[1]))" }
+    "ReportConfigFailed" { return "Report configuration failed." }
+    "EnableTimeSync" { return "[+] enabling Windows time sync (non-fatal)" }
+    "TimeServiceEnabled" { return "[+] Windows time service is enabled" }
+    "TimeResyncWarn" { return "Windows time service is enabled, but immediate resync was not accepted. It should sync on the normal Windows schedule." }
+    "TimeSyncFailed" { return "Could not enable Windows time sync automatically; please check Windows Time service manually. $($Args[0])" }
+    "SecretRequired" { return "Secret is required." }
+    "Done" { return "[OK] Done: Windows service $ServiceName is running and set to start automatically" }
+    "Status" { return "     Status: Get-Service $ServiceName" }
+    "Logs" { return "     Logs:   Event Viewer -> Windows Logs -> Application/System" }
+    default { return $Key }
+  }
+}
 
 function Get-DefaultPort([string]$Scheme) {
   if ([string]::IsNullOrWhiteSpace($Scheme)) { return "80" }
@@ -44,7 +86,7 @@ function Require-Admin {
   $currentIdentity = [Security.Principal.WindowsIdentity]::GetCurrent()
   $principal = New-Object Security.Principal.WindowsPrincipal($currentIdentity)
   if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
-    throw "Administrator privileges are required. Please run PowerShell as Administrator."
+    throw (Msg "AdminRequired")
   }
 }
 
@@ -55,7 +97,7 @@ function Detect-Arch {
     "ARM64" { return "arm64" }
     default {
       if ([Environment]::Is64BitOperatingSystem) { return "amd64" }
-      throw "Only amd64/arm64 are supported; current PROCESSOR_ARCHITECTURE=$arch"
+      throw (Msg "UnsupportedArch" @($arch))
     }
   }
 }
@@ -69,7 +111,7 @@ function Download-File([string]$Url, [string]$OutFile, [string]$Secret) {
   try {
     Invoke-WebRequest -Uri $Url -OutFile $OutFile -UseBasicParsing -TimeoutSec 60 -Headers @{ "X-Node-Secret" = $Secret }
   } catch {
-    throw "Download failed: $Url ($($_.Exception.Message))"
+    throw (Msg "DownloadFailed" @($Url, $_.Exception.Message))
   }
 }
 
@@ -86,24 +128,24 @@ function Report-Url([string]$DashIP, [string]$DashPort) {
 function Configure-Report([string]$Url, [string]$Secret, [string[]]$ExtraArgs = @()) {
   & $BinPath report install $Url $Secret @ExtraArgs
   if ($LASTEXITCODE -ne 0) {
-    throw "Report configuration failed."
+    throw (Msg "ReportConfigFailed")
   }
 }
 
 function Enable-TimeSync {
-  Write-Host "[+] enabling Windows time sync (non-fatal)"
+  Write-Host (Msg "EnableTimeSync")
 
   try {
     Set-Service -Name W32Time -StartupType Automatic -ErrorAction Stop
     Start-Service -Name W32Time -ErrorAction SilentlyContinue
-    Write-Host "[+] Windows time service is enabled"
+    Write-Host (Msg "TimeServiceEnabled")
 
     w32tm.exe /resync /nowait | Out-Null
     if ($LASTEXITCODE -ne 0) {
-      Write-Warning "Windows time service is enabled, but immediate resync was not accepted. It should sync on the normal Windows schedule."
+      Write-Warning (Msg "TimeResyncWarn")
     }
   } catch {
-    Write-Warning "Could not enable Windows time sync automatically; please check Windows Time service manually. $($_.Exception.Message)"
+    Write-Warning (Msg "TimeSyncFailed" @($_.Exception.Message))
   }
 }
 
@@ -138,7 +180,7 @@ if ([string]::IsNullOrWhiteSpace($Secret)) {
   $resolvedPort = Get-DefaultPort $DOWNLOAD_SCHEME
 }
 if ([string]::IsNullOrWhiteSpace($resolvedSecret)) {
-  throw "Secret is required."
+  throw (Msg "SecretRequired")
 }
 
 $intervalValue = 0
@@ -191,6 +233,6 @@ $binaryPathName = $binaryQuoted + " " + ($quotedArgs -join " ")
 
 Create-Or-UpdateService -Name $ServiceName -BinaryPathName $binaryPathName
 
-Write-Host "[OK] Done: Windows service $ServiceName is running and set to start automatically"
-Write-Host "     Status: Get-Service $ServiceName"
-Write-Host "     Logs:   Event Viewer -> Windows Logs -> Application/System"
+Write-Host (Msg "Done")
+Write-Host (Msg "Status")
+Write-Host (Msg "Logs")

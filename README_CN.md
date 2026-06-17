@@ -75,6 +75,8 @@ go run ./cmd/dash -debug
 
 - 默认部署形态：`PostgreSQL 16+ + TimescaleDB + Redis`
 - `install_dash_linux.sh` 要求 Redis `8.2.3+`；系统仓库无法提供时，安装脚本会源码构建 Redis 并安装 `redis-server.service`
+- 节点安装脚本提示语言跟随 `app.language`。
+- Linux 节点安装时会在存在 `cc`、`gcc` 或 `clang` 时编译一个 root 侧连接数 helper。由于节点服务以低权限运行，完整统计主机和容器网络命名空间的 TCP/UDP 连接数需要该 helper；没有编译器时，节点会使用自带连接数统计，可能缺失容器连接数据。通过系统包管理器安装 C 编译器后，重新运行安装脚本即可启用该 helper。
 - 推荐最小配置：`1 vCPU / 2 GB RAM / 40 GB SSD/NVMe`
 - `4 GB RAM` 以下推荐启用 `SWAP`
 - 反向代理必须保留同源路径：`/api`、`/theme`、`/deploy` 转发到 Dash 后端，`/` 交给 Dash SPA

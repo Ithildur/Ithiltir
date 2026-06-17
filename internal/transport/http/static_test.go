@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"regexp"
 	"testing"
 
 	"dash/internal/config"
@@ -127,6 +128,104 @@ func TestInstallScriptsSendNodeSecretHeader(t *testing.T) {
 			}
 			if !bytes.Contains(script, []byte(request.NodeSecretHeader)) {
 				t.Fatalf("rendered script does not send %s", request.NodeSecretHeader)
+			}
+		})
+	}
+}
+
+func TestInstallScriptsUseConfiguredLanguage(t *testing.T) {
+	tests := []struct {
+		name     string
+		platform string
+		language string
+		want     string
+	}{
+		{
+			name:     "linux chinese",
+			platform: "linux",
+			language: config.LanguageChinese,
+			want:     "连接数缓存 helper 已安装",
+		},
+		{
+			name:     "linux english",
+			platform: "linux",
+			language: config.LanguageEnglish,
+			want:     "Connections cache helper installed",
+		},
+		{
+			name:     "macos chinese",
+			platform: "macos",
+			language: config.LanguageChinese,
+			want:     "网络时间同步已启用",
+		},
+		{
+			name:     "macos english",
+			platform: "macos",
+			language: config.LanguageEnglish,
+			want:     "network time sync is enabled",
+		},
+		{
+			name:     "windows chinese",
+			platform: "windows",
+			language: config.LanguageChinese,
+			want:     "Windows 时间服务已启用",
+		},
+		{
+			name:     "windows english",
+			platform: "windows",
+			language: config.LanguageEnglish,
+			want:     "Windows time service is enabled",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := &config.Config{
+				App: config.AppConfig{
+					PublicURLScheme: "https",
+					PublicURLHost:   "dash.example.com",
+					Language:        tt.language,
+				},
+			}
+			script, err := renderInstallScript(cfg, tt.platform)
+			if err != nil {
+				t.Fatalf("renderInstallScript() error = %v", err)
+			}
+			if bytes.Contains(script, []byte(appLanguageToken)) {
+				t.Fatalf("rendered script contains language token")
+			}
+			wantLanguage := `APP_LANGUAGE="${APP_LANGUAGE:-` + tt.language + `}"`
+			if tt.platform == "windows" {
+				wantLanguage = `$APP_LANGUAGE = if ($env:APP_LANGUAGE) { $env:APP_LANGUAGE } else { "` + tt.language + `" }`
+			}
+			if !bytes.Contains(script, []byte(wantLanguage)) {
+				t.Fatalf("rendered script missing language default %q", wantLanguage)
+			}
+			if !bytes.Contains(script, []byte(tt.want)) {
+				t.Fatalf("rendered script missing %q", tt.want)
+			}
+		})
+	}
+}
+
+func TestShellInstallScriptsUseBash32Syntax(t *testing.T) {
+	cfg := &config.Config{
+		App: config.AppConfig{
+			PublicURLScheme: "https",
+			PublicURLHost:   "dash.example.com",
+			Language:        config.LanguageEnglish,
+		},
+	}
+	bash4CaseExpansion := regexp.MustCompile(`\$\{[^}\n]*(,,|\^\^)[^}\n]*\}`)
+
+	for _, platform := range []string{"linux", "macos"} {
+		t.Run(platform, func(t *testing.T) {
+			script, err := renderInstallScript(cfg, platform)
+			if err != nil {
+				t.Fatalf("renderInstallScript() error = %v", err)
+			}
+			if match := bash4CaseExpansion.Find(script); match != nil {
+				t.Fatalf("%s install script uses Bash 4 case expansion %q", platform, match)
 			}
 		})
 	}

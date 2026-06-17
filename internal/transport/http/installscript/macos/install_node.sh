@@ -14,24 +14,77 @@ DOWNLOAD_SCHEME="${DOWNLOAD_SCHEME:-__DOWNLOAD_SCHEME__}"
 DOWNLOAD_HOST="${DOWNLOAD_HOST:-__DOWNLOAD_HOST__}"
 DOWNLOAD_PATH="${DOWNLOAD_PATH:-__DOWNLOAD_PATH__}"
 DOWNLOAD_PREFIX="${DOWNLOAD_PREFIX:-node_macos_}"
+APP_LANGUAGE="${APP_LANGUAGE:-__APP_LANGUAGE__}"
 
 RUN_USER="${RUN_USER:-${SUDO_USER:-}}"
 
 need_cmd() { command -v "$1" >/dev/null 2>&1; }
+
+is_zh() {
+  case "$APP_LANGUAGE" in
+    [eE][nN]|[eE][nN][gG][lL][iI][sS][hH]) return 1 ;;
+    *) return 0 ;;
+  esac
+}
+
+msg() {
+  local key="$1"
+  shift || true
+  if is_zh; then
+    case "$key" in
+      root_required) echo "此安装脚本需要 root 权限，且当前系统未安装 sudo。请使用 root 用户运行。" ;;
+      unsupported_arch) echo "仅支持 arm64，当前 uname -m=$1" ;;
+      missing_download_tool) echo "缺少下载工具：请安装 curl" ;;
+      enable_time_sync) echo "[+] 正在启用网络时间同步（非致命）" ;;
+      time_sync_enabled) echo "[+] 网络时间同步已启用" ;;
+      time_sync_failed) echo "[Warn] 无法自动启用网络时间同步；请手动检查日期与时间设置" ;;
+      secret_required) echo "Secret 不能为空。" ;;
+      done) echo "[OK] 完成：LaunchDaemon com.ithiltir.node 已启用" ;;
+      status) echo "     状态：sudo launchctl print system/com.ithiltir.node" ;;
+      logs) echo "     日志：tail -f /var/log/ithiltir-node.log /var/log/ithiltir-node.err" ;;
+      *) echo "$key" ;;
+    esac
+    return
+  fi
+
+  case "$key" in
+    root_required) echo "This installer requires root privileges, and sudo is not installed. Please run as root." ;;
+    unsupported_arch) echo "Only arm64 is supported; current uname -m=$1" ;;
+    missing_download_tool) echo "Missing download tool: please install curl" ;;
+    enable_time_sync) echo "[+] enabling network time sync (non-fatal)" ;;
+    time_sync_enabled) echo "[+] network time sync is enabled" ;;
+    time_sync_failed) echo "[Warn] could not enable network time sync automatically; please check Date & Time settings manually" ;;
+    secret_required) echo "Secret is required." ;;
+    done) echo "[OK] Done: LaunchDaemon com.ithiltir.node is enabled" ;;
+    status) echo "     Status: sudo launchctl print system/com.ithiltir.node" ;;
+    logs) echo "     Logs:   tail -f /var/log/ithiltir-node.log /var/log/ithiltir-node.err" ;;
+    *) echo "$key" ;;
+  esac
+}
 
 as_root() {
   if [[ "${EUID:-$(id -u)}" -eq 0 ]]; then
     "$@"
   else
     if need_cmd sudo; then sudo "$@"; else
-      echo "This installer requires root privileges, and sudo is not installed. Please run as root." >&2
+      msg root_required >&2
       exit 1
     fi
   fi
 }
 
 usage() {
-  cat >&2 <<EOF
+  if is_zh; then
+    cat >&2 <<EOF
+用法：sudo bash $0 <dash_ip> [dash_port] <secret> [interval_seconds] [--net iface1,iface2]
+
+示例：
+  sudo bash $0 10.0.0.2 8080 mysecret
+  sudo bash $0 dash.example.com mysecret
+  sudo bash $0 10.0.0.2 8080 'my secret with space' 3 --net en0,en1
+EOF
+  else
+    cat >&2 <<EOF
 Usage:  sudo bash $0 <dash_ip> [dash_port] <secret> [interval_seconds] [--net iface1,iface2]
 
 Examples:
@@ -39,6 +92,7 @@ Examples:
   sudo bash $0 dash.example.com mysecret
   sudo bash $0 10.0.0.2 8080 'my secret with space' 3 --net en0,en1
 EOF
+  fi
   exit 1
 }
 
@@ -47,7 +101,7 @@ detect_arch() {
   m="$(uname -m)"
   case "$m" in
     arm64|aarch64) echo "arm64" ;;
-    *) echo "Only arm64 is supported; current uname -m=$m" >&2; exit 1 ;;
+    *) msg unsupported_arch "$m" >&2; exit 1 ;;
   esac
 }
 
@@ -56,20 +110,20 @@ download_file() {
   if need_cmd curl; then
     curl -fL --retry 3 --connect-timeout 10 --max-time 300 -H "X-Node-Secret: ${secret}" -o "$out" "$url"
   else
-    echo "Missing download tool: please install curl" >&2
+    msg missing_download_tool >&2
     exit 1
   fi
 }
 
 enable_time_sync() {
-  echo "[+] enabling network time sync (non-fatal)"
+  msg enable_time_sync
 
   if need_cmd systemsetup && as_root systemsetup -setusingnetworktime on >/dev/null 2>&1; then
-    echo "[+] network time sync is enabled"
+    msg time_sync_enabled
     return 0
   fi
 
-  echo "[!] could not enable network time sync automatically; please check Date & Time settings manually" >&2
+  msg time_sync_failed >&2
   return 0
 }
 
@@ -187,9 +241,9 @@ main() {
   local dash_port=""
   local secret=""
   if [[ $# -eq 2 ]]; then
-    case "${DOWNLOAD_SCHEME,,}" in
-      https) dash_port="443" ;;
-      http) dash_port="80" ;;
+    case "$DOWNLOAD_SCHEME" in
+      [hH][tT][tT][pP][sS]) dash_port="443" ;;
+      [hH][tT][tT][pP]) dash_port="80" ;;
       *) dash_port="80" ;;
     esac
     secret="$2"
@@ -200,7 +254,7 @@ main() {
     shift 3
   fi
   if [[ -z "$secret" ]]; then
-    echo "Secret is required." >&2
+    msg secret_required >&2
     exit 1
   fi
 
@@ -259,9 +313,9 @@ main() {
   fi
   restart_service
 
-  echo "[OK] Done: LaunchDaemon com.ithiltir.node is enabled"
-  echo "     Status: sudo launchctl print system/com.ithiltir.node"
-  echo "     Logs:   tail -f /var/log/ithiltir-node.log /var/log/ithiltir-node.err"
+  msg done
+  msg status
+  msg logs
 }
 
 main "$@"

@@ -13,6 +13,7 @@ const (
 	downloadSchemeToken = "__DOWNLOAD_SCHEME__"
 	downloadHostToken   = "__DOWNLOAD_HOST__"
 	downloadPathToken   = "__DOWNLOAD_PATH__"
+	appLanguageToken    = "__APP_LANGUAGE__"
 )
 
 //go:embed installscript/linux/install_node.sh installscript/macos/install_node.sh installscript/windows/install_node.ps1
@@ -38,6 +39,7 @@ func renderInstallScript(cfg *config.Config, platform string) ([]byte, error) {
 		cfg.App.PublicURLScheme,
 		cfg.App.PublicURLHost,
 		publicDownloadPath(cfg.App.PublicURLBasePath, platform),
+		cfg.App.EffectiveLanguage(),
 	)
 	return []byte(rendered), nil
 }
@@ -63,10 +65,11 @@ func publicDownloadPath(basePath, platform string) string {
 	return path.Join("/", p, "deploy", platform)
 }
 
-func renderTemplate(tpl, scheme, host, dlPath string) string {
+func renderTemplate(tpl, scheme, host, dlPath, language string) string {
 	out := tpl
 	out = strings.ReplaceAll(out, downloadSchemeToken, scheme)
 	out = strings.ReplaceAll(out, downloadHostToken, host)
 	out = strings.ReplaceAll(out, downloadPathToken, dlPath)
+	out = strings.ReplaceAll(out, appLanguageToken, language)
 	return out
 }
