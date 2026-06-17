@@ -61,14 +61,14 @@ func mountDeployRoute(router chi.Router, node *nodestore.Store, opts kitstatic.O
 		return err
 	}
 
-	handler := requireDeploySecret(node, http.StripPrefix("/deploy", http.FileServer(http.Dir(dir))))
+	handler := requireDeployAccess(node, http.StripPrefix("/deploy", http.FileServer(http.Dir(dir))))
 	router.Handle("/deploy/*", handler)
 	return nil
 }
 
-func requireDeploySecret(node *nodestore.Store, next http.Handler) http.Handler {
+func requireDeployAccess(node *nodestore.Store, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		ok, err := validDeploySecret(r, node)
+		ok, err := validDeployAccess(r, node)
 		if err != nil {
 			http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 			return
@@ -82,16 +82,18 @@ func requireDeploySecret(node *nodestore.Store, next http.Handler) http.Handler 
 	})
 }
 
-func validDeploySecret(r *http.Request, node *nodestore.Store) (bool, error) {
+func validDeployAccess(r *http.Request, node *nodestore.Store) (bool, error) {
 	secret := strings.TrimSpace(r.Header.Get(request.NodeSecretHeader))
-	if secret == "" {
-		return false, nil
-	}
-	if _, err := node.GetServerBySecret(r.Context(), secret); err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return false, nil
+	if secret != "" {
+		if _, err := node.GetServerBySecret(r.Context(), secret); err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return false, nil
+			}
+			return false, err
 		}
-		return false, err
+		return true, nil
 	}
-	return true, nil
+
+	token := strings.TrimSpace(r.URL.Query().Get(request.DeployGrantQuery))
+	return node.ValidDeployGrant(token, r.URL.Path), nil
 }

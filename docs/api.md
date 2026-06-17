@@ -20,6 +20,7 @@ This document summarizes the stable HTTP contract. Public paths, methods, and fi
 | refresh cookie + `X-CSRF-Token`        | `POST /api/auth/refresh`, `POST /api/auth/logout` |
 | `Authorization: Bearer <access_token>` | admin APIs and optional authenticated reads       |
 | `X-Node-Secret`                        | agent pushes, node identity reads, and deploy asset downloads |
+| `upgrade_token` query                  | temporary deploy asset download grant issued only for legacy agent upgrades |
 
 Optional bearer endpoints treat a missing, malformed, expired, revoked, or otherwise invalid bearer token as an anonymous request. This is intentional compatibility behavior: clients that need admin data must check whether the response is the authenticated view or the guest-filtered view.
 
@@ -78,6 +79,7 @@ Optional bearer endpoints treat a missing, malformed, expired, revoked, or other
 - Successful `POST /api/node/metrics` responses include `update`.
 - `update` is `null` when no upgrade is pending.
 - A pending update contains `id`, `version`, `url`, `sha256`, and `size`.
+- `url` may include a short-lived `upgrade_token` so legacy agents can download the exact update asset without sending `X-Node-Secret`. Clients must use the URL as returned.
 - Pending updates are volatile and clear when the agent reports the exact target version or a higher SemVer precedence. Different build metadata at the same SemVer precedence is treated as a distinct node binary and can still be delivered.
 
 ## Node Metrics Runtime Fields
@@ -127,7 +129,7 @@ Optional bearer endpoints treat a missing, malformed, expired, revoked, or other
 | `/deploy/linux/install.sh`    | Linux agent install script                              |
 | `/deploy/macos/install.sh`    | macOS agent install script                              |
 | `/deploy/windows/install.ps1` | Windows agent install script                            |
-| `/deploy/*`                   | packaged node release assets; requires `X-Node-Secret` |
+| `/deploy/*`                   | packaged node release assets; requires `X-Node-Secret` or a temporary `upgrade_token` |
 | `/`                           | SPA                                                     |
 
 ## Compatibility Rules

@@ -89,6 +89,27 @@ func TestDeployAssetRequiresNodeSecret(t *testing.T) {
 	if rr.Code != http.StatusUnauthorized {
 		t.Fatalf("query key status = %d, want %d", rr.Code, http.StatusUnauthorized)
 	}
+
+	token, err := st.GrantDeployAccess("/deploy/linux/node_linux_amd64")
+	if err != nil {
+		t.Fatalf("GrantDeployAccess() error = %v", err)
+	}
+	req = httptest.NewRequest(http.MethodGet, "/deploy/linux/node_linux_amd64?"+request.DeployGrantQuery+"="+token, nil)
+	rr = httptest.NewRecorder()
+	router.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("grant token status = %d, want %d", rr.Code, http.StatusOK)
+	}
+	if rr.Body.String() != "node asset" {
+		t.Fatalf("grant token body = %q", rr.Body.String())
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/deploy/linux/node_linux_arm64?"+request.DeployGrantQuery+"="+token, nil)
+	rr = httptest.NewRecorder()
+	router.ServeHTTP(rr, req)
+	if rr.Code != http.StatusUnauthorized {
+		t.Fatalf("grant token wrong path status = %d, want %d", rr.Code, http.StatusUnauthorized)
+	}
 }
 
 func TestInstallScriptsSendNodeSecretHeader(t *testing.T) {

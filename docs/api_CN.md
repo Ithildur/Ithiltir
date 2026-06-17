@@ -20,6 +20,7 @@
 | refresh cookie + `X-CSRF-Token`        | `POST /api/auth/refresh`、`POST /api/auth/logout` |
 | `Authorization: Bearer <access_token>` | 管理 API 和可选鉴权读取                           |
 | `X-Node-Secret`                        | Agent 上报、节点身份读取和 deploy 资产下载        |
+| `upgrade_token` query                  | 只给旧 Agent 自动升级使用的临时 deploy 资产下载授权 |
 
 Bearer 可选端点会把缺失、格式错误、过期、已撤销或其他无法通过校验的 Bearer token 当作匿名请求处理。这是有意保留的兼容行为：需要管理视图的客户端必须自行区分响应是已鉴权视图还是游客过滤视图。
 
@@ -78,6 +79,7 @@ Bearer 可选端点会把缺失、格式错误、过期、已撤销或其他无�
 - `POST /api/node/metrics` 成功响应包含 `update`。
 - 无待升级任务时，`update` 为 `null`。
 - 有待升级任务时，`update` 包含 `id`、`version`、`url`、`sha256` 和 `size`。
+- `url` 可能包含短期有效的 `upgrade_token`，让旧 Agent 不发送 `X-Node-Secret` 也能下载本次升级的精确资产。客户端必须按原样使用返回的 URL。
 - 待升级任务是易失状态，Agent 上报完全相同的目标版本或 SemVer 优先级更高的版本后清除。同一 SemVer 优先级但 build metadata 不同的版本视为不同节点二进制，仍可下发。
 
 ## 节点运行时指标字段
@@ -127,7 +129,7 @@ Bearer 可选端点会把缺失、格式错误、过期、已撤销或其他无�
 | `/deploy/linux/install.sh`    | Linux Agent 安装脚本                    |
 | `/deploy/macos/install.sh`    | macOS Agent 安装脚本                    |
 | `/deploy/windows/install.ps1` | Windows Agent 安装脚本                  |
-| `/deploy/*`                   | 打包携带的节点发布资产；需要 `X-Node-Secret` |
+| `/deploy/*`                   | 打包携带的节点发布资产；需要 `X-Node-Secret` 或临时 `upgrade_token` |
 | `/`                           | SPA                                     |
 
 ## 兼容性规则

@@ -3,7 +3,9 @@ package nodeid
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 
 	"dash/internal/infra"
@@ -62,9 +64,14 @@ func (h *handler) upgradeHandler(w http.ResponseWriter, r *http.Request) {
 		writeAssetError(w, err)
 		return
 	}
+	updateURL, err := h.legacyUpdateURL(asset.URL)
+	if err != nil {
+		httperr.Write(w, http.StatusServiceUnavailable, "node_upgrade_grant_error", "failed to prepare node update download")
+		return
+	}
 	update := nodestore.AgentUpdateTarget{
 		Version: target,
-		URL:     asset.URL,
+		URL:     updateURL,
 		SHA256:  asset.SHA256,
 		Size:    asset.Size,
 	}
@@ -72,6 +79,21 @@ func (h *handler) upgradeHandler(w http.ResponseWriter, r *http.Request) {
 	h.store.RequestAgentUpdate(id, update)
 
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *handler) legacyUpdateURL(rawURL string) (string, error) {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return "", fmt.Errorf("parse update url: %w", err)
+	}
+	token, err := h.store.GrantDeployAccess(u.Path)
+	if err != nil {
+		return "", err
+	}
+	q := u.Query()
+	q.Set(request.DeployGrantQuery, token)
+	u.RawQuery = q.Encode()
+	return u.String(), nil
 }
 
 func (h *handler) loadAgentPlatform(ctx context.Context, id int64) (nodestore.AgentPlatform, error) {

@@ -15,6 +15,9 @@ type memState struct {
 
 	updateMu sync.RWMutex
 	updates  map[int64]agentUpdateState
+
+	deployGrantMu sync.RWMutex
+	deployGrants  map[string]deployGrantState
 }
 
 type authEntry struct {
@@ -31,11 +34,17 @@ type agentUpdateState struct {
 	target AgentUpdateTarget
 }
 
+type deployGrantState struct {
+	path      string
+	expiresAt time.Time
+}
+
 func newMemory() *memState {
 	return &memState{
 		authBySecret: make(map[string]authEntry),
 		authByID:     make(map[int64]authEntry),
 		runtime:      make(map[int64]serverRuntimeState),
 		updates:      make(map[int64]agentUpdateState),
+		deployGrants: make(map[string]deployGrantState),
 	}
 }
