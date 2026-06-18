@@ -1,5 +1,4 @@
 import React from 'react';
-import Network from 'lucide-react/dist/esm/icons/network';
 import Save from 'lucide-react/dist/esm/icons/save';
 import Button from '@components/ui/Button';
 import ConfirmDialog from '@components/ui/ConfirmDialog';
@@ -7,7 +6,10 @@ import Input from '@components/ui/Input';
 import IOSSwitch from '@components/ui/IOSSwitch';
 import Select from '@components/ui/Select';
 import TimezoneSelect from '@components/ui/TimezoneSelect';
-import SettingRow from '@components/admin/systemManager/SettingRow';
+import SettingRow, {
+  SettingPanel,
+  SettingPanelFooter,
+} from '@components/admin/systemManager/SettingRow';
 import { pushTopBanner } from '@runtime/topBannerRuntime';
 import {
   billingDayFromAnchor,
@@ -216,17 +218,10 @@ const TrafficSettings: React.FC = () => {
   const showTimezone = cycleNeedsTimezone(draft.cycle_mode);
 
   return (
-    <section className="space-y-4">
+    <section>
       <ConfirmDialog {...confirmDialogProps} />
 
-      <div className="px-1">
-        <div className="flex items-center gap-2 text-sm font-semibold text-(--theme-fg-default)">
-          <Network className="size-4 text-(--theme-fg-muted)" aria-hidden="true" />
-          {t('admin_traffic_settings_title')}
-        </div>
-      </div>
-
-      <div className="space-y-4">
+      <SettingPanel title={t('admin_traffic_settings_title')}>
         <SettingRow
           title={t('admin_system_traffic_usage_mode')}
           description={t('admin_system_traffic_usage_mode_desc')}
@@ -271,27 +266,12 @@ const TrafficSettings: React.FC = () => {
           </Select>
         </SettingRow>
 
-        <div className="rounded-lg border border-(--theme-border-subtle) bg-(--theme-bg-default) p-5 shadow-sm transition-[border-color,background-color] hover:border-(--theme-border-hover) hover:bg-(--theme-surface-row-hover) dark:border-(--theme-border-default) dark:bg-(--theme-bg-default) dark:hover:bg-(--theme-canvas-subtle)">
-          <div className="flex flex-wrap items-center justify-between gap-4">
-            <div className="min-w-0">
-              <div className="text-sm font-semibold text-(--theme-fg-default)">
-                {t('traffic_cycle_mode')}
-              </div>
-              <div className="mt-1 max-w-160 text-xs/5 text-(--theme-fg-muted)">
-                {t('traffic_cycle_mode_desc')}
-              </div>
-            </div>
-            <Button
-              type="button"
-              icon={Save}
-              disabled={loading || savingSettings || !changed || !cycleValid}
-              onClick={() => void saveTrafficSettings()}
-            >
-              {savingSettings ? t('admin_system_settings_saving') : t('common_save_changes')}
-            </Button>
-          </div>
-
-          <div className="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+        <SettingRow
+          title={t('traffic_cycle_mode')}
+          description={t('traffic_cycle_mode_desc')}
+          controlClassName="md:justify-start"
+        >
+          <div className="grid w-full gap-4 md:grid-cols-2 xl:grid-cols-3">
             <label className="grid gap-1.5">
               <span className="text-xs font-semibold uppercase tracking-wide text-(--theme-fg-muted)">
                 {t('traffic_cycle_mode')}
@@ -385,8 +365,19 @@ const TrafficSettings: React.FC = () => {
               </label>
             )}
           </div>
-        </div>
-      </div>
+        </SettingRow>
+
+        <SettingPanelFooter>
+          <Button
+            type="button"
+            icon={Save}
+            disabled={loading || savingSettings || !changed || !cycleValid}
+            onClick={() => void saveTrafficSettings()}
+          >
+            {savingSettings ? t('admin_system_settings_saving') : t('common_save_changes')}
+          </Button>
+        </SettingPanelFooter>
+      </SettingPanel>
     </section>
   );
 };

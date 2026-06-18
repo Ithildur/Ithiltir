@@ -9,7 +9,10 @@ import Button from '@components/ui/Button';
 import ConfirmDialog from '@components/ui/ConfirmDialog';
 import Input from '@components/ui/Input';
 import IOSSwitch from '@components/ui/IOSSwitch';
-import SettingRow from '@components/admin/systemManager/SettingRow';
+import SettingRow, {
+  SettingPanel,
+  SettingPanelFooter,
+} from '@components/admin/systemManager/SettingRow';
 import ThemeManager from '@components/admin/systemManager/ThemeManager';
 import TrafficSettings from '@components/admin/systemManager/TrafficSettings';
 import type {
@@ -195,29 +198,17 @@ const SystemSettings: React.FC = () => {
       </div>
 
       {activeTab === 'settings' && (
-        <div className="space-y-4">
-          <div className="rounded-lg border border-(--theme-border-subtle) bg-(--theme-bg-default) p-5 shadow-sm transition-[border-color,background-color] hover:border-(--theme-border-hover) hover:bg-(--theme-surface-row-hover) dark:border-(--theme-border-default) dark:bg-(--theme-bg-default) dark:hover:bg-(--theme-canvas-subtle)">
-            <div className="flex flex-wrap items-center justify-between gap-4">
-              <div className="min-w-0">
-                <div className="text-sm font-semibold text-(--theme-fg-default)">
-                  {t('admin_system_brand_title')}
-                </div>
-                <div className="mt-1 max-w-160 text-xs/5 text-(--theme-fg-muted)">
-                  {t('admin_system_brand_desc')}
-                </div>
-              </div>
-              <Button
-                type="button"
-                icon={Save}
-                disabled={!settings || !brandChanged || loadingSettings || savingBrand}
-                onClick={() => void saveBrandSettings()}
-              >
-                {savingBrand ? t('admin_system_settings_saving') : t('common_save_changes')}
-              </Button>
-            </div>
-
-            <div className="mt-5 grid gap-5 lg:grid-cols-[minmax(340px,520px)_minmax(260px,360px)] lg:justify-start">
-              <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
+        <div className="max-w-310 space-y-4">
+          <SettingPanel
+            title={t('admin_system_brand_title')}
+            description={t('admin_system_brand_desc')}
+          >
+            <SettingRow
+              title={t('admin_system_brand_logo_preview')}
+              description={t('admin_system_brand_logo_hint')}
+              controlClassName="md:justify-start"
+            >
+              <div className="flex w-full flex-col gap-3 sm:flex-row sm:items-center">
                 <div className="flex size-24 shrink-0 items-center justify-center rounded-lg border border-(--theme-border-subtle) bg-(--theme-bg-muted) p-4 dark:border-(--theme-border-default)">
                   <img
                     src={draftLogoURL}
@@ -232,71 +223,82 @@ const SystemSettings: React.FC = () => {
                   className="hidden"
                   onChange={(event) => void selectLogoFile(event)}
                 />
-                <div className="min-w-0 space-y-2">
-                  <div className="flex flex-wrap gap-2">
-                    <Button
-                      type="button"
-                      variant="secondary"
-                      icon={Upload}
-                      disabled={!settings || loadingSettings || savingBrand}
-                      onClick={() => logoInputRef.current?.click()}
-                    >
-                      {t('admin_system_brand_logo_upload')}
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="secondary"
-                      icon={RotateCcw}
-                      disabled={!brandDraft || loadingSettings || savingBrand}
-                      onClick={() => updateBrandDraft('logo_url', defaultSiteBrand.logo_url)}
-                    >
-                      {t('admin_system_brand_logo_reset')}
-                    </Button>
-                  </div>
-                  <div className="text-xs/5 text-(--theme-fg-subtle)">
-                    {t('admin_system_brand_logo_hint')}
-                  </div>
+                <div className="flex min-w-0 flex-wrap gap-2">
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    icon={Upload}
+                    disabled={!settings || loadingSettings || savingBrand}
+                    onClick={() => logoInputRef.current?.click()}
+                  >
+                    {t('admin_system_brand_logo_upload')}
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    icon={RotateCcw}
+                    disabled={!brandDraft || loadingSettings || savingBrand}
+                    onClick={() => updateBrandDraft('logo_url', defaultSiteBrand.logo_url)}
+                  >
+                    {t('admin_system_brand_logo_reset')}
+                  </Button>
                 </div>
               </div>
+            </SettingRow>
 
-              <div className="grid content-start gap-4">
-                <label className="grid gap-1.5">
-                  <span className="text-xs font-semibold uppercase tracking-wide text-(--theme-fg-muted)">
-                    {t('admin_system_brand_page_title')}
-                  </span>
-                  <Input
-                    value={brandDraft?.page_title ?? ''}
-                    disabled={!settings || loadingSettings || savingBrand}
-                    maxLength={120}
-                    onChange={(event) => updateBrandDraft('page_title', event.target.value)}
-                  />
-                </label>
-                <label className="grid gap-1.5">
-                  <span className="text-xs font-semibold uppercase tracking-wide text-(--theme-fg-muted)">
-                    {t('admin_system_brand_topbar_text')}
-                  </span>
-                  <Input
-                    value={brandDraft?.topbar_text ?? ''}
-                    disabled={!settings || loadingSettings || savingBrand}
-                    maxLength={64}
-                    onChange={(event) => updateBrandDraft('topbar_text', event.target.value)}
-                  />
-                </label>
-              </div>
-            </div>
-          </div>
+            <SettingRow
+              title={t('admin_system_brand_page_title')}
+              controlClassName="md:justify-start"
+            >
+              <Input
+                wrapperClassName="w-full max-w-md"
+                aria-label={t('admin_system_brand_page_title')}
+                value={brandDraft?.page_title ?? ''}
+                disabled={!settings || loadingSettings || savingBrand}
+                maxLength={120}
+                onChange={(event) => updateBrandDraft('page_title', event.target.value)}
+              />
+            </SettingRow>
 
-          <SettingRow
-            title={t('admin_system_history_guest_access')}
-            description={t('admin_system_history_guest_access_desc')}
-          >
-            <IOSSwitch
-              checked={historyByNode}
-              disabled={!settings || loadingSettings || savingHistoryMode}
-              ariaLabel={t('admin_system_history_guest_access')}
-              onChange={() => void updateHistoryMode(historyByNode ? 'disabled' : 'by_node')}
-            />
-          </SettingRow>
+            <SettingRow
+              title={t('admin_system_brand_topbar_text')}
+              controlClassName="md:justify-start"
+            >
+              <Input
+                wrapperClassName="w-full max-w-md"
+                aria-label={t('admin_system_brand_topbar_text')}
+                value={brandDraft?.topbar_text ?? ''}
+                disabled={!settings || loadingSettings || savingBrand}
+                maxLength={64}
+                onChange={(event) => updateBrandDraft('topbar_text', event.target.value)}
+              />
+            </SettingRow>
+
+            <SettingPanelFooter>
+              <Button
+                type="button"
+                icon={Save}
+                disabled={!settings || !brandChanged || loadingSettings || savingBrand}
+                onClick={() => void saveBrandSettings()}
+              >
+                {savingBrand ? t('admin_system_settings_saving') : t('common_save_changes')}
+              </Button>
+            </SettingPanelFooter>
+          </SettingPanel>
+
+          <SettingPanel>
+            <SettingRow
+              title={t('admin_system_history_guest_access')}
+              description={t('admin_system_history_guest_access_desc')}
+            >
+              <IOSSwitch
+                checked={historyByNode}
+                disabled={!settings || loadingSettings || savingHistoryMode}
+                ariaLabel={t('admin_system_history_guest_access')}
+                onChange={() => void updateHistoryMode(historyByNode ? 'disabled' : 'by_node')}
+              />
+            </SettingRow>
+          </SettingPanel>
 
           <TrafficSettings />
         </div>
