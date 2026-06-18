@@ -38,8 +38,8 @@ func rebuildRoute(r *routes.Blueprint, h *handler) {
 	)
 }
 
-func (h *handler) rebuildHandler(w http.ResponseWriter, r *http.Request) {
-	id, ok := h.existingNodeID(w, r)
+func (h *handler) rebuildHandler(w http.ResponseWriter, r *http.Request, rawID string) {
+	id, ok := h.existingNodeID(w, r, rawID)
 	if !ok {
 		return
 	}
@@ -56,8 +56,8 @@ func (h *handler) rebuildHandler(w http.ResponseWriter, r *http.Request) {
 	response.WriteJSON(w, http.StatusAccepted, view)
 }
 
-func (h *handler) existingNodeID(w http.ResponseWriter, r *http.Request) (int64, bool) {
-	id, err := request.ParseIDInt64(r, "id")
+func (h *handler) existingNodeID(w http.ResponseWriter, r *http.Request, rawID string) (int64, bool) {
+	id, err := request.ParseIDInt64(rawID)
 	if err != nil {
 		httperr.Write(w, http.StatusBadRequest, "invalid_id", "invalid id")
 		return 0, false

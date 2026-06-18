@@ -27,10 +27,10 @@ func detailRoute(r *routes.Blueprint, h *handler) {
 	)
 }
 
-func (h *handler) detailHandler(w http.ResponseWriter, r *http.Request) {
+func (h *handler) detailHandler(w http.ResponseWriter, r *http.Request, rawID string) {
 	w.Header().Set("Cache-Control", "no-store")
 
-	id, err := request.ParseIDInt64(r, "id")
+	id, err := request.ParseIDInt64(rawID)
 	if err != nil {
 		httperr.Write(w, http.StatusBadRequest, "invalid_id", "invalid id")
 		return

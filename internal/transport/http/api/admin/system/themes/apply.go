@@ -6,7 +6,6 @@ import (
 	themefs "dash/internal/theme"
 	"dash/internal/transport/http/httperr"
 	"github.com/Ithildur/EiluneKit/http/routes"
-	"github.com/go-chi/chi/v5"
 )
 
 func applyRoute(r *routes.Blueprint, h *handler) {
@@ -17,8 +16,8 @@ func applyRoute(r *routes.Blueprint, h *handler) {
 	)
 }
 
-func (h *handler) applyHandler(w http.ResponseWriter, r *http.Request) {
-	id, err := themefs.NormalizeID(chi.URLParam(r, "id"))
+func (h *handler) applyHandler(w http.ResponseWriter, r *http.Request, rawID string) {
+	id, err := themefs.NormalizeID(rawID)
 	if err != nil {
 		httperr.Write(w, http.StatusBadRequest, "invalid_theme_id", err.Error())
 		return

@@ -30,8 +30,8 @@ func testMessageRoute(r *routes.Blueprint, h *handler) {
 	)
 }
 
-func (h *handler) testMessageHandler(w http.ResponseWriter, r *http.Request) {
-	id, err := request.ParseIDInt64(r, "id")
+func (h *handler) testMessageHandler(w http.ResponseWriter, r *http.Request, rawID string) {
+	id, err := request.ParseIDInt64(rawID)
 	if err != nil {
 		httperr.Write(w, http.StatusBadRequest, "invalid_id", "invalid id")
 		return

@@ -7,7 +7,6 @@ import (
 
 	themefs "dash/internal/theme"
 	"github.com/Ithildur/EiluneKit/http/routes"
-	"github.com/go-chi/chi/v5"
 )
 
 func previewRoute(r *routes.Blueprint, h *handler, method string) {
@@ -19,8 +18,8 @@ func previewRoute(r *routes.Blueprint, h *handler, method string) {
 	)
 }
 
-func (h *handler) previewHandler(w http.ResponseWriter, r *http.Request) {
-	id, err := themefs.NormalizeID(chi.URLParam(r, "id"))
+func (h *handler) previewHandler(w http.ResponseWriter, r *http.Request, rawID string) {
+	id, err := themefs.NormalizeID(rawID)
 	if err != nil {
 		http.NotFound(w, r)
 		return
