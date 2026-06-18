@@ -420,7 +420,7 @@ export const zh = {
   admin_nodes_column_version: '版本',
   admin_nodes_version_outdated: '版本不受支持',
   admin_nodes_version_update_target: '可升至 {{target}}',
-  admin_nodes_auto_update_requires_manual: '需要版本号≥0.2.1才能使用自动下发更新，请手动更新。',
+  admin_nodes_auto_update_requires_manual: '需要版本号≥0.2.3才能使用自动下发更新，请手动更新。',
   admin_nodes_confirm_upgrade: '确认升级',
   admin_nodes_filter_groups: '分组',
   admin_nodes_filter_version: '版本',

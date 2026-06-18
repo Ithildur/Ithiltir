@@ -12,7 +12,7 @@ const (
 	// Allowed node version range (inclusive lower bound, exclusive upper bound).
 	nodeMin           = "0.0.0-0"
 	nodeMax           = ""
-	NodeSelfUpdateMin = "0.2.1"
+	NodeSelfUpdateMin = "0.2.3"
 )
 
 const FormatNote = "version format: MAJOR.MINOR.PATCH[-PRERELEASE][+BUILD] (strict SemVer without a v prefix; numeric identifiers must not contain leading zeroes)"

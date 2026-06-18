@@ -100,6 +100,29 @@ func TestIsNodeUpdateTarget(t *testing.T) {
 	}
 }
 
+func TestSupportsNodeSelfUpdate(t *testing.T) {
+	tests := []struct {
+		version string
+		want    bool
+	}{
+		{version: "0.2.2", want: false},
+		{version: "0.2.3", want: true},
+		{version: "0.2.3+build.1", want: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.version, func(t *testing.T) {
+			got, err := SupportsNodeSelfUpdate(tt.version)
+			if err != nil {
+				t.Fatalf("SupportsNodeSelfUpdate(%q) error = %v", tt.version, err)
+			}
+			if got != tt.want {
+				t.Fatalf("SupportsNodeSelfUpdate(%q) = %t, want %t", tt.version, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestLatest(t *testing.T) {
 	versions := []string{
 		"bad",

@@ -19,7 +19,7 @@ import (
 	"gorm.io/gorm"
 )
 
-const nodeUpgradeUnsupportedMessage = "node version must be >= 0.2.1 to use automatic update delivery; update manually"
+const nodeUpgradeUnsupportedMessage = "node version must be >= " + appversion.NodeSelfUpdateMin + " to use automatic update delivery; update manually"
 
 func upgradeRoute(r *routes.Blueprint, h *handler) {
 	r.Post(
