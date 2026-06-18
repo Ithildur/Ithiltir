@@ -53,8 +53,7 @@ const NodeAdvancedTable: React.FC<Props> = ({
               />
             </div>
           </th>
-          <th className="px-3 py-2.5">{t('admin_nodes_column_node')}</th>
-          <th className="px-3 py-2.5 w-32">{t('admin_nodes_column_ip')}</th>
+          <th className="px-3 py-2.5 min-w-72">{t('admin_nodes_column_node')}</th>
           <th className="px-3 py-2.5 w-44">{t('admin_nodes_column_traffic_settings')}</th>
           <th className="px-3 py-2.5 w-20">{t('admin_nodes_column_traffic_p95')}</th>
           <th className="px-3 py-2.5 w-16">{t('admin_nodes_column_traffic_rebuild')}</th>
@@ -64,7 +63,7 @@ const NodeAdvancedTable: React.FC<Props> = ({
         {nodes.length === 0 ? (
           <tr>
             <td
-              colSpan={6}
+              colSpan={5}
               className="px-4 py-12 text-center text-(--theme-fg-muted) dark:text-(--theme-fg-action-muted)"
             >
               {t('no_data')}
@@ -88,12 +87,14 @@ const NodeAdvancedTable: React.FC<Props> = ({
                   </div>
                 </td>
                 <td className="px-3 py-2">
-                  <div className="font-semibold text-(--theme-fg-default) dark:text-(--theme-fg-default)">
-                    {node.name}
+                  <div className="min-w-0">
+                    <div className="font-semibold text-(--theme-fg-default) dark:text-(--theme-fg-default)">
+                      {node.name}
+                    </div>
+                    <div className="mt-1 text-xs font-mono text-(--theme-fg-muted) dark:text-(--theme-fg-muted)">
+                      {node.ip || t('admin_nodes_unconfigured')}
+                    </div>
                   </div>
-                </td>
-                <td className="px-3 py-2 text-xs font-mono w-32">
-                  {node.ip || t('admin_nodes_unconfigured')}
                 </td>
                 <td className="px-3 py-2 text-xs w-44">
                   <TrafficSettingsButton

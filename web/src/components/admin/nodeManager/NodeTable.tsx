@@ -7,6 +7,7 @@ import Trash2 from 'lucide-react/dist/esm/icons/trash-2';
 import Button from '@components/ui/Button';
 import IOSSwitch from '@components/ui/IOSSwitch';
 import Input from '@components/ui/Input';
+import { Tooltip } from '@components/ui/Tooltip';
 import { PlatformLogo } from '@components/system/SystemLogo';
 import type { NodeDeployPlatform } from '@app-types/api';
 import type { NodeRow } from '@app-types/admin';
@@ -87,15 +88,13 @@ const NodeTable: React.FC<Props> = ({
       <thead className="bg-(--theme-bg-muted) dark:bg-(--theme-canvas-subtle) text-(--theme-fg-default) dark:text-(--theme-fg-default) text-xs font-semibold whitespace-nowrap border-b border-(--theme-border-subtle) dark:border-(--theme-border-default)">
         <tr>
           <th className="px-3 py-2.5 w-10"></th>
-          <th className="px-3 py-2.5">{t('admin_nodes_column_node')}</th>
-          <th className="px-3 py-2.5 w-32">{t('admin_nodes_column_ip')}</th>
-          <th className="px-3 py-2.5 w-40">{t('admin_nodes_column_hostname')}</th>
+          <th className="px-3 py-2.5 min-w-72">{t('admin_nodes_column_node')}</th>
           <th className="px-3 py-2.5 w-32">{t('admin_nodes_column_group')}</th>
           <th className="px-3 py-2.5 w-20">{t('admin_nodes_column_guest_visible')}</th>
           <th className="px-3 py-2.5 w-14">{t('admin_nodes_column_secret')}</th>
           <th className="px-3 py-2.5 w-56">{t('admin_nodes_column_tags')}</th>
           <th className="px-3 py-2.5 w-36">{t('admin_nodes_column_deploy')}</th>
-          <th className="px-3 py-2.5 w-52">{t('admin_nodes_column_version')}</th>
+          <th className="px-3 py-2.5 w-44">{t('admin_nodes_column_version')}</th>
           <th className="px-3 py-2.5 text-right w-16"></th>
         </tr>
       </thead>
@@ -124,55 +123,57 @@ const NodeTable: React.FC<Props> = ({
               </button>
             </td>
             <td className="px-3 py-2">
-              {editingId === node.id ? (
-                <Input
-                  autoFocus
-                  enterKeyHint="done"
-                  value={draftName}
-                  onChange={(event) => setDraftName(event.target.value)}
-                  onBlur={() => commitName(node)}
-                  onKeyDown={(event) => {
-                    if (event.key === 'Enter' && !event.nativeEvent.isComposing) {
-                      event.preventDefault();
-                      event.currentTarget.blur();
-                    }
-                    if (event.key === 'Escape') {
-                      setDraftName(node.name);
-                      setEditingId(null);
-                    }
-                  }}
-                />
-              ) : (
-                <button
-                  type="button"
-                  className="ui-focus-ring rounded-sm font-semibold text-(--theme-fg-default) dark:text-(--theme-fg-default) hover:text-(--theme-bg-accent-emphasis) hover:underline transition-colors"
-                  onClick={() => startEditName(node)}
-                >
-                  {node.name}
-                </button>
-              )}
-            </td>
-            <td className="px-3 py-2 text-xs font-mono w-32">
-              {node.ip || t('admin_nodes_unconfigured')}
-            </td>
-            <td className="px-3 py-2 text-(--theme-fg-muted) dark:text-(--theme-fg-muted) w-40">
-              {node.hostname ? (
-                <span className="font-mono text-xs break-all">{node.hostname}</span>
-              ) : (
-                <span className="text-(--theme-fg-action-muted) dark:text-(--theme-fg-muted) text-xs">
-                  {t('admin_nodes_hostname_unknown')}
-                </span>
-              )}
+              <div className="min-w-0">
+                {editingId === node.id ? (
+                  <Input
+                    autoFocus
+                    enterKeyHint="done"
+                    value={draftName}
+                    onChange={(event) => setDraftName(event.target.value)}
+                    onBlur={() => commitName(node)}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter' && !event.nativeEvent.isComposing) {
+                        event.preventDefault();
+                        event.currentTarget.blur();
+                      }
+                      if (event.key === 'Escape') {
+                        setDraftName(node.name);
+                        setEditingId(null);
+                      }
+                    }}
+                  />
+                ) : (
+                  <button
+                    type="button"
+                    className="ui-focus-ring rounded-sm font-semibold text-(--theme-fg-default) dark:text-(--theme-fg-default) hover:text-(--theme-bg-accent-emphasis) hover:underline transition-colors"
+                    onClick={() => startEditName(node)}
+                  >
+                    {node.name}
+                  </button>
+                )}
+                <div className="mt-1 flex min-w-0 items-center gap-2 text-xs text-(--theme-fg-muted) dark:text-(--theme-fg-muted)">
+                  <span className="shrink-0 font-mono">
+                    {node.ip || t('admin_nodes_unconfigured')}
+                  </span>
+                  <span
+                    className="min-w-0 max-w-80 truncate font-mono"
+                    title={node.hostname || t('admin_nodes_hostname_unknown')}
+                  >
+                    {node.hostname || t('admin_nodes_hostname_unknown')}
+                  </span>
+                </div>
+              </div>
             </td>
             <td className="px-3 py-2 text-(--theme-fg-muted) dark:text-(--theme-fg-muted) w-32">
-              <div className="flex flex-wrap gap-1">
+              <div className="flex max-w-40 flex-wrap gap-1">
                 {(node.groupNames.length > 0 ? node.groupNames : [t('admin_nodes_ungrouped')]).map(
                   (name) => (
                     <span
                       key={`${node.id}-${name}`}
-                      className="inline-flex px-1.5 py-0.5 text-xs font-medium rounded-md border border-(--theme-border-subtle) dark:border-(--theme-border-default) bg-(--theme-bg-muted) dark:bg-(--theme-canvas-muted) text-(--theme-fg-muted) dark:text-(--theme-fg-muted)"
+                      className="inline-flex max-w-full px-1.5 py-0.5 text-xs font-medium rounded-md border border-(--theme-border-subtle) dark:border-(--theme-border-default) bg-(--theme-bg-muted) dark:bg-(--theme-canvas-muted) text-(--theme-fg-muted) dark:text-(--theme-fg-muted)"
+                      title={name}
                     >
-                      {name}
+                      <span className="truncate">{name}</span>
                     </span>
                   ),
                 )}
@@ -200,7 +201,7 @@ const NodeTable: React.FC<Props> = ({
               </div>
             </td>
             <td className="px-3 py-2">
-              <div className="flex flex-wrap gap-1">
+              <div className="flex max-w-72 flex-wrap gap-1">
                 {node.tags.length === 0 ? (
                   <span className="text-xs text-(--theme-fg-subtle) dark:text-(--theme-fg-subtle)">
                     {t('admin_nodes_tags_none')}
@@ -209,7 +210,8 @@ const NodeTable: React.FC<Props> = ({
                   node.tags.map((tag) => (
                     <span
                       key={`${node.id}-${tag}`}
-                      className="text-xs px-1.5 py-0.5 bg-(--theme-bg-muted) dark:bg-(--theme-canvas-muted) text-(--theme-fg-muted) dark:text-(--theme-fg-muted) rounded-md border border-(--theme-border-subtle) dark:border-(--theme-border-default)"
+                      className="text-xs max-w-32 truncate px-1.5 py-0.5 bg-(--theme-bg-muted) dark:bg-(--theme-canvas-muted) text-(--theme-fg-muted) dark:text-(--theme-fg-muted) rounded-md border border-(--theme-border-subtle) dark:border-(--theme-border-default)"
+                      title={tag}
                     >
                       {tag}
                     </span>
@@ -251,7 +253,7 @@ const NodeTable: React.FC<Props> = ({
                 </Button>
               </div>
             </td>
-            <td className="px-3 py-2 text-xs text-(--theme-fg-muted) dark:text-(--theme-fg-muted)">
+            <td className="px-3 py-2 text-xs text-(--theme-fg-muted) dark:text-(--theme-fg-muted) w-44">
               {node.version.is_outdated ? (
                 <span className="text-(--theme-fg-danger-muted) font-medium">
                   {t('admin_nodes_version_outdated')}
@@ -277,16 +279,24 @@ const NodeTable: React.FC<Props> = ({
                   </button>
                 </div>
               ) : manualUpdateNodeIds.has(node.id) ? (
-                <div className="flex max-w-52 flex-col gap-0.5">
+                <div className="inline-flex items-center gap-1.5">
                   <span className="font-mono text-xs">
                     {node.version.version || t('common_unknown')}
                   </span>
-                  <span
-                    className="text-[11px] leading-snug text-(--theme-fg-warning-strong)"
-                    title={t('admin_nodes_auto_update_requires_manual')}
+                  <Tooltip
+                    content={t('admin_nodes_auto_update_requires_manual')}
+                    className="inline-flex cursor-not-allowed"
                   >
-                    {t('admin_nodes_auto_update_requires_manual')}
-                  </span>
+                    <button
+                      type="button"
+                      className="inline-flex size-5 shrink-0 cursor-not-allowed items-center justify-center rounded-md border border-(--theme-border-warning-muted) bg-(--theme-bg-warning-muted) p-1 text-(--theme-fg-warning-strong) opacity-50 dark:border-(--theme-border-warning-soft) dark:bg-(--theme-bg-warning-soft) dark:text-(--theme-fg-warning-strong)"
+                      disabled
+                      title={t('admin_nodes_auto_update_requires_manual')}
+                      aria-label={t('admin_nodes_auto_update_requires_manual')}
+                    >
+                      <ArrowUpFromLine size={10} aria-hidden="true" />
+                    </button>
+                  </Tooltip>
                 </div>
               ) : (
                 <span className="font-mono text-xs">
