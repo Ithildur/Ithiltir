@@ -4,7 +4,7 @@ import LoaderCircle from 'lucide-react/dist/esm/icons/loader-circle';
 import RefreshCw from 'lucide-react/dist/esm/icons/refresh-cw';
 import RotateCcw from 'lucide-react/dist/esm/icons/rotate-ccw';
 import type { AppVersion } from '@app-types/api';
-import type { DashUpdateChannel, SystemSettings } from '@app-types/admin';
+import type { DashUpdateChannel, DashUpdateMode, SystemSettings } from '@app-types/admin';
 import Badge, { type BadgeColor } from '@components/ui/Badge';
 import Button from '@components/ui/Button';
 import ConfirmDialog from '@components/ui/ConfirmDialog';
@@ -27,7 +27,9 @@ interface Props {
   settings: SystemSettings | null;
   loadingSettings: boolean;
   savingChannel: boolean;
+  savingMode: boolean;
   onChannelChange: (channel: DashUpdateChannel) => void;
+  onModeChange: (mode: DashUpdateMode) => void;
 }
 
 type VersionStatus = {
@@ -43,6 +45,28 @@ const unknownVersionStatus: VersionStatus = {
   labelKey: 'admin_dash_update_status_unknown',
   color: 'slate',
 };
+
+const updateModeOptions: Array<{
+  mode: DashUpdateMode;
+  labelKey: TranslationKey;
+  hintKey: TranslationKey;
+}> = [
+  {
+    mode: 'manual',
+    labelKey: 'admin_dash_update_mode_manual',
+    hintKey: 'admin_dash_update_mode_manual_hint',
+  },
+  {
+    mode: 'notify',
+    labelKey: 'admin_dash_update_mode_notify',
+    hintKey: 'admin_dash_update_mode_notify_hint',
+  },
+  {
+    mode: 'auto',
+    labelKey: 'admin_dash_update_mode_auto',
+    hintKey: 'admin_dash_update_mode_auto_hint',
+  },
+];
 
 const statusFromCheck = (status: adminApi.DashUpdateVersionStatus | undefined): VersionStatus => {
   switch (status) {
@@ -124,6 +148,13 @@ const LoadingState: React.FC<{ label: string }> = ({ label }) => (
     <span>{label}</span>
   </span>
 );
+
+const modeButtonClass = (active: boolean) =>
+  `min-h-[5.25rem] rounded-lg border px-3 py-2 text-left transition-[background-color,border-color,box-shadow,color] ${
+    active
+      ? 'border-(--theme-fg-interactive) bg-(--theme-bg-accent-muted) text-(--theme-fg-default) shadow-[inset_0_0_0_1px_var(--theme-fg-interactive)]'
+      : 'border-(--theme-border-subtle) bg-(--theme-bg-default) text-(--theme-fg-default) hover:bg-(--theme-surface-row-hover) dark:border-(--theme-border-default) dark:hover:bg-(--theme-canvas-subtle)'
+  } disabled:cursor-not-allowed disabled:opacity-50`;
 
 const readableError = (error: unknown, fallback: string): string => {
   if (error instanceof ApiError) return error.message || fallback;
@@ -219,7 +250,9 @@ const DashUpdateSettings: React.FC<Props> = ({
   settings,
   loadingSettings,
   savingChannel,
+  savingMode,
   onChannelChange,
+  onModeChange,
 }) => {
   const { lang, t } = useI18n();
   const apiError = useApiErrorHandler();
@@ -246,6 +279,7 @@ const DashUpdateSettings: React.FC<Props> = ({
   const checkRequestRef = React.useRef<{ seq: number; controller: AbortController } | null>(null);
 
   const channel = settings?.dash_update_channel ?? 'release';
+  const updateMode = settings?.dash_update_mode ?? 'manual';
   const isPrerelease = channel === 'prerelease';
   const latestNote = React.useMemo(
     () => latestNoteForChannel(releaseNotes, channel),
@@ -265,6 +299,7 @@ const DashUpdateSettings: React.FC<Props> = ({
     !settings ||
     loadingSettings ||
     savingChannel ||
+    savingMode ||
     checkingStatus ||
     isUpdateRunning ||
     updateUnavailable;
@@ -552,10 +587,33 @@ const DashUpdateSettings: React.FC<Props> = ({
         <UpdateRow label={t('admin_dash_update_channel_prerelease')}>
           <IOSSwitch
             checked={isPrerelease}
-            disabled={!settings || loadingSettings || savingChannel || isUpdateRunning}
+            disabled={!settings || loadingSettings || savingChannel || savingMode || isUpdateRunning}
             ariaLabel={t('admin_dash_update_channel_prerelease')}
             onChange={() => void togglePrerelease()}
           />
+        </UpdateRow>
+
+        <UpdateRow label={t('admin_dash_update_mode_title')}>
+          <div className="grid w-full gap-2 sm:grid-cols-3">
+            {updateModeOptions.map((option) => {
+              const active = updateMode === option.mode;
+              return (
+                <button
+                  key={option.mode}
+                  type="button"
+                  className={modeButtonClass(active)}
+                  aria-pressed={active}
+                  disabled={!settings || loadingSettings || savingMode || isUpdateRunning}
+                  onClick={() => onModeChange(option.mode)}
+                >
+                  <span className="block text-sm font-semibold">{t(option.labelKey)}</span>
+                  <span className="mt-1 block text-xs/5 text-(--theme-fg-muted)">
+                    {t(option.hintKey)}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
         </UpdateRow>
 
         {showJob ? (

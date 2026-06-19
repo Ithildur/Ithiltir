@@ -46,7 +46,7 @@ Ithiltir Dash 是单实例应用。根入口只启动一个 HTTP 进程，该进
 - 默认启动依赖 PostgreSQL 和 Redis；传 `--no-redis` 时，Redis 承载的运行时状态改用进程内内存。
 - `app.timezone` 在启动时编译。空值使用本地时区；非空值必须是有效 IANA 时区名，否则配置加载失败，错误中会包含配置值。
 - 节点鉴权和待下发 Agent 更新请求使用进程内内存，不走 Redis。
-- Dash 自更新状态是 `DASH_HOME/runtime/dash-update` 下的本地运行时状态。管理端更新接口通过 systemd transient unit 启动打包内置的 Linux 更新器；状态和日志尾部来自本地文件，不写入 PostgreSQL 或 Redis。版本检查从配置的 Git remote 读取 Dash 发布 tag。
+- Dash 自更新配置写在 `system_settings`：`dash_update_channel` 选择 `release` 或 `prerelease`，`dash_update_mode` 选择手动检查、仅自动检查并通知，或自动更新。Dash 自更新任务状态是 `DASH_HOME/runtime/dash-update` 下的本地运行时状态。管理端更新接口和自动更新服务通过 systemd transient unit 启动打包内置的 Linux 更新器；状态、日志尾部和通知去重状态来自本地文件，不写入 PostgreSQL 或 Redis。版本检查从配置的 Git remote 读取 Dash 发布 tag。自动更新通知使用已启用的全局通知渠道。
 - SMART、thermal 和完整 RAID 详情属于运行时状态。SMART 缓存新鲜度、helper 可用性、设备健康结果、完整 thermal 传感器 payload 以及完整 RAID 阵列/成员 payload 保存在当前快照或热点缓存，不写入 PostgreSQL 历史指标行。确认是物理盘的 SMART 温度会归约写入 `disk_physical_metrics.temp_c`，用于按设备查询历史；虚拟盘和 RAID 设备会被忽略。同一套后端判定会生成 `disk.temperature_devices`，供前端进入硬盘温度历史。thermal 会归约写入 `cpu_temp_c` 作为主机历史；完整 thermal 详情拆成独立前台字段缓存，读取前台节点视图时再组合进 JSON。
 - TCP/UDP 连接数是持久化数值指标，会写入 `tcp_conn` 和 `udp_conn`，并作为 `conn.tcp` 和 `conn.udp` 支持历史查询。Linux 上完整主机/netns 连接数来自 root 侧连接数缓存，因为 Agent 以低权限运行。Linux 安装脚本会在存在 `cc`、`gcc` 或 `clang` 时本地编译该 helper。缓存缺失、过期或 helper 无法编译时，Agent 使用自带连接数统计，可能缺失容器连接数据。
 - Linux PSI pressure 指标是固定数值时序数据。PSI 的 `avg10`、`avg60`、`avg300` 和 `total` 会作为可空列保存到 `server_metrics` 和 `server_current_metrics`；缺失列表示不可用，不表示 0 压力。Dashboard 持久化会忽略采集原因/状态字符串。PSI 当前不接入告警评估。

@@ -26,7 +26,7 @@ func (h *handler) patchHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if in.HistoryGuestAccessMode == nil && in.DashUpdateChannel == nil && !in.hasSiteBrandFields() {
+	if in.HistoryGuestAccessMode == nil && in.DashUpdateChannel == nil && in.DashUpdateMode == nil && !in.hasSiteBrandFields() {
 		httperr.Write(w, http.StatusBadRequest, "no_fields", "no fields to update")
 		return
 	}
@@ -51,6 +51,16 @@ func (h *handler) patchHandler(w http.ResponseWriter, r *http.Request) {
 		channel = &normalized
 	}
 
+	var updateMode *systemstore.DashUpdateMode
+	if in.DashUpdateMode != nil {
+		normalized, ok := systemstore.ParseDashUpdateMode(*in.DashUpdateMode)
+		if !ok {
+			httperr.Write(w, http.StatusBadRequest, "invalid_fields", "invalid dash_update_mode")
+			return
+		}
+		updateMode = &normalized
+	}
+
 	var brand *systemstore.SiteBrand
 	if in.hasSiteBrandFields() {
 		current, err := loadSiteBrand(r.Context(), h.system)
@@ -66,7 +76,7 @@ func (h *handler) patchHandler(w http.ResponseWriter, r *http.Request) {
 		brand = &next
 	}
 
-	if err := saveSettings(r.Context(), h.metric, h.system, mode, channel, brand); err != nil {
+	if err := saveSettings(r.Context(), h.metric, h.system, mode, channel, updateMode, brand); err != nil {
 		httperr.Write(w, http.StatusServiceUnavailable, "db_error", "failed to update settings")
 		return
 	}

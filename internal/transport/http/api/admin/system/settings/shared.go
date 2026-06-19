@@ -14,6 +14,7 @@ import (
 type settingsView struct {
 	HistoryGuestAccessMode metricdata.HistoryGuestAccessMode `json:"history_guest_access_mode"`
 	DashUpdateChannel      systemstore.DashUpdateChannel     `json:"dash_update_channel"`
+	DashUpdateMode         systemstore.DashUpdateMode        `json:"dash_update_mode"`
 	LogoURL                string                            `json:"logo_url"`
 	PageTitle              string                            `json:"page_title"`
 	TopbarText             string                            `json:"topbar_text"`
@@ -22,6 +23,7 @@ type settingsView struct {
 type settingsInput struct {
 	HistoryGuestAccessMode *metricdata.HistoryGuestAccessMode `json:"history_guest_access_mode"`
 	DashUpdateChannel      *systemstore.DashUpdateChannel     `json:"dash_update_channel"`
+	DashUpdateMode         *systemstore.DashUpdateMode        `json:"dash_update_mode"`
 	LogoURL                *string                            `json:"logo_url"`
 	PageTitle              *string                            `json:"page_title"`
 	TopbarText             *string                            `json:"topbar_text"`
@@ -41,7 +43,11 @@ func loadSettings(ctx context.Context, metric *metricdata.Store, system *systems
 		if err != nil {
 			return settingsView{}, err
 		}
-		return settingsViewFrom(mode, channel, brand), nil
+		updateMode, err := system.GetDashUpdateMode(c)
+		if err != nil {
+			return settingsView{}, err
+		}
+		return settingsViewFrom(mode, channel, updateMode, brand), nil
 	})
 }
 
@@ -57,6 +63,7 @@ func saveSettings(
 	system *systemstore.Store,
 	mode *metricdata.HistoryGuestAccessMode,
 	channel *systemstore.DashUpdateChannel,
+	updateMode *systemstore.DashUpdateMode,
 	brand *systemstore.SiteBrand,
 ) error {
 	_, err := infra.WithPGWriteTimeout(ctx, func(c context.Context) (struct{}, error) {
@@ -67,6 +74,11 @@ func saveSettings(
 		}
 		if channel != nil {
 			if err := system.SetDashUpdateChannel(c, *channel); err != nil {
+				return struct{}{}, err
+			}
+		}
+		if updateMode != nil {
+			if err := system.SetDashUpdateMode(c, *updateMode); err != nil {
 				return struct{}{}, err
 			}
 		}
@@ -83,6 +95,7 @@ func saveSettings(
 func settingsViewFrom(
 	mode metricdata.HistoryGuestAccessMode,
 	channel systemstore.DashUpdateChannel,
+	updateMode systemstore.DashUpdateMode,
 	brand systemstore.SiteBrand,
 ) settingsView {
 	normalized := systemstore.NormalizeSiteBrand(brand)
@@ -90,9 +103,14 @@ func settingsViewFrom(
 	if !ok {
 		normalizedChannel = systemstore.DashUpdateChannelRelease
 	}
+	normalizedUpdateMode, ok := systemstore.NormalizeDashUpdateMode(updateMode)
+	if !ok {
+		normalizedUpdateMode = systemstore.DashUpdateModeManual
+	}
 	return settingsView{
 		HistoryGuestAccessMode: mode,
 		DashUpdateChannel:      normalizedChannel,
+		DashUpdateMode:         normalizedUpdateMode,
 		LogoURL:                normalized.LogoURL,
 		PageTitle:              normalized.PageTitle,
 		TopbarText:             normalized.TopbarText,

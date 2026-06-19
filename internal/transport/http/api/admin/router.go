@@ -2,6 +2,7 @@ package admin
 
 import (
 	"dash/internal/config"
+	updater "dash/internal/dashupdate"
 	"dash/internal/store"
 	themefs "dash/internal/theme"
 	trafficjob "dash/internal/traffic"
@@ -13,11 +14,11 @@ import (
 )
 
 // Router returns admin routes.
-func Router(st *store.Stores, cfg *config.Config, themes *themefs.Store, rebuild *trafficjob.RebuildRunner) *routes.Blueprint {
+func Router(st *store.Stores, cfg *config.Config, themes *themefs.Store, rebuild *trafficjob.RebuildRunner, dashUpdate *updater.Runner) *routes.Blueprint {
 	r := routes.NewBlueprint()
 	r.Include("/groups", admingroups.Router(st.Node))
 	r.Include("/nodes", adminnodes.Router(st.Node, rebuild, cfg))
 	r.Include("/alerts", adminalerts.Router(st, cfg.App.EffectiveLanguage()))
-	r.Include("/system", adminsystem.Router(st, themes))
+	r.Include("/system", adminsystem.Router(st, themes, dashUpdate))
 	return r
 }

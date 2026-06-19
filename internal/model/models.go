@@ -644,6 +644,7 @@ type SystemSetting struct {
 	ID                int16     `gorm:"column:id;primaryKey;autoIncrement:false"`
 	ActiveThemeID     string    `gorm:"column:active_theme_id;size:64;not null;default:''"`            // 空值表示使用内置默认主题。
 	DashUpdateChannel string    `gorm:"column:dash_update_channel;size:16;not null;default:'release'"` // release 或 prerelease。
+	DashUpdateMode    string    `gorm:"column:dash_update_mode;size:16;not null;default:'manual'"`     // manual、notify 或 auto。
 	LogoURL           string    `gorm:"column:logo_url;type:text;not null"`
 	PageTitle         string    `gorm:"column:page_title;type:text;not null"`
 	TopbarText        string    `gorm:"column:topbar_text;type:text;not null"`

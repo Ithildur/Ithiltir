@@ -21,10 +21,15 @@ const (
 )
 
 type DashUpdateChannel = appversion.Channel
+type DashUpdateMode string
 
 const (
 	DashUpdateChannelRelease    DashUpdateChannel = appversion.ChannelRelease
 	DashUpdateChannelPrerelease DashUpdateChannel = appversion.ChannelPrerelease
+
+	DashUpdateModeManual DashUpdateMode = "manual"
+	DashUpdateModeNotify DashUpdateMode = "notify"
+	DashUpdateModeAuto   DashUpdateMode = "auto"
 )
 
 type SiteBrand struct {
@@ -75,11 +80,32 @@ func ParseDashUpdateChannel(channel DashUpdateChannel) (DashUpdateChannel, bool)
 	return normalized, true
 }
 
+func NormalizeDashUpdateMode(mode DashUpdateMode) (DashUpdateMode, bool) {
+	if strings.TrimSpace(string(mode)) == "" {
+		return DashUpdateModeManual, true
+	}
+	return ParseDashUpdateMode(mode)
+}
+
+func ParseDashUpdateMode(mode DashUpdateMode) (DashUpdateMode, bool) {
+	switch DashUpdateMode(strings.TrimSpace(string(mode))) {
+	case DashUpdateModeManual:
+		return DashUpdateModeManual, true
+	case DashUpdateModeNotify:
+		return DashUpdateModeNotify, true
+	case DashUpdateModeAuto:
+		return DashUpdateModeAuto, true
+	default:
+		return DashUpdateModeManual, false
+	}
+}
+
 func defaultSystemSetting() model.SystemSetting {
 	brand := DefaultSiteBrand()
 	return model.SystemSetting{
 		ID:                systemSettingsID,
 		DashUpdateChannel: string(DashUpdateChannelRelease),
+		DashUpdateMode:    string(DashUpdateModeManual),
 		LogoURL:           brand.LogoURL,
 		PageTitle:         brand.PageTitle,
 		TopbarText:        brand.TopbarText,
@@ -148,6 +174,28 @@ func (s *Store) SetDashUpdateChannel(ctx context.Context, channel DashUpdateChan
 	item := defaultSystemSetting()
 	item.DashUpdateChannel = string(normalized)
 	return s.saveSettingsColumns(ctx, item, []string{"dash_update_channel"})
+}
+
+func (s *Store) GetDashUpdateMode(ctx context.Context) (DashUpdateMode, error) {
+	item, err := s.loadSettings(ctx)
+	if err != nil {
+		return DashUpdateModeManual, err
+	}
+	mode, ok := NormalizeDashUpdateMode(DashUpdateMode(item.DashUpdateMode))
+	if !ok {
+		return DashUpdateModeManual, nil
+	}
+	return mode, nil
+}
+
+func (s *Store) SetDashUpdateMode(ctx context.Context, mode DashUpdateMode) error {
+	normalized, ok := ParseDashUpdateMode(mode)
+	if !ok {
+		return fmt.Errorf("invalid dash update mode %q", mode)
+	}
+	item := defaultSystemSetting()
+	item.DashUpdateMode = string(normalized)
+	return s.saveSettingsColumns(ctx, item, []string{"dash_update_mode"})
 }
 
 func (s *Store) GetSiteBrand(ctx context.Context) (SiteBrand, error) {

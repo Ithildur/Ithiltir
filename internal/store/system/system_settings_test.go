@@ -33,6 +33,9 @@ func TestIntegrationSystemSettingsPreserveOtherFields(t *testing.T) {
 	if err := st.SetDashUpdateChannel(ctx, DashUpdateChannelPrerelease); err != nil {
 		t.Fatalf("SetDashUpdateChannel() error = %v", err)
 	}
+	if err := st.SetDashUpdateMode(ctx, DashUpdateModeNotify); err != nil {
+		t.Fatalf("SetDashUpdateMode() error = %v", err)
+	}
 	themeID, err := st.GetActiveThemeID(ctx)
 	if err != nil {
 		t.Fatalf("GetActiveThemeID() error = %v", err)
@@ -57,5 +60,12 @@ func TestIntegrationSystemSettingsPreserveOtherFields(t *testing.T) {
 	}
 	if channel != DashUpdateChannelPrerelease {
 		t.Fatalf("GetDashUpdateChannel() = %q, want %q", channel, DashUpdateChannelPrerelease)
+	}
+	mode, err := st.GetDashUpdateMode(ctx)
+	if err != nil {
+		t.Fatalf("GetDashUpdateMode() error = %v", err)
+	}
+	if mode != DashUpdateModeNotify {
+		t.Fatalf("GetDashUpdateMode() = %q, want %q", mode, DashUpdateModeNotify)
 	}
 }

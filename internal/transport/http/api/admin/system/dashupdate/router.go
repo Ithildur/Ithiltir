@@ -19,10 +19,13 @@ type handler struct {
 }
 
 // Router returns admin/system/dash-update routes.
-func Router() *routes.Blueprint {
+func Router(runner *updater.Runner) *routes.Blueprint {
+	if runner == nil {
+		runner = updater.NewRunner()
+	}
 	h := &handler{
 		client: &http.Client{Timeout: releaseNotesTimeout},
-		runner: updater.NewRunner(),
+		runner: runner,
 	}
 
 	r := routes.NewBlueprint(

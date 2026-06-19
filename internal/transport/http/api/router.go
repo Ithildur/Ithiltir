@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"dash/internal/config"
+	updater "dash/internal/dashupdate"
 	"dash/internal/serverid"
 	"dash/internal/store"
 	themefs "dash/internal/theme"
@@ -32,6 +33,7 @@ type Dependencies struct {
 	Auth           *authjwt.Manager
 	Theme          *themefs.Store
 	TrafficRebuild *trafficjob.RebuildRunner
+	DashUpdate     *updater.Runner
 }
 
 const (
@@ -68,6 +70,9 @@ func prepareRoutes(cfg *config.Config, deps Dependencies) (routeSetup, error) {
 	if deps.TrafficRebuild == nil {
 		return routeSetup{}, fmt.Errorf("api: traffic rebuild runner is nil")
 	}
+	if deps.DashUpdate == nil {
+		return routeSetup{}, fmt.Errorf("api: dash update runner is nil")
+	}
 
 	offlineThreshold, staleAfterSec := nodeThresholds(cfg)
 	trustedProxies := append([]netip.Prefix(nil), cfg.HTTP.TrustedProxyPrefixes...)
@@ -98,7 +103,7 @@ func buildRoutes(cfg *config.Config, deps Dependencies, setup routeSetup) *route
 	r := routes.NewBlueprint()
 	r.Add(setup.authHandler.Routes()...)
 	r.Include("/version", versionapi.Router())
-	r.Include("/admin", adminapi.Router(deps.Stores, cfg, deps.Theme, deps.TrafficRebuild), routes.IncludeAuth(routes.AuthRequired), routes.IncludeMiddleware(setup.bearer))
+	r.Include("/admin", adminapi.Router(deps.Stores, cfg, deps.Theme, deps.TrafficRebuild, deps.DashUpdate), routes.IncludeAuth(routes.AuthRequired), routes.IncludeMiddleware(setup.bearer))
 	r.Include("/node", nodeapi.Router(deps.Stores, setup.serverID, setup.staleAfterSec, setup.trustedProxies), routes.IncludeAuth(nodeSecretAuth))
 	r.Include("/front", frontapi.Router(deps.Stores, setup.offlineThreshold, deps.Auth))
 	r.Include("/metrics", metricsapi.Router(deps.Stores, deps.Auth))

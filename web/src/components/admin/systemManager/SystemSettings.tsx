@@ -19,6 +19,7 @@ import ThemeManager from '@components/admin/systemManager/ThemeManager';
 import TrafficSettings from '@components/admin/systemManager/TrafficSettings';
 import type {
   DashUpdateChannel,
+  DashUpdateMode,
   HistoryGuestAccessMode,
   SystemSettings as SystemSettingsData,
 } from '@app-types/admin';
@@ -72,6 +73,7 @@ const SystemSettings: React.FC = () => {
   const [savingBrand, setSavingBrand] = React.useState(false);
   const [savingHistoryMode, setSavingHistoryMode] = React.useState(false);
   const [savingDashUpdateChannel, setSavingDashUpdateChannel] = React.useState(false);
+  const [savingDashUpdateMode, setSavingDashUpdateMode] = React.useState(false);
   const [activeTab, setActiveTab] = React.useState<SystemManagerTab>('settings');
   const [brandDraft, setBrandDraft] = React.useState<SiteBrand | null>(null);
   const brandDirty = React.useRef(false);
@@ -176,6 +178,23 @@ const SystemSettings: React.FC = () => {
       }
     },
     [apiError, savingDashUpdateChannel, settings, t],
+  );
+
+  const updateDashUpdateMode = React.useCallback(
+    async (mode: DashUpdateMode) => {
+      if (!settings || savingDashUpdateMode || mode === settings.dash_update_mode) return;
+      setSavingDashUpdateMode(true);
+      try {
+        await adminApi.updateSystemSettings({ dash_update_mode: mode });
+        setSettings({ ...settings, dash_update_mode: mode });
+        pushTopBanner(t('admin_system_settings_saved'), { tone: 'info' });
+      } catch (error) {
+        apiError(error, t('admin_system_settings_save_failed'));
+      } finally {
+        setSavingDashUpdateMode(false);
+      }
+    },
+    [apiError, savingDashUpdateMode, settings, t],
   );
 
   const selectLogoFile = React.useCallback(
@@ -332,7 +351,9 @@ const SystemSettings: React.FC = () => {
           settings={settings}
           loadingSettings={loadingSettings}
           savingChannel={savingDashUpdateChannel}
+          savingMode={savingDashUpdateMode}
           onChannelChange={(channel) => void updateDashUpdateChannel(channel)}
+          onModeChange={(mode) => void updateDashUpdateMode(mode)}
         />
       )}
 

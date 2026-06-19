@@ -276,7 +276,7 @@ export interface DashReleaseNotesDocument {
   html: string;
 }
 
-export type { DashUpdateChannel } from '@app-types/admin';
+export type { DashUpdateChannel, DashUpdateMode } from '@app-types/admin';
 
 export type DashUpdateAction = 'update' | 'reinstall';
 export type DashUpdateStatusValue = 'idle' | 'running' | 'completed' | 'failed';

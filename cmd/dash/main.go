@@ -12,6 +12,7 @@ import (
 
 	"dash/internal/alert"
 	"dash/internal/config"
+	"dash/internal/dashupdate"
 	"dash/internal/infra"
 	"dash/internal/migrate"
 	"dash/internal/store"
@@ -178,11 +179,14 @@ func main() {
 		appLocation,
 		cfg.Database.EffectiveTrafficRetentionDays(),
 	)
+	dashUpdateRunner := dashupdate.NewRunner()
+	dashUpdateService := dashupdate.NewService(st.System, st.Alert, dashUpdateRunner, cfg.App.EffectiveLanguage())
 	deps := httpapi.Dependencies{
 		Stores:         st,
 		Auth:           jwtAuth,
 		Theme:          themeStore,
 		TrafficRebuild: trafficRuntime.RebuildRunner(),
+		DashUpdate:     dashUpdateRunner,
 	}
 
 	srv, err := transporthttp.NewHTTPServer(cfg, deps)
@@ -198,6 +202,7 @@ func main() {
 	group.Go(func() error { return srv.Run(groupCtx) })
 	group.Go(func() error { return alertService.Run(groupCtx) })
 	group.Go(func() error { return trafficRuntime.Run(groupCtx) })
+	group.Go(func() error { return dashUpdateService.Run(groupCtx) })
 
 	runErr := group.Wait()
 	trafficRuntime.Stop()

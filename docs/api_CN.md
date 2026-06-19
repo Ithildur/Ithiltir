@@ -78,7 +78,7 @@ Bearer 可选端点会把缺失、格式错误、过期、已撤销或其他无�
 
 ## 管理系统设置
 
-- `GET /api/admin/system/settings` 返回 `history_guest_access_mode`、`dash_update_channel`、`logo_url`、`page_title` 和 `topbar_text`。`dash_update_channel` 为 `release` 或 `prerelease`。
+- `GET /api/admin/system/settings` 返回 `history_guest_access_mode`、`dash_update_channel`、`dash_update_mode`、`logo_url`、`page_title` 和 `topbar_text`。`dash_update_channel` 为 `release` 或 `prerelease`；`dash_update_mode` 为 `manual`、`notify` 或 `auto`。
 - `PATCH /api/admin/system/settings` 接受这些字段的局部更新。空更新返回 `400 no_fields`；非法值返回 `400 invalid_fields`。
 - `PUT /api/admin/system/settings` 必须提交 `history_guest_access_mode`，并接受与 `PATCH` 相同的可选字段。未提交的可选字段为兼容性保持不变。
 
@@ -87,6 +87,7 @@ Bearer 可选端点会把缺失、格式错误、过期、已撤销或其他无�
 - `GET /api/admin/system/dash-update/status` 返回最近一次 Dash 更新任务状态。`status` 为 `idle`、`running`、`completed` 或 `failed`。响应包含 `available`，并可能包含 `id`、`action`、`channel`、`started_at`、`finished_at`、`exit_code`、`log_tail` 和 `unavailable_reason`。
 - `GET /api/admin/system/dash-update/check?channel=release|prerelease` 返回 `current_version`、`current_channel`、`target_channel`、`latest_version`、`version_status` 和 `bundled_node_version`。`version_status` 为 `available`、`current`、`ahead` 或 `unknown`。省略 `channel` 时默认使用 `release`；`prerelease` 只检查 prerelease tag；非法 `channel` 返回 `400 invalid_fields`；本机缺少 `git` 返回 `503 dash_update_unavailable`；远端 tag 拉取失败返回 `502 dash_update_check_failed`。
 - `POST /api/admin/system/dash-update/run` 必须提交 `action=update|reinstall`、`channel=release|prerelease` 和 `lang=zh|en`。它会启动后台 Dash 更新任务，成功返回 `202` 和状态体。`prerelease` 只针对 prerelease tag 运行。已有任务运行时返回 `409` 和当前状态体。字段缺失或非法返回 `400 invalid_fields`；更新器不可用返回 `503 dash_update_unavailable`。
+- `dash_update_mode=notify` 会让 Dash 按配置通道定期检查更新，并通过已启用通知渠道发送可用更新提醒。`dash_update_mode=auto` 会定期检查、发现更高版本时自动启动更新，并发送开始和结果通知。
 - 已部署的 Dash 更新器基于 Linux/systemd，并通过打包内置的 `update_dash_linux.sh` 运行。更新任务可能重启 Dash，调用方收到 `202` 后必须容忍短暂断连。
 - `GET /api/admin/system/dash-update/release-notes?lang=zh|en` 从文档站返回 `{ "source_url": "...", "html": "..." }`；抓取失败返回 `502 release_notes_fetch_failed`。
 
