@@ -118,7 +118,7 @@ func Compare(a, b string) (int, error) {
 	return modsemver.Compare(av, bv), nil
 }
 
-func Latest(versions []string, channel Channel) (string, bool) {
+func LatestCompatible(versions []string, channel Channel) (string, bool) {
 	var latest string
 	for _, raw := range versions {
 		version := strings.TrimSpace(raw)
@@ -130,6 +130,29 @@ func Latest(versions []string, channel Channel) (string, bool) {
 			continue
 		}
 		if tagChannel != channel && !(channel == ChannelPrerelease && tagChannel == ChannelRelease) {
+			continue
+		}
+		if latest == "" {
+			latest = version
+			continue
+		}
+		cmp, err := Compare(version, latest)
+		if err == nil && cmp > 0 {
+			latest = version
+		}
+	}
+	return latest, latest != ""
+}
+
+func LatestInChannel(versions []string, channel Channel) (string, bool) {
+	var latest string
+	for _, raw := range versions {
+		version := strings.TrimSpace(raw)
+		if version == "" {
+			continue
+		}
+		tagChannel, err := ChannelFor(version)
+		if err != nil || tagChannel != channel {
 			continue
 		}
 		if latest == "" {

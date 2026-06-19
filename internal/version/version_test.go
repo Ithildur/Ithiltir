@@ -123,7 +123,7 @@ func TestSupportsNodeSelfUpdate(t *testing.T) {
 	}
 }
 
-func TestLatest(t *testing.T) {
+func TestLatestCompatible(t *testing.T) {
 	versions := []string{
 		"bad",
 		"1.2.3-alpha.1",
@@ -132,14 +132,14 @@ func TestLatest(t *testing.T) {
 		"1.2.3+build.2",
 	}
 
-	got, ok := Latest(versions, ChannelRelease)
+	got, ok := LatestCompatible(versions, ChannelRelease)
 	if !ok || got != "1.2.3" {
-		t.Fatalf("Latest(release) = %q, %v; want %q, true", got, ok, "1.2.3")
+		t.Fatalf("LatestCompatible(release) = %q, %v; want %q, true", got, ok, "1.2.3")
 	}
 
-	got, ok = Latest(versions, ChannelPrerelease)
+	got, ok = LatestCompatible(versions, ChannelPrerelease)
 	if !ok || got != "1.2.4-alpha.1" {
-		t.Fatalf("Latest(prerelease) = %q, %v; want %q, true", got, ok, "1.2.4-alpha.1")
+		t.Fatalf("LatestCompatible(prerelease) = %q, %v; want %q, true", got, ok, "1.2.4-alpha.1")
 	}
 
 	tests := []struct {
@@ -174,10 +174,30 @@ func TestLatest(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, ok := Latest(tt.values, tt.channel)
+			got, ok := LatestCompatible(tt.values, tt.channel)
 			if ok != tt.wantOK || got != tt.want {
-				t.Fatalf("Latest() = %q, %v; want %q, %v", got, ok, tt.want, tt.wantOK)
+				t.Fatalf("LatestCompatible() = %q, %v; want %q, %v", got, ok, tt.want, tt.wantOK)
 			}
 		})
+	}
+}
+
+func TestLatestInChannel(t *testing.T) {
+	versions := []string{
+		"bad",
+		"1.2.3-alpha.1",
+		"1.2.3",
+		"1.2.4-alpha.1",
+		"1.2.5",
+	}
+
+	got, ok := LatestInChannel(versions, ChannelRelease)
+	if !ok || got != "1.2.5" {
+		t.Fatalf("LatestInChannel(release) = %q, %v; want %q, true", got, ok, "1.2.5")
+	}
+
+	got, ok = LatestInChannel(versions, ChannelPrerelease)
+	if !ok || got != "1.2.4-alpha.1" {
+		t.Fatalf("LatestInChannel(prerelease) = %q, %v; want %q, true", got, ok, "1.2.4-alpha.1")
 	}
 }
