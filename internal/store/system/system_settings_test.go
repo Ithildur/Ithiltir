@@ -30,6 +30,9 @@ func TestIntegrationSystemSettingsPreserveOtherFields(t *testing.T) {
 	if err := st.SetSiteBrand(ctx, wantBrand); err != nil {
 		t.Fatalf("SetSiteBrand() error = %v", err)
 	}
+	if err := st.SetDashUpdateChannel(ctx, DashUpdateChannelPrerelease); err != nil {
+		t.Fatalf("SetDashUpdateChannel() error = %v", err)
+	}
 	themeID, err := st.GetActiveThemeID(ctx)
 	if err != nil {
 		t.Fatalf("GetActiveThemeID() error = %v", err)
@@ -47,5 +50,12 @@ func TestIntegrationSystemSettingsPreserveOtherFields(t *testing.T) {
 	}
 	if brand != wantBrand {
 		t.Fatalf("GetSiteBrand() = %#v, want %#v", brand, wantBrand)
+	}
+	channel, err := st.GetDashUpdateChannel(ctx)
+	if err != nil {
+		t.Fatalf("GetDashUpdateChannel() error = %v", err)
+	}
+	if channel != DashUpdateChannelPrerelease {
+		t.Fatalf("GetDashUpdateChannel() = %q, want %q", channel, DashUpdateChannelPrerelease)
 	}
 }

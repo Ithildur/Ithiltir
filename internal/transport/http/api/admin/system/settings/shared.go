@@ -13,6 +13,7 @@ import (
 
 type settingsView struct {
 	HistoryGuestAccessMode metricdata.HistoryGuestAccessMode `json:"history_guest_access_mode"`
+	DashUpdateChannel      systemstore.DashUpdateChannel     `json:"dash_update_channel"`
 	LogoURL                string                            `json:"logo_url"`
 	PageTitle              string                            `json:"page_title"`
 	TopbarText             string                            `json:"topbar_text"`
@@ -20,6 +21,7 @@ type settingsView struct {
 
 type settingsInput struct {
 	HistoryGuestAccessMode *metricdata.HistoryGuestAccessMode `json:"history_guest_access_mode"`
+	DashUpdateChannel      *systemstore.DashUpdateChannel     `json:"dash_update_channel"`
 	LogoURL                *string                            `json:"logo_url"`
 	PageTitle              *string                            `json:"page_title"`
 	TopbarText             *string                            `json:"topbar_text"`
@@ -35,7 +37,11 @@ func loadSettings(ctx context.Context, metric *metricdata.Store, system *systems
 		if err != nil {
 			return settingsView{}, err
 		}
-		return settingsViewFrom(mode, brand), nil
+		channel, err := system.GetDashUpdateChannel(c)
+		if err != nil {
+			return settingsView{}, err
+		}
+		return settingsViewFrom(mode, channel, brand), nil
 	})
 }
 
@@ -50,11 +56,17 @@ func saveSettings(
 	metric *metricdata.Store,
 	system *systemstore.Store,
 	mode *metricdata.HistoryGuestAccessMode,
+	channel *systemstore.DashUpdateChannel,
 	brand *systemstore.SiteBrand,
 ) error {
 	_, err := infra.WithPGWriteTimeout(ctx, func(c context.Context) (struct{}, error) {
 		if mode != nil {
 			if err := metric.SetHistoryGuestAccessMode(c, *mode); err != nil {
+				return struct{}{}, err
+			}
+		}
+		if channel != nil {
+			if err := system.SetDashUpdateChannel(c, *channel); err != nil {
 				return struct{}{}, err
 			}
 		}
@@ -68,10 +80,19 @@ func saveSettings(
 	return err
 }
 
-func settingsViewFrom(mode metricdata.HistoryGuestAccessMode, brand systemstore.SiteBrand) settingsView {
+func settingsViewFrom(
+	mode metricdata.HistoryGuestAccessMode,
+	channel systemstore.DashUpdateChannel,
+	brand systemstore.SiteBrand,
+) settingsView {
 	normalized := systemstore.NormalizeSiteBrand(brand)
+	normalizedChannel, ok := systemstore.NormalizeDashUpdateChannel(channel)
+	if !ok {
+		normalizedChannel = systemstore.DashUpdateChannelRelease
+	}
 	return settingsView{
 		HistoryGuestAccessMode: mode,
+		DashUpdateChannel:      normalizedChannel,
 		LogoURL:                normalized.LogoURL,
 		PageTitle:              normalized.PageTitle,
 		TopbarText:             normalized.TopbarText,

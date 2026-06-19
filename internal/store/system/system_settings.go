@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"dash/internal/model"
+	appversion "dash/internal/version"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
@@ -17,6 +18,13 @@ const (
 	DefaultSiteLogoURL    = "/brandlogo.svg"
 	DefaultSitePageTitle  = "Ithiltir Monitor Dashboard"
 	DefaultSiteTopbarText = "Ithiltir Control"
+)
+
+type DashUpdateChannel = appversion.Channel
+
+const (
+	DashUpdateChannelRelease    DashUpdateChannel = appversion.ChannelRelease
+	DashUpdateChannelPrerelease DashUpdateChannel = appversion.ChannelPrerelease
 )
 
 type SiteBrand struct {
@@ -52,13 +60,29 @@ func NormalizeSiteBrand(brand SiteBrand) SiteBrand {
 	return out
 }
 
+func NormalizeDashUpdateChannel(channel DashUpdateChannel) (DashUpdateChannel, bool) {
+	if strings.TrimSpace(string(channel)) == "" {
+		return DashUpdateChannelRelease, true
+	}
+	return ParseDashUpdateChannel(channel)
+}
+
+func ParseDashUpdateChannel(channel DashUpdateChannel) (DashUpdateChannel, bool) {
+	normalized, err := appversion.ParseChannel(string(channel))
+	if err != nil {
+		return DashUpdateChannelRelease, false
+	}
+	return normalized, true
+}
+
 func defaultSystemSetting() model.SystemSetting {
 	brand := DefaultSiteBrand()
 	return model.SystemSetting{
-		ID:         systemSettingsID,
-		LogoURL:    brand.LogoURL,
-		PageTitle:  brand.PageTitle,
-		TopbarText: brand.TopbarText,
+		ID:                systemSettingsID,
+		DashUpdateChannel: string(DashUpdateChannelRelease),
+		LogoURL:           brand.LogoURL,
+		PageTitle:         brand.PageTitle,
+		TopbarText:        brand.TopbarText,
 	}
 }
 
@@ -102,6 +126,28 @@ func (s *Store) SetActiveThemeID(ctx context.Context, id string) error {
 	item := defaultSystemSetting()
 	item.ActiveThemeID = id
 	return s.saveSettingsColumns(ctx, item, []string{"active_theme_id"})
+}
+
+func (s *Store) GetDashUpdateChannel(ctx context.Context) (DashUpdateChannel, error) {
+	item, err := s.loadSettings(ctx)
+	if err != nil {
+		return DashUpdateChannelRelease, err
+	}
+	channel, ok := NormalizeDashUpdateChannel(DashUpdateChannel(item.DashUpdateChannel))
+	if !ok {
+		return DashUpdateChannelRelease, nil
+	}
+	return channel, nil
+}
+
+func (s *Store) SetDashUpdateChannel(ctx context.Context, channel DashUpdateChannel) error {
+	normalized, ok := ParseDashUpdateChannel(channel)
+	if !ok {
+		return fmt.Errorf("invalid dash update channel %q", channel)
+	}
+	item := defaultSystemSetting()
+	item.DashUpdateChannel = string(normalized)
+	return s.saveSettingsColumns(ctx, item, []string{"dash_update_channel"})
 }
 
 func (s *Store) GetSiteBrand(ctx context.Context) (SiteBrand, error) {

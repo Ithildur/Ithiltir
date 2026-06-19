@@ -4,6 +4,7 @@ import type {
   AlertRule,
   AlertRuleInput,
   AlertMounts,
+  DashUpdateChannel,
   EmailConfig,
   SystemSettings,
   TelegramBotConfig,
@@ -268,6 +269,77 @@ export const updateSystemSettings = (input: Partial<SystemSettings>) =>
     method: 'PATCH',
     json: input,
     responseType: 'empty',
+  });
+
+export interface DashReleaseNotesDocument {
+  source_url: string;
+  html: string;
+}
+
+export type { DashUpdateChannel } from '@app-types/admin';
+
+export type DashUpdateAction = 'update' | 'reinstall';
+export type DashUpdateStatusValue = 'idle' | 'running' | 'completed' | 'failed';
+export type DashUpdateVersionStatus = 'available' | 'current' | 'ahead' | 'unknown';
+
+export interface DashUpdateStatus {
+  id?: string;
+  status: DashUpdateStatusValue;
+  action?: DashUpdateAction;
+  channel?: DashUpdateChannel;
+  started_at?: string;
+  finished_at?: string;
+  exit_code?: number;
+  log_tail?: string;
+  available: boolean;
+  unavailable_reason?: string;
+}
+
+export interface DashUpdateCheck {
+  current_version: string;
+  current_channel?: DashUpdateChannel;
+  target_channel: DashUpdateChannel;
+  latest_version: string;
+  version_status: DashUpdateVersionStatus;
+  bundled_node_version: string;
+}
+
+export const fetchDashReleaseNotes = (
+  params: { lang?: 'zh' | 'en'; signal?: AbortSignal } = {},
+) => {
+  const query = params.lang ? `?lang=${encodeURIComponent(params.lang)}` : '';
+  return apiFetch<DashReleaseNotesDocument>(`/admin/system/dash-update/release-notes${query}`, {
+    method: 'GET',
+    signal: params.signal,
+  });
+};
+
+export const fetchDashUpdateStatus = (params: { signal?: AbortSignal } = {}) =>
+  apiFetch<DashUpdateStatus>('/admin/system/dash-update/status', {
+    method: 'GET',
+    signal: params.signal,
+  });
+
+export const fetchDashUpdateCheck = (params: {
+  channel: DashUpdateChannel;
+  signal?: AbortSignal;
+}) =>
+  apiFetch<DashUpdateCheck>(
+    `/admin/system/dash-update/check?channel=${encodeURIComponent(params.channel)}`,
+    {
+      method: 'GET',
+      signal: params.signal,
+    },
+  );
+
+export const runDashUpdate = (input: {
+  action: DashUpdateAction;
+  channel: DashUpdateChannel;
+  lang: 'zh' | 'en';
+}) =>
+  apiFetch<DashUpdateStatus>('/admin/system/dash-update/run', {
+    method: 'POST',
+    json: input,
   });
 
 export const fetchThemePackages = (params: { signal?: AbortSignal } = {}) =>

@@ -53,9 +53,11 @@ export interface ThemePackage {
 }
 
 export type HistoryGuestAccessMode = 'disabled' | 'by_node';
+export type DashUpdateChannel = 'release' | 'prerelease';
 
 export interface SystemSettings extends SiteBrand {
   history_guest_access_mode: HistoryGuestAccessMode;
+  dash_update_channel: DashUpdateChannel;
 }
 
 export interface NodeRow {

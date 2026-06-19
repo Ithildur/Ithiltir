@@ -42,6 +42,7 @@ Optional bearer endpoints treat a missing, malformed, expired, revoked, or other
 | `/api/admin/alerts/settings`                  | bearer                                                                                                    | `GET /`, `PUT /`                                                                                                                                                                        |
 | `/api/admin/alerts/channels`                  | bearer                                                                                                    | `GET /`, `POST /`, `GET /{id}`, `PUT /{id}`, `PUT /{id}/enabled`, `POST /{id}/test`, `DELETE /{id}`                                                                                     |
 | `/api/admin/alerts/channels/telegram/mtproto` | bearer                                                                                                    | `POST /code`, `POST /verify`, `POST /password`, `POST /ping`                                                                                                                            |
+| `/api/admin/system/dash-update`               | bearer                                                                                                    | `GET /status`, `GET /check`, `POST /run`, `GET /release-notes`                                                                                                                          |
 | `/api/admin/system/settings`                  | bearer                                                                                                    | `GET /`, `PUT /`, `PATCH /`                                                                                                                                                             |
 | `/api/admin/system/themes`                    | bearer                                                                                                    | `GET /`, `POST /upload`, `POST /{id}/apply`, `DELETE /{id}`                                                                                                                             |
 
@@ -74,6 +75,20 @@ Optional bearer endpoints treat a missing, malformed, expired, revoked, or other
 - Node direction normalization is stable: `default` inherits the global traffic direction; `out`, `both`, and `max` override it for that node.
 - Invalid node traffic fields return `400 invalid_traffic_cycle_mode`, `invalid_traffic_cycle_settings`, `invalid_traffic_billing_start_day`, `invalid_traffic_billing_anchor_date`, `invalid_traffic_billing_timezone`, or `invalid_traffic_direction_mode`.
 - `POST /api/admin/nodes/{id}/upgrade` returns `204`. It returns `409 node_upgrade_unsupported` when the node cannot receive automatic update delivery, `409` when the bundled version, platform, or asset is unavailable, or `503 node_upgrade_grant_error` when Dash cannot prepare the temporary legacy download grant.
+
+## Admin System Settings
+
+- `GET /api/admin/system/settings` returns `history_guest_access_mode`, `dash_update_channel`, `logo_url`, `page_title`, and `topbar_text`. `dash_update_channel` is `release` or `prerelease`.
+- `PATCH /api/admin/system/settings` accepts partial updates for those fields. An empty update returns `400 no_fields`; invalid values return `400 invalid_fields`.
+- `PUT /api/admin/system/settings` requires `history_guest_access_mode` and accepts the same optional fields as `PATCH`. Omitted optional fields remain unchanged for compatibility.
+
+## Admin Dash Update
+
+- `GET /api/admin/system/dash-update/status` returns the latest Dash update task state. `status` is `idle`, `running`, `completed`, or `failed`. Responses include `available`, and may include `id`, `action`, `channel`, `started_at`, `finished_at`, `exit_code`, `log_tail`, and `unavailable_reason`.
+- `GET /api/admin/system/dash-update/check?channel=release|prerelease` returns `current_version`, `current_channel`, `target_channel`, `latest_version`, `version_status`, and `bundled_node_version`. `version_status` is `available`, `current`, `ahead`, or `unknown`. Omitted `channel` defaults to `release`; `prerelease` checks prerelease tags only. Invalid `channel` returns `400 invalid_fields`; a missing local `git` returns `503 dash_update_unavailable`; remote tag fetch failure returns `502 dash_update_check_failed`.
+- `POST /api/admin/system/dash-update/run` requires `action=update|reinstall`, `channel=release|prerelease`, and `lang=zh|en`. It starts a background Dash update task and returns `202` with the status body. `prerelease` runs against prerelease tags only. A running task returns `409` with the current status body. Missing or invalid fields return `400 invalid_fields`; an unavailable updater returns `503 dash_update_unavailable`.
+- The deployed Dash updater is Linux/systemd based and runs through the packaged `update_dash_linux.sh`. The update task may restart Dash, so callers must tolerate a brief connection loss after `202`.
+- `GET /api/admin/system/dash-update/release-notes?lang=zh|en` returns `{ "source_url": "...", "html": "..." }` from the documentation site. Fetch failure returns `502 release_notes_fetch_failed`.
 
 ## Agent Updates
 

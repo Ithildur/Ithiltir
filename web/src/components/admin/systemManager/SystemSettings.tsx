@@ -1,5 +1,6 @@
 import React from 'react';
 import Palette from 'lucide-react/dist/esm/icons/palette';
+import RefreshCw from 'lucide-react/dist/esm/icons/refresh-cw';
 import RotateCcw from 'lucide-react/dist/esm/icons/rotate-ccw';
 import Save from 'lucide-react/dist/esm/icons/save';
 import Settings2 from 'lucide-react/dist/esm/icons/settings-2';
@@ -13,9 +14,11 @@ import SettingRow, {
   SettingPanel,
   SettingPanelFooter,
 } from '@components/admin/systemManager/SettingRow';
+import DashUpdateSettings from '@components/admin/systemManager/DashUpdateSettings';
 import ThemeManager from '@components/admin/systemManager/ThemeManager';
 import TrafficSettings from '@components/admin/systemManager/TrafficSettings';
 import type {
+  DashUpdateChannel,
   HistoryGuestAccessMode,
   SystemSettings as SystemSettingsData,
 } from '@app-types/admin';
@@ -36,6 +39,7 @@ const logoMaxBytes = 512 * 1024;
 const tabs = [
   { key: 'settings', labelKey: 'admin_tab_system', icon: Settings2 },
   { key: 'themes', labelKey: 'admin_system_tab_themes', icon: Palette },
+  { key: 'dashUpdate', labelKey: 'admin_system_tab_dash_update', icon: RefreshCw },
 ] as const;
 
 type SystemManagerTab = (typeof tabs)[number]['key'];
@@ -67,6 +71,7 @@ const SystemSettings: React.FC = () => {
   const [loadingSettings, setLoadingSettings] = React.useState(false);
   const [savingBrand, setSavingBrand] = React.useState(false);
   const [savingHistoryMode, setSavingHistoryMode] = React.useState(false);
+  const [savingDashUpdateChannel, setSavingDashUpdateChannel] = React.useState(false);
   const [activeTab, setActiveTab] = React.useState<SystemManagerTab>('settings');
   const [brandDraft, setBrandDraft] = React.useState<SiteBrand | null>(null);
   const brandDirty = React.useRef(false);
@@ -91,7 +96,7 @@ const SystemSettings: React.FC = () => {
   );
 
   React.useEffect(() => {
-    if (activeTab !== 'settings' || settings) return;
+    if ((activeTab !== 'settings' && activeTab !== 'dashUpdate') || settings) return;
     const controller = new AbortController();
 
     void loadSettings(controller.signal);
@@ -156,6 +161,23 @@ const SystemSettings: React.FC = () => {
     }
   }, [apiError, brandDraft, savingBrand, settings, t]);
 
+  const updateDashUpdateChannel = React.useCallback(
+    async (channel: DashUpdateChannel) => {
+      if (!settings || savingDashUpdateChannel || channel === settings.dash_update_channel) return;
+      setSavingDashUpdateChannel(true);
+      try {
+        await adminApi.updateSystemSettings({ dash_update_channel: channel });
+        setSettings({ ...settings, dash_update_channel: channel });
+        pushTopBanner(t('admin_system_settings_saved'), { tone: 'info' });
+      } catch (error) {
+        apiError(error, t('admin_system_settings_save_failed'));
+      } finally {
+        setSavingDashUpdateChannel(false);
+      }
+    },
+    [apiError, savingDashUpdateChannel, settings, t],
+  );
+
   const selectLogoFile = React.useCallback(
     async (event: React.ChangeEvent<HTMLInputElement>) => {
       const file = event.currentTarget.files?.[0];
@@ -198,7 +220,7 @@ const SystemSettings: React.FC = () => {
       </div>
 
       {activeTab === 'settings' && (
-        <div className="max-w-310 space-y-4">
+        <div className="space-y-4">
           <SettingPanel
             title={t('admin_system_brand_title')}
             description={t('admin_system_brand_desc')}
@@ -302,6 +324,16 @@ const SystemSettings: React.FC = () => {
 
           <TrafficSettings />
         </div>
+      )}
+
+      {activeTab === 'dashUpdate' && (
+        <DashUpdateSettings
+          enabled
+          settings={settings}
+          loadingSettings={loadingSettings}
+          savingChannel={savingDashUpdateChannel}
+          onChannelChange={(channel) => void updateDashUpdateChannel(channel)}
+        />
       )}
 
       {activeTab === 'themes' && <ThemeManager enabled confirmAction={confirmAction} />}
