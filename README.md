@@ -146,7 +146,7 @@ bash update_dash_linux.sh reinstall --test
 
 By default the updater installs the latest release. Pass `--test` to install the latest prerelease. If the installed Dash is a prerelease newer than the latest release, the default release update stops with a warning.
 Use `reinstall` to install the selected latest package again even when the Dash version is unchanged, for example after repacking a test release with newer bundled node assets.
-The manual updater script requires `bash`, `git`, `tar`, `systemctl`, and either `curl` or `wget`; it fails when they are missing and does not install system packages. The admin-console background updater also requires `systemd-run`.
+The manual updater script requires `bash`, `git`, `tar`, `find`, `systemctl`, and either `curl` or `wget`; it fails when they are missing and does not install system packages. The admin-console background updater also requires `systemd-run`.
 The Linux updater treats the official GitHub release source as the root of trust. A compromised GitHub account, token, repository, workflow, or release permission is equivalent to a compromised update source.
 
 ## Repository Layout

@@ -119,29 +119,29 @@ as_root() {
 
 tighten_sensitive_file_permissions() {
   if [[ -f "$CONFIG_LOCAL" ]]; then
-    as_root chown root:root "$CONFIG_LOCAL"
-    as_root chmod 0600 "$CONFIG_LOCAL"
+    as_root chown root:root "$CONFIG_LOCAL" || return
+    as_root chmod 0600 "$CONFIG_LOCAL" || return
   fi
   if [[ -f "$SERVICE_FILE" ]]; then
-    as_root chown root:root "$SERVICE_FILE"
-    as_root chmod 0600 "$SERVICE_FILE"
+    as_root chown root:root "$SERVICE_FILE" || return
+    as_root chmod 0600 "$SERVICE_FILE" || return
   fi
 }
 
 backup_install_dir() {
   local backup_dir="$1"
   [[ -d "$INSTALL_DIR" ]] || return 0
-  mkdir -p "$backup_dir"
-  as_root cp -a "${INSTALL_DIR}/." "$backup_dir/"
+  mkdir -p "$backup_dir" || return
+  as_root cp -a "${INSTALL_DIR}/." "$backup_dir/" || return
 }
 
 restore_install_dir() {
   local backup_dir="$1"
   [[ -d "$backup_dir" ]] || return 1
-  as_root rm -rf "$INSTALL_DIR"
-  as_root install -d -m 0755 "$INSTALL_DIR"
-  as_root cp -a "${backup_dir}/." "$INSTALL_DIR/"
-  tighten_sensitive_file_permissions
+  as_root rm -rf "$INSTALL_DIR" || return
+  as_root install -d -m 0755 "$INSTALL_DIR" || return
+  as_root cp -a "${backup_dir}/." "$INSTALL_DIR/" || return
+  tighten_sensitive_file_permissions || return
 }
 
 start_service_if_needed() {
@@ -149,6 +149,77 @@ start_service_if_needed() {
   if [[ "$was_active" == "true" ]]; then
     as_root systemctl start "$SERVICE"
   fi
+}
+
+validate_release_archive() {
+  local archive="$1" listing member
+  listing="$(tar -tzf "$archive")" || die "$(txt "release 包无法读取" "release archive cannot be read")"
+  while IFS= read -r member; do
+    [[ -n "$member" ]] || continue
+    case "$member" in
+      /*|../*|*/../*|..|*/..)
+        die "$(txt "release 包包含不安全路径：$member" "release archive contains unsafe path: $member")"
+        ;;
+    esac
+    case "$member" in
+      Ithiltir-dash|Ithiltir-dash/|Ithiltir-dash/*) ;;
+      *)
+        die "$(txt "release 包包含未知根路径：$member" "release archive contains unexpected root path: $member")"
+        ;;
+    esac
+  done <<<"$listing"
+}
+
+reject_release_symlinks() {
+  local root="$1" first
+  first="$(find "$root" -type l -print -quit)" || die "$(txt "无法检查 release 包符号链接" "failed to inspect release package symlinks")"
+  [[ -z "$first" ]] || die "$(txt "release 包不能包含符号链接：$first" "release package must not contain symlinks: $first")"
+}
+
+preserve_local_path() {
+  local rel="$1" preserve_dir="$2" source target_parent
+  source="${INSTALL_DIR}/${rel}"
+  [[ -e "$source" ]] || return 0
+  target_parent="${preserve_dir}/$(dirname "$rel")"
+  as_root install -d -m 0755 "$target_parent" || return
+  as_root cp -a "$source" "${preserve_dir}/${rel}" || return
+}
+
+preserve_local_state() {
+  local preserve_dir="$1"
+  as_root rm -rf "$preserve_dir" || return
+  as_root install -d -m 0755 "$preserve_dir" || return
+  preserve_local_path "configs/config.local.yaml" "$preserve_dir" || return
+  preserve_local_path "configs/config.yaml" "$preserve_dir" || return
+}
+
+restore_local_state() {
+  local preserve_dir="$1"
+  [[ -d "$preserve_dir" ]] || return 0
+  as_root cp -a "${preserve_dir}/." "$INSTALL_DIR/" || return
+  tighten_sensitive_file_permissions || return
+}
+
+clear_install_for_package() {
+  as_root install -d -m 0755 "$INSTALL_DIR" || return
+  as_root find "$INSTALL_DIR" -mindepth 1 -maxdepth 1 \
+    ! -name runtime \
+    ! -name logs \
+    ! -name themes \
+    ! -name install_id \
+    -exec rm -rf {} + || return
+}
+
+replace_install_files() {
+  local pkg_root="$1" preserve_dir="$2"
+  preserve_local_state "$preserve_dir" || return
+  clear_install_for_package || return
+  as_root cp -a "${pkg_root}/." "$INSTALL_DIR/" || return
+  restore_local_state "$preserve_dir" || return
+  as_root chown -R root:root "$INSTALL_DIR" || return
+  as_root chmod 0755 "$BIN_PATH" || return
+  as_root find "$INSTALL_DIR" -maxdepth 1 -type f -name '*.sh' -exec chmod 0755 {} + || return
+  tighten_sensitive_file_permissions || return
 }
 
 ensure_download_tool() {
@@ -161,6 +232,7 @@ ensure_download_tool() {
 ensure_dependencies() {
   need_cmd git || die "$(txt "更新需要 git" "git is required for updates")"
   need_cmd tar || die "$(txt "更新需要 tar" "tar is required for updates")"
+  need_cmd find || die "$(txt "更新需要 find" "find is required for updates")"
   ensure_download_tool
   need_cmd systemctl || die "$(txt "更新 ${SERVICE} 需要 systemctl" "systemctl is required to update ${SERVICE}")"
 }
@@ -458,18 +530,21 @@ download_release() {
 }
 
 install_release() {
-  local version="$1" archive extract_dir backup_dir pkg_root new_version was_active
+  local version="$1" archive extract_dir backup_dir preserve_dir pkg_root new_version was_active
   INSTALL_TMP_ROOT="$(mktemp -d)"
   KEEP_INSTALL_TMP="false"
   archive="${INSTALL_TMP_ROOT}/dash.tar.gz"
   extract_dir="${INSTALL_TMP_ROOT}/extract"
   backup_dir="${INSTALL_TMP_ROOT}/backup"
+  preserve_dir="${INSTALL_TMP_ROOT}/preserve"
   mkdir -p "$extract_dir"
 
   download_release "$version" "$archive"
-  tar -xzf "$archive" -C "$extract_dir"
+  validate_release_archive "$archive"
+  tar --no-same-owner --no-same-permissions -xzf "$archive" -C "$extract_dir"
 
   pkg_root="${extract_dir}/Ithiltir-dash"
+  reject_release_symlinks "$pkg_root"
   [[ -x "${pkg_root}/bin/dash" ]] || die "$(txt "release 包缺少 bin/dash" "release package is missing bin/dash")"
   new_version="$("${pkg_root}/bin/dash" --version)"
   [[ "$new_version" == "$version" ]] || die "$(txt "release 资源版本不匹配：实际 $new_version，期望 $version" "release asset version mismatch: got $new_version, want $version")"
@@ -482,11 +557,25 @@ install_release() {
   fi
 
   as_root systemctl stop "$SERVICE"
-  backup_install_dir "$backup_dir"
-  as_root install -d -m 0755 "$INSTALL_DIR"
-  as_root cp -a "${pkg_root}/." "$INSTALL_DIR/"
-  as_root chmod 0755 "$BIN_PATH"
-  tighten_sensitive_file_permissions
+  if ! backup_install_dir "$backup_dir"; then
+    if ! start_service_if_needed "$was_active"; then
+      KEEP_INSTALL_TMP="true"
+      die "$(txt "备份安装目录失败，且重启 ${SERVICE} 失败；临时目录保留在 ${INSTALL_TMP_ROOT}" "failed to back up install directory and failed to restart ${SERVICE}; temp directory preserved at ${INSTALL_TMP_ROOT}")"
+    fi
+    die "$(txt "备份安装目录失败；服务已恢复" "failed to back up install directory; service restored")"
+  fi
+  if ! replace_install_files "$pkg_root" "$preserve_dir"; then
+    say_err "安装文件替换失败，正在回滚文件" "failed to replace installed files; rolling back files"
+    if ! restore_install_dir "$backup_dir"; then
+      KEEP_INSTALL_TMP="true"
+      die "$(txt "文件替换失败且回滚失败；备份保留在 ${backup_dir}" "file replacement failed and rollback failed; backup preserved at ${backup_dir}")"
+    fi
+    if ! start_service_if_needed "$was_active"; then
+      KEEP_INSTALL_TMP="true"
+      die "$(txt "文件替换失败；文件已恢复但重启 ${SERVICE} 失败；备份保留在 ${backup_dir}" "file replacement failed; files restored but failed to restart ${SERVICE}; backup preserved at ${backup_dir}")"
+    fi
+    die "$(txt "文件替换失败；文件已恢复" "file replacement failed; files restored")"
+  fi
 
   if ! as_root env DASH_HOME="$INSTALL_DIR" "$BIN_PATH" migrate -config "$CONFIG_LOCAL"; then
     say_err "迁移阶段升级失败，正在回滚文件" "upgrade failed during migration; rolling back files"
