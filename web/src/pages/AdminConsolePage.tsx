@@ -5,7 +5,7 @@ import Users from 'lucide-react/dist/esm/icons/users';
 import LayoutDashboard from 'lucide-react/dist/esm/icons/layout-dashboard';
 import Bell from 'lucide-react/dist/esm/icons/bell';
 import Settings2 from 'lucide-react/dist/esm/icons/settings-2';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import AdminMobileMenu from '@components/admin/AdminMobileMenu';
 import AdminSidebar from '@components/admin/AdminSidebar';
 import type { AdminNavItem } from '@components/admin/adminNav';
@@ -41,9 +41,19 @@ const tabComponents = {
   system: SystemSettings,
 } satisfies Record<AdminConsoleTab, React.ElementType>;
 
+const tabKeys = new Set<AdminConsoleTab>(tabs.map((tab) => tab.key));
+
+const tabFromParams = (params: URLSearchParams): AdminConsoleTab | null => {
+  const raw = params.get('tab') as AdminConsoleTab | null;
+  return raw && tabKeys.has(raw) ? raw : null;
+};
+
 const AdminConsolePage: React.FC = () => {
   const [dashVersion, setDashVersion] = React.useState('');
-  const [activeTab, setActiveTab] = React.useState<AdminConsoleTab>('nodes');
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [activeTab, setActiveTab] = React.useState<AdminConsoleTab>(
+    () => tabFromParams(searchParams) ?? 'nodes',
+  );
   const [mobileMenuOpen, setMobileMenuOpen] = React.useState(false);
   const { t } = useI18n();
   const brand = useSiteBrandStore((state) => state.brand);
@@ -54,6 +64,33 @@ const AdminConsolePage: React.FC = () => {
       setActiveTab(visibleTabs[0]?.key ?? 'nodes');
     }
   }, [activeTab, setActiveTab]);
+
+  React.useEffect(() => {
+    const next = tabFromParams(searchParams);
+    if (!next) return;
+    setActiveTab((current) => (current === next ? current : next));
+  }, [searchParams]);
+
+  const changeTab = React.useCallback(
+    (tab: AdminConsoleTab) => {
+      setActiveTab(tab);
+      setSearchParams((current) => {
+        const next = new URLSearchParams(current);
+        next.set('tab', tab);
+        if (tab !== 'alerts') {
+          next.delete('alerts_tab');
+          next.delete('alert_server_id');
+          next.delete('alert_status');
+          next.delete('alert_metric');
+          next.delete('alert_range');
+          next.delete('alert_from');
+          next.delete('alert_to');
+        }
+        return next;
+      });
+    },
+    [setSearchParams],
+  );
 
   const activeTabMeta = tabs.find((tab) => tab.key === activeTab) ?? visibleTabs[0] ?? tabs[0];
   const ActiveTabComponent = tabComponents[activeTab] ?? NodeManager;
@@ -94,7 +131,7 @@ const AdminConsolePage: React.FC = () => {
         <AdminSidebar
           tabs={tabs}
           activeTab={activeTab}
-          onTabChange={setActiveTab}
+          onTabChange={changeTab}
           versionLabel={versionLabel}
         />
       )}
@@ -103,7 +140,7 @@ const AdminConsolePage: React.FC = () => {
         isOpen={mobileMenuOpen}
         tabs={tabs}
         activeTab={activeTab}
-        onTabChange={setActiveTab}
+        onTabChange={changeTab}
         onClose={() => setMobileMenuOpen(false)}
       />
 
@@ -112,7 +149,7 @@ const AdminConsolePage: React.FC = () => {
           <AdminTopbar
             tabs={tabs}
             activeTab={activeTab}
-            onTabChange={setActiveTab}
+            onTabChange={changeTab}
             versionLabel={versionLabel}
           />
         )}

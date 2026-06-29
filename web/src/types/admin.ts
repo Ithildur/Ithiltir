@@ -84,6 +84,8 @@ export interface NodeRow {
 
 export type AlertRuleOperator = '>' | '>=' | '<' | '<=' | '==' | '!=';
 export type AlertRuleThresholdMode = 'static' | 'core_plus';
+export type AlertEventStatus = 'open' | 'closed';
+export type AlertEventStatusFilter = AlertEventStatus | 'all';
 
 export interface AlertRuleInput {
   name: string;
@@ -215,3 +217,49 @@ export interface WebhookAlertChannel extends AlertChannelBase {
 }
 
 export type AlertChannel = TelegramAlertChannel | EmailAlertChannel | WebhookAlertChannel;
+
+export interface AlertEvent {
+  id: number;
+  rule_id: number;
+  rule_generation: number;
+  server_id: number;
+  server_name: string;
+  server_hostname: string;
+  server_ip?: string | null;
+  status: AlertEventStatus;
+  metric: string;
+  rule_name: string;
+  first_trigger_at: ISODateString;
+  last_trigger_at: ISODateString;
+  closed_at?: ISODateString | null;
+  current_value?: number | null;
+  effective_threshold?: number | null;
+  close_reason?: string | null;
+  title?: string | null;
+  message?: string | null;
+}
+
+export interface AlertEventList {
+  items: AlertEvent[];
+}
+
+export interface AlertEventSummary {
+  server_id: number;
+  open_count: number;
+  last_trigger_at: ISODateString;
+  metric: string;
+  rule_name: string;
+}
+
+export interface AlertEventSummaryList {
+  items: AlertEventSummary[];
+}
+
+export interface AlertEventServer {
+  id: number;
+  name: string;
+}
+
+export interface AlertEventServerList {
+  items: AlertEventServer[];
+}

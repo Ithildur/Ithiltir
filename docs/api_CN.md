@@ -37,6 +37,7 @@ Bearer 可选端点会把缺失、格式错误、过期、已撤销或其他无�
 | `/api/node`                                   | `X-Node-Secret`                                                                        | `POST /identity`、`POST /metrics`、`POST /static`                                                                                                                                       |
 | `/api/admin/groups`                           | Bearer                                                                                 | `GET /`、`GET /map`、`POST /`、`PATCH /{id}`、`DELETE /{id}`                                                                                                                            |
 | `/api/admin/nodes`                            | Bearer                                                                                 | `GET /`、`GET /deploy`、`POST /`、`PUT /display-order`、`PATCH /traffic-p95`、`PATCH /{id}`、`POST /{id}/upgrade`、`GET /traffic/rebuild`、`POST /{id}/traffic/rebuild`、`DELETE /{id}` |
+| `/api/admin/alerts/events`                    | Bearer                                                                                 | `GET /`、`GET /summary`、`GET /servers`                                                                                                                                                |
 | `/api/admin/alerts/rules`                     | Bearer                                                                                 | `GET /`、`POST /`、`PATCH /{id}`、`DELETE /{id}`                                                                                                                                        |
 | `/api/admin/alerts/mounts`                    | Bearer                                                                                 | `GET /`、`PUT /`                                                                                                                                                                        |
 | `/api/admin/alerts/settings`                  | Bearer                                                                                 | `GET /`、`PUT /`                                                                                                                                                                        |
@@ -75,6 +76,13 @@ Bearer 可选端点会把缺失、格式错误、过期、已撤销或其他无�
 - 节点统计方向规范化语义稳定：`default` 继承全局统计方向；`out`、`both`、`max` 覆盖该节点。
 - 非法节点流量字段返回 `400 invalid_traffic_cycle_mode`、`invalid_traffic_cycle_settings`、`invalid_traffic_billing_start_day`、`invalid_traffic_billing_anchor_date`、`invalid_traffic_billing_timezone` 或 `invalid_traffic_direction_mode`。
 - `POST /api/admin/nodes/{id}/upgrade` 成功返回 `204`；节点无法接收自动下发更新时返回 `409 node_upgrade_unsupported`；打包版本、平台或资产不可用时返回 `409`；Dash 无法生成旧 Agent 临时下载授权时返回 `503 node_upgrade_grant_error`。
+
+## 管理告警事件
+
+- `GET /api/admin/alerts/events` 返回活跃节点的告警事件 `{ "items": [...] }`，不包含已删除节点。每项包含 `id`、`rule_id`、`rule_generation`、`server_id`、`server_name`、`server_hostname`、`status`、`metric`、`rule_name`、`first_trigger_at` 和 `last_trigger_at`。`server_ip`、`closed_at`、`current_value`、`effective_threshold`、`close_reason`、`title` 和 `message` 在有值时返回。
+- 查询参数：`server_id` 可按节点筛选；`status` 允许 `open`、`closed`、`all`，省略时为 `open`；`metric` 按告警指标名筛选；`from` 和 `to` 为可选 RFC3339 时间，提供时按 `last_trigger_at` 过滤；`limit` 默认 200，最大 500。
+- `GET /api/admin/alerts/events/summary` 返回每台存在未恢复告警的节点摘要 `{ "items": [...] }`。每项包含 `server_id`、`open_count`、`last_trigger_at`、`metric` 和 `rule_name`，用于节点概览显示当前告警状态。摘要不按时间过滤。
+- `GET /api/admin/alerts/events/servers` 返回可用于筛选的活跃服务器选项 `{ "items": [{ "id": 1, "name": "..." }] }`。
 
 ## 管理系统设置
 

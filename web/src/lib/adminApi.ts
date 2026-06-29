@@ -1,6 +1,10 @@
 import type { Group, NodeDeploy, ManagedNode, UpdateNodeInput } from '@app-types/api';
 import type {
   AlertChannel,
+  AlertEventList,
+  AlertEventServerList,
+  AlertEventStatusFilter,
+  AlertEventSummaryList,
   AlertRule,
   AlertRuleInput,
   AlertMounts,
@@ -157,6 +161,49 @@ export const updateAlertMounts = (input: {
     method: 'PUT',
     json: input,
     responseType: 'empty',
+  });
+
+export interface FetchAlertEventsParams {
+  serverId?: number;
+  status?: AlertEventStatusFilter;
+  metric?: string;
+  from?: string;
+  to?: string;
+  limit?: number;
+  signal?: AbortSignal;
+}
+
+const alertEventSearchParams = (params: FetchAlertEventsParams): URLSearchParams => {
+  const search = new URLSearchParams();
+  if (params.serverId && params.serverId > 0) search.set('server_id', String(params.serverId));
+  if (params.status) search.set('status', params.status);
+  if (params.metric) search.set('metric', params.metric);
+  if (params.from) search.set('from', params.from);
+  if (params.to) search.set('to', params.to);
+  if (params.limit && params.limit > 0) search.set('limit', String(params.limit));
+  return search;
+};
+
+export const fetchAlertEvents = (params: FetchAlertEventsParams = {}) => {
+  const search = alertEventSearchParams(params);
+  const query = search.toString();
+  const suffix = query ? `?${query}` : '';
+  return apiFetch<AlertEventList>(`/admin/alerts/events${suffix}`, {
+    method: 'GET',
+    signal: params.signal,
+  });
+};
+
+export const fetchAlertEventSummary = (params: { signal?: AbortSignal } = {}) =>
+  apiFetch<AlertEventSummaryList>('/admin/alerts/events/summary', {
+    method: 'GET',
+    signal: params.signal,
+  });
+
+export const fetchAlertEventServers = (params: { signal?: AbortSignal } = {}) =>
+  apiFetch<AlertEventServerList>('/admin/alerts/events/servers', {
+    method: 'GET',
+    signal: params.signal,
   });
 
 interface BaseAlertChannelInput {

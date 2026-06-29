@@ -60,6 +60,11 @@ type NodeItem struct {
 	AgentVersion             *string        `json:"version" gorm:"column:agent_version"`
 }
 
+type ServerRef struct {
+	ID   int64
+	Name string
+}
+
 func (s *Store) Nodes(ctx context.Context) ([]NodeItem, error) {
 	var nodes []NodeItem
 	err := s.db.WithContext(ctx).
@@ -70,6 +75,18 @@ func (s *Store) Nodes(ctx context.Context) ([]NodeItem, error) {
 		Find(&nodes).
 		Error
 	return nodes, err
+}
+
+func (s *Store) ServerRefs(ctx context.Context) ([]ServerRef, error) {
+	var refs []ServerRef
+	err := s.db.WithContext(ctx).
+		Model(&model.Server{}).
+		Select("id", "name").
+		Where("is_deleted = ?", false).
+		Order("display_order DESC").
+		Find(&refs).
+		Error
+	return refs, err
 }
 
 func (s *Store) NodeExists(ctx context.Context, id int64) (bool, error) {

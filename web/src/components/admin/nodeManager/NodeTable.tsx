@@ -4,17 +4,21 @@ import Copy from 'lucide-react/dist/esm/icons/copy';
 import GripVertical from 'lucide-react/dist/esm/icons/grip-vertical';
 import Settings from 'lucide-react/dist/esm/icons/settings';
 import Trash2 from 'lucide-react/dist/esm/icons/trash-2';
+import { Link } from 'react-router-dom';
 import Button from '@components/ui/Button';
 import IOSSwitch from '@components/ui/IOSSwitch';
 import Input from '@components/ui/Input';
 import { Tooltip } from '@components/ui/Tooltip';
 import { PlatformLogo } from '@components/system/SystemLogo';
 import type { NodeDeployPlatform } from '@app-types/api';
-import type { NodeRow } from '@app-types/admin';
+import type { AlertEventSummary, NodeRow } from '@app-types/admin';
 import { useI18n } from '@i18n';
+import { alertMetricName } from '@components/admin/alertManager/alertLabels';
+import { nodeAlertEventsPath } from './nodeManagerModel';
 
 export interface Props {
   nodes: NodeRow[];
+  alertSummaryByServer: ReadonlyMap<number, AlertEventSummary>;
   updatableNodeIds: Set<number>;
   manualUpdateNodeIds: Set<number>;
   savingGuestVisibleNodeIds: Set<number>;
@@ -37,6 +41,7 @@ export interface Props {
 
 const NodeTable: React.FC<Props> = ({
   nodes,
+  alertSummaryByServer,
   updatableNodeIds,
   manualUpdateNodeIds,
   savingGuestVisibleNodeIds,
@@ -82,6 +87,24 @@ const NodeTable: React.FC<Props> = ({
     },
     [draftName, editingId, onRename],
   );
+
+  const renderAlertSummary = (node: NodeRow) => {
+    const summary = alertSummaryByServer.get(node.id);
+    if (!summary) return null;
+    return (
+      <Link
+        to={nodeAlertEventsPath(node.id)}
+        className="mt-1 inline-flex max-w-full items-center gap-1.5 rounded-md border border-(--theme-border-danger-muted) bg-(--theme-bg-danger-subtle) px-1.5 py-0.5 text-[11px] font-semibold text-(--theme-fg-danger) transition-colors hover:bg-(--theme-bg-danger-muted) dark:border-(--theme-border-danger-muted) dark:bg-(--theme-bg-danger-soft)"
+      >
+        <span className="shrink-0">
+          {t('admin_nodes_alerts_open_count', {
+            count: String(summary.open_count),
+          })}
+        </span>
+        <span className="min-w-0 truncate font-normal">{alertMetricName(summary.metric, t)}</span>
+      </Link>
+    );
+  };
 
   return (
     <table className="w-full text-sm text-left bg-(--theme-bg-default) dark:bg-(--theme-bg-default)">
@@ -162,6 +185,7 @@ const NodeTable: React.FC<Props> = ({
                     {node.hostname || t('admin_nodes_hostname_unknown')}
                   </span>
                 </div>
+                {renderAlertSummary(node)}
               </div>
             </td>
             <td className="px-3 py-2 text-(--theme-fg-muted) dark:text-(--theme-fg-muted) w-32">

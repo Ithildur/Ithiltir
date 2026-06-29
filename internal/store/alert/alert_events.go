@@ -11,6 +11,52 @@ import (
 	"gorm.io/gorm/clause"
 )
 
+type EventStatus string
+
+const (
+	EventStatusAll    EventStatus = "all"
+	EventStatusOpen   EventStatus = EventStatus(model.AlertStatusOpen)
+	EventStatusClosed EventStatus = EventStatus(model.AlertStatusClosed)
+)
+
+type AlertEventQuery struct {
+	ServerID int64
+	Status   EventStatus
+	Metric   string
+	From     *time.Time
+	To       *time.Time
+	Limit    int
+}
+
+type AlertEventItem struct {
+	ID                 int64
+	RuleID             int64
+	RuleGeneration     int64
+	ServerID           int64
+	ServerName         string
+	ServerHostname     string
+	ServerIP           *string
+	Status             model.AlertStatus
+	FirstTriggerAt     time.Time
+	LastTriggerAt      time.Time
+	ClosedAt           *time.Time
+	CurrentValue       *float64
+	EffectiveThreshold *float64
+	CloseReason        *string
+	Title              *string
+	Message            *string
+	Metric             string
+	RuleName           string
+}
+
+type OpenEventSummary struct {
+	ServerID      int64
+	OpenCount     int64
+	LastTriggerAt time.Time
+	Metric        string
+	RuleName      string
+}
+
 func (s *Store) ListOpenEvents(ctx context.Context) ([]model.AlertEvent, error) {
 	var items []model.AlertEvent
 	err := s.db.WithContext(ctx).
@@ -49,6 +95,96 @@ func (s *Store) ListOpenObjectIDs(ctx context.Context, objectType model.ObjectTy
 		Order("object_id ASC").
 		Pluck("object_id", &ids).Error
 	return ids, err
+}
+
+func (s *Store) ListEvents(ctx context.Context, q AlertEventQuery) ([]AlertEventItem, error) {
+	if q.Status == "" {
+		q.Status = EventStatusOpen
+	}
+
+	db := s.db.WithContext(ctx).
+		Model(&model.AlertEvent{}).
+		Select(`
+			alert_events.id,
+			alert_events.rule_id,
+			alert_events.rule_generation,
+			alert_events.object_id AS server_id,
+			servers.name AS server_name,
+			servers.hostname AS server_hostname,
+			servers.ip AS server_ip,
+			alert_events.status,
+			alert_events.first_trigger_at,
+			alert_events.last_trigger_at,
+			alert_events.closed_at,
+			alert_events.current_value,
+			alert_events.effective_threshold,
+			alert_events.close_reason,
+			alert_events.title,
+			alert_events.message,
+			COALESCE(alert_events.rule_snapshot ->> 'metric', '') AS metric,
+			COALESCE(alert_events.rule_snapshot ->> 'name', '') AS rule_name
+		`).
+		Joins("JOIN servers ON servers.id = alert_events.object_id").
+		Where("alert_events.object_type = ? AND servers.is_deleted = ?", model.ObjectTypeServer, false)
+
+	if q.ServerID > 0 {
+		db = db.Where("alert_events.object_id = ?", q.ServerID)
+	}
+	if q.Status != EventStatusAll {
+		db = db.Where("alert_events.status = ?", model.AlertStatus(q.Status))
+	}
+	if q.Metric != "" {
+		db = db.Where("alert_events.rule_snapshot ->> 'metric' = ?", q.Metric)
+	}
+	if q.From != nil {
+		db = db.Where("alert_events.last_trigger_at >= ?", *q.From)
+	}
+	if q.To != nil {
+		db = db.Where("alert_events.last_trigger_at <= ?", *q.To)
+	}
+
+	var items []AlertEventItem
+	db = db.
+		Order("alert_events.last_trigger_at DESC").
+		Order("alert_events.id DESC")
+	if q.Limit > 0 {
+		db = db.Limit(q.Limit)
+	}
+	err := db.Scan(&items).Error
+	return items, err
+}
+
+func (s *Store) ListOpenEventSummaries(ctx context.Context) ([]OpenEventSummary, error) {
+	ranked := s.db.WithContext(ctx).
+		Model(&model.AlertEvent{}).
+		Select(`
+			alert_events.object_id AS server_id,
+			COUNT(*) OVER (PARTITION BY alert_events.object_id) AS open_count,
+			alert_events.last_trigger_at,
+			COALESCE(alert_events.rule_snapshot ->> 'metric', '') AS metric,
+			COALESCE(alert_events.rule_snapshot ->> 'name', '') AS rule_name,
+			ROW_NUMBER() OVER (
+				PARTITION BY alert_events.object_id
+				ORDER BY alert_events.last_trigger_at DESC, alert_events.id DESC
+			) AS row_rank
+		`).
+		Joins("JOIN servers ON servers.id = alert_events.object_id").
+		Where(
+			"alert_events.object_type = ? AND alert_events.status = ? AND servers.is_deleted = ?",
+			model.ObjectTypeServer,
+			model.AlertStatusOpen,
+			false,
+		)
+
+	var items []OpenEventSummary
+	err := s.db.WithContext(ctx).
+		Table("(?) AS ranked", ranked).
+		Select("server_id, open_count, last_trigger_at, metric, rule_name").
+		Where("row_rank = 1").
+		Order("last_trigger_at DESC").
+		Order("server_id ASC").
+		Scan(&items).Error
+	return items, err
 }
 
 func (s *Store) TouchOpenEvent(ctx context.Context, eventID int64, triggeredAt time.Time, currentValue, effectiveThreshold float64) (bool, error) {

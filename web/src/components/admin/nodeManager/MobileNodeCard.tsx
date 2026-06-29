@@ -3,17 +3,22 @@ import ArrowUpFromLine from 'lucide-react/dist/esm/icons/arrow-up-from-line';
 import Copy from 'lucide-react/dist/esm/icons/copy';
 import Globe from 'lucide-react/dist/esm/icons/globe';
 import Settings from 'lucide-react/dist/esm/icons/settings';
+import { Link } from 'react-router-dom';
 import Button from '@components/ui/Button';
 import Card from '@components/ui/Card';
 import IOSSwitch from '@components/ui/IOSSwitch';
 import { Tooltip } from '@components/ui/Tooltip';
 import { PlatformLogo } from '@components/system/SystemLogo';
 import type { NodeDeployPlatform } from '@app-types/api';
-import type { NodeRow } from '@app-types/admin';
+import type { AlertEventSummary, NodeRow } from '@app-types/admin';
 import { useI18n } from '@i18n';
+import { alertMetricName } from '@components/admin/alertManager/alertLabels';
+import { nodeAlertEventsPath } from './nodeManagerModel';
 
 export interface Props {
   node: NodeRow;
+  alertSummary: AlertEventSummary | null;
+  alertSummaryLoaded: boolean;
   bundledNodeVersion: string;
   canRequestUpgrade: boolean;
   needsManualUpdate: boolean;
@@ -31,6 +36,8 @@ const deployButtonClass =
 
 const MobileNodeCard: React.FC<Props> = ({
   node,
+  alertSummary,
+  alertSummaryLoaded,
   bundledNodeVersion,
   canRequestUpgrade,
   needsManualUpdate,
@@ -118,6 +125,30 @@ const MobileNodeCard: React.FC<Props> = ({
             <span className="min-w-0 truncate font-mono" title={hostname}>
               {hostname}
             </span>
+          </div>
+          <div className="grid grid-cols-[4.5rem_minmax(0,1fr)] items-center gap-2">
+            <span className="uppercase text-(--theme-fg-subtle)">
+              {t('admin_nodes_alerts_label')}
+            </span>
+            {alertSummary ? (
+              <Link
+                to={nodeAlertEventsPath(node.id)}
+                className="inline-flex min-w-0 items-center gap-1.5 rounded-md border border-(--theme-border-danger-muted) bg-(--theme-bg-danger-subtle) px-2 py-1 text-xs font-semibold text-(--theme-fg-danger)"
+              >
+                <span className="shrink-0">
+                  {t('admin_nodes_alerts_open_count', {
+                    count: String(alertSummary.open_count),
+                  })}
+                </span>
+                <span className="truncate font-normal">
+                  {alertMetricName(alertSummary.metric, t)}
+                </span>
+              </Link>
+            ) : (
+              <span className="text-(--theme-fg-muted)">
+                {alertSummaryLoaded ? t('admin_nodes_alerts_normal') : t('common_unknown')}
+              </span>
+            )}
           </div>
           <div className="grid grid-cols-[4.5rem_minmax(0,1fr)] items-center gap-2">
             <span className="uppercase text-(--theme-fg-subtle)">

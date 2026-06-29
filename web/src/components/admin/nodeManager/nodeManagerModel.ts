@@ -20,6 +20,17 @@ export const nodeNeedsManualUpdate = (node: NodeRow, bundledNodeVersion: string)
   !node.version.supports_auto_update &&
   nodeHasBundledUpdate(node, bundledNodeVersion);
 
+export const nodeAlertEventsPath = (nodeID: number): string => {
+  const params = new URLSearchParams({
+    tab: 'alerts',
+    alerts_tab: 'events',
+    alert_server_id: String(nodeID),
+    alert_status: 'open',
+    alert_range: 'all',
+  });
+  return `/admin?${params.toString()}`;
+};
+
 const nodeNeedsUpdate = (node: NodeRow, bundledNodeVersion: string): boolean =>
   node.version.is_outdated ||
   nodeCanRequestUpgrade(node, bundledNodeVersion) ||

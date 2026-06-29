@@ -31,6 +31,7 @@ import { useNodeOrder } from '@components/admin/nodeManager/useNodeOrder';
 import { useTrafficRebuildBanner } from '@hooks/useTrafficRebuildBanner';
 import { useTrafficRebuild } from '@hooks/useTrafficRebuild';
 import { useIdSelection } from '@hooks/useIdSelection';
+import { useOpenAlertSummary } from '@hooks/useOpenAlertSummary';
 
 const tabs = [
   { key: 'basic', labelKey: 'admin_nodes_tab_basic', icon: Settings2 },
@@ -80,6 +81,8 @@ const NodeManager: React.FC = () => {
     busy: trafficRebuildBusy,
     start: startTrafficRebuild,
   } = useTrafficRebuild();
+  const { summaryByServer: alertSummaryByServer, loaded: alertSummaryLoaded } =
+    useOpenAlertSummary(activeTab === 'basic');
   const showTrafficRebuildOutcome = useTrafficRebuildBanner();
 
   const savingGuestVisibleNodeIdSet = React.useMemo(
@@ -258,6 +261,7 @@ const NodeManager: React.FC = () => {
         <Card className="hidden md:block overflow-hidden">
           <NodeTable
             nodes={filteredNodes}
+            alertSummaryByServer={alertSummaryByServer}
             updatableNodeIds={updatableNodeIds}
             manualUpdateNodeIds={manualUpdateNodeIds}
             savingGuestVisibleNodeIds={savingGuestVisibleNodeIdSet}
@@ -335,6 +339,8 @@ const NodeManager: React.FC = () => {
             <MobileNodeCard
               key={node.id}
               node={node}
+              alertSummary={alertSummaryByServer.get(node.id) ?? null}
+              alertSummaryLoaded={alertSummaryLoaded}
               bundledNodeVersion={bundledNodeVersion}
               canRequestUpgrade={updatableNodeIds.has(node.id)}
               needsManualUpdate={manualUpdateNodeIds.has(node.id)}
