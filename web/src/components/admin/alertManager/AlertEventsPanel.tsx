@@ -3,6 +3,7 @@ import RotateCcw from 'lucide-react/dist/esm/icons/rotate-ccw';
 import Search from 'lucide-react/dist/esm/icons/search';
 import Button from '@components/ui/Button';
 import Card from '@components/ui/Card';
+import ComboboxSelect, { type ComboboxOption } from '@components/ui/ComboboxSelect';
 import Input from '@components/ui/Input';
 import Select from '@components/ui/Select';
 import type { AlertEvent, AlertEventServer, AlertEventStatusFilter } from '@app-types/admin';
@@ -115,7 +116,34 @@ export const AlertEventsPanel: React.FC<Props> = ({
 
   const customRangeLabel = alertEventCustomRangeLabel(applied, lang);
   const canSearch = alertEventFilterReady(draft);
-  const hasSelectedServer = servers.some((server) => server.id === draft.serverId);
+  const serverOptions = React.useMemo<ComboboxOption[]>(() => {
+    const options: ComboboxOption[] = [
+      { value: '0', label: t('admin_alerts_events_all_servers') },
+    ];
+    if (draft.serverId > 0 && !servers.some((server) => server.id === draft.serverId)) {
+      options.push({ value: String(draft.serverId), label: `#${draft.serverId}` });
+    }
+    for (const server of servers) {
+      const id = String(server.id);
+      options.push({
+        value: id,
+        label: server.name || `#${id}`,
+        keywords: [id, `#${id}`],
+      });
+    }
+    return options;
+  }, [draft.serverId, servers, t]);
+  const metricOptions = React.useMemo<ComboboxOption[]>(
+    () => [
+      { value: '', label: t('admin_alerts_events_all_metrics') },
+      ...alertMetricValues.map((metric) => ({
+        value: metric,
+        label: alertMetricName(metric, t),
+        keywords: [metric],
+      })),
+    ],
+    [t],
+  );
 
   return (
     <div className="space-y-4 md:space-y-6">
@@ -124,25 +152,18 @@ export const AlertEventsPanel: React.FC<Props> = ({
           <div className="grid gap-2 md:grid-cols-[minmax(12rem,1.1fr)_9rem_minmax(11rem,1fr)_9rem_auto_auto] md:items-end">
             <label className="grid gap-1 text-xs font-semibold text-(--theme-fg-muted)">
               {t('admin_alerts_events_filter_server')}
-              <Select
-                value={draft.serverId}
-                onChange={(event) =>
+              <ComboboxSelect
+                value={String(draft.serverId)}
+                options={serverOptions}
+                ariaLabel={t('admin_alerts_events_filter_server')}
+                emptyLabel={t('admin_alerts_events_server_filter_empty')}
+                onChange={(value) =>
                   setDraft((current) => ({
                     ...current,
-                    serverId: Number.parseInt(event.target.value, 10) || 0,
+                    serverId: Number.parseInt(value, 10) || 0,
                   }))
                 }
-              >
-                <option value={0}>{t('admin_alerts_events_all_servers')}</option>
-                {draft.serverId > 0 && !hasSelectedServer && (
-                  <option value={draft.serverId}>{`#${draft.serverId}`}</option>
-                )}
-                {servers.map((server) => (
-                  <option key={server.id} value={server.id}>
-                    {server.name}
-                  </option>
-                ))}
-              </Select>
+              />
             </label>
             <label className="grid gap-1 text-xs font-semibold text-(--theme-fg-muted)">
               {t('admin_alerts_events_filter_status')}
@@ -162,19 +183,13 @@ export const AlertEventsPanel: React.FC<Props> = ({
             </label>
             <label className="grid gap-1 text-xs font-semibold text-(--theme-fg-muted)">
               {t('admin_alerts_events_filter_metric')}
-              <Select
+              <ComboboxSelect
                 value={draft.metric}
-                onChange={(event) =>
-                  setDraft((current) => ({ ...current, metric: event.target.value }))
-                }
-              >
-                <option value="">{t('admin_alerts_events_all_metrics')}</option>
-                {alertMetricValues.map((metric) => (
-                  <option key={metric} value={metric}>
-                    {alertMetricName(metric, t)}
-                  </option>
-                ))}
-              </Select>
+                options={metricOptions}
+                ariaLabel={t('admin_alerts_events_filter_metric')}
+                emptyLabel={t('admin_alerts_events_metric_filter_empty')}
+                onChange={(value) => setDraft((current) => ({ ...current, metric: value }))}
+              />
             </label>
             <label className="grid gap-1 text-xs font-semibold text-(--theme-fg-muted)">
               {t('admin_alerts_events_filter_range')}

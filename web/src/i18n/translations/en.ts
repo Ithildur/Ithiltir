@@ -313,6 +313,8 @@ export const en = {
   admin_alerts_events_empty: 'No matching alert records.',
   admin_alerts_events_fetch_failed: 'Failed to fetch alert records.',
   admin_alerts_events_servers_fetch_failed: 'Failed to fetch alert event servers.',
+  admin_alerts_events_server_filter_empty: 'No matching servers',
+  admin_alerts_events_metric_filter_empty: 'No matching metrics',
   admin_alerts_summary_fetch_failed: 'Failed to fetch current alert summaries.',
   admin_alerts_events_custom_range_label: 'Custom range: {{range}}',
   admin_alerts_events_col_server: 'Server',

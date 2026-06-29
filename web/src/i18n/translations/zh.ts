@@ -305,6 +305,8 @@ export const zh = {
   admin_alerts_events_empty: '没有匹配的告警记录。',
   admin_alerts_events_fetch_failed: '获取告警记录失败。',
   admin_alerts_events_servers_fetch_failed: '获取告警记录服务器选项失败。',
+  admin_alerts_events_server_filter_empty: '没有匹配的服务器',
+  admin_alerts_events_metric_filter_empty: '没有匹配的监控指标',
   admin_alerts_summary_fetch_failed: '获取当前告警摘要失败。',
   admin_alerts_events_custom_range_label: '自定义时间段：{{range}}',
   admin_alerts_events_col_server: '服务器',
