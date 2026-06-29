@@ -5,7 +5,6 @@ import Button from '@components/ui/Button';
 import Card from '@components/ui/Card';
 import ComboboxSelect, { type ComboboxOption } from '@components/ui/ComboboxSelect';
 import Input from '@components/ui/Input';
-import Select from '@components/ui/Select';
 import type { AlertEvent, AlertEventServer, AlertEventStatusFilter } from '@app-types/admin';
 import { fetchAlertEvents, fetchAlertEventServers } from '@lib/adminApi';
 import { useApiErrorHandler } from '@hooks/useApiErrorHandler';
@@ -144,6 +143,24 @@ export const AlertEventsPanel: React.FC<Props> = ({
     ],
     [t],
   );
+  const statusOptions = React.useMemo<ComboboxOption[]>(
+    () => [
+      { value: 'open', label: t('admin_alerts_events_status_open') },
+      { value: 'closed', label: t('admin_alerts_events_status_closed') },
+      { value: 'all', label: t('admin_alerts_events_status_all') },
+    ],
+    [t],
+  );
+  const rangeOptions = React.useMemo<ComboboxOption[]>(
+    () => [
+      { value: '24h', label: t('admin_alerts_events_range_24h') },
+      { value: '7d', label: t('admin_alerts_events_range_7d') },
+      { value: '30d', label: t('admin_alerts_events_range_30d') },
+      { value: 'all', label: t('admin_alerts_events_range_all') },
+      { value: 'custom', label: t('admin_alerts_events_range_custom') },
+    ],
+    [t],
+  );
 
   return (
     <div className="space-y-4 md:space-y-6">
@@ -156,6 +173,7 @@ export const AlertEventsPanel: React.FC<Props> = ({
                 value={String(draft.serverId)}
                 options={serverOptions}
                 ariaLabel={t('admin_alerts_events_filter_server')}
+                clearLabel={t('common_clear')}
                 emptyLabel={t('admin_alerts_events_server_filter_empty')}
                 onChange={(value) =>
                   setDraft((current) => ({
@@ -167,19 +185,20 @@ export const AlertEventsPanel: React.FC<Props> = ({
             </label>
             <label className="grid gap-1 text-xs font-semibold text-(--theme-fg-muted)">
               {t('admin_alerts_events_filter_status')}
-              <Select
+              <ComboboxSelect
                 value={draft.status}
-                onChange={(event) =>
+                options={statusOptions}
+                ariaLabel={t('admin_alerts_events_filter_status')}
+                clearLabel={t('common_clear')}
+                emptyLabel={t('common_unknown')}
+                searchable={false}
+                onChange={(value) =>
                   setDraft((current) => ({
                     ...current,
-                    status: event.target.value as AlertEventStatusFilter,
+                    status: value as AlertEventStatusFilter,
                   }))
                 }
-              >
-                <option value="open">{t('admin_alerts_events_status_open')}</option>
-                <option value="closed">{t('admin_alerts_events_status_closed')}</option>
-                <option value="all">{t('admin_alerts_events_status_all')}</option>
-              </Select>
+              />
             </label>
             <label className="grid gap-1 text-xs font-semibold text-(--theme-fg-muted)">
               {t('admin_alerts_events_filter_metric')}
@@ -187,27 +206,27 @@ export const AlertEventsPanel: React.FC<Props> = ({
                 value={draft.metric}
                 options={metricOptions}
                 ariaLabel={t('admin_alerts_events_filter_metric')}
+                clearLabel={t('common_clear')}
                 emptyLabel={t('admin_alerts_events_metric_filter_empty')}
                 onChange={(value) => setDraft((current) => ({ ...current, metric: value }))}
               />
             </label>
             <label className="grid gap-1 text-xs font-semibold text-(--theme-fg-muted)">
               {t('admin_alerts_events_filter_range')}
-              <Select
+              <ComboboxSelect
                 value={draft.range}
-                onChange={(event) =>
+                options={rangeOptions}
+                ariaLabel={t('admin_alerts_events_filter_range')}
+                clearLabel={t('common_clear')}
+                emptyLabel={t('common_unknown')}
+                searchable={false}
+                onChange={(value) =>
                   setDraft((current) => ({
                     ...current,
-                    range: event.target.value as AlertEventRange,
+                    range: value as AlertEventRange,
                   }))
                 }
-              >
-                <option value="24h">{t('admin_alerts_events_range_24h')}</option>
-                <option value="7d">{t('admin_alerts_events_range_7d')}</option>
-                <option value="30d">{t('admin_alerts_events_range_30d')}</option>
-                <option value="all">{t('admin_alerts_events_range_all')}</option>
-                <option value="custom">{t('admin_alerts_events_range_custom')}</option>
-              </Select>
+              />
             </label>
             <Button
               icon={Search}
