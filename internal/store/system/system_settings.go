@@ -65,26 +65,12 @@ func NormalizeSiteBrand(brand SiteBrand) SiteBrand {
 	return out
 }
 
-func NormalizeDashUpdateChannel(channel DashUpdateChannel) (DashUpdateChannel, bool) {
-	if strings.TrimSpace(string(channel)) == "" {
-		return DashUpdateChannelRelease, true
-	}
-	return ParseDashUpdateChannel(channel)
-}
-
 func ParseDashUpdateChannel(channel DashUpdateChannel) (DashUpdateChannel, bool) {
 	normalized, err := appversion.ParseChannel(string(channel))
 	if err != nil {
 		return DashUpdateChannelRelease, false
 	}
 	return normalized, true
-}
-
-func NormalizeDashUpdateMode(mode DashUpdateMode) (DashUpdateMode, bool) {
-	if strings.TrimSpace(string(mode)) == "" {
-		return DashUpdateModeManual, true
-	}
-	return ParseDashUpdateMode(mode)
 }
 
 func ParseDashUpdateMode(mode DashUpdateMode) (DashUpdateMode, bool) {
@@ -159,9 +145,9 @@ func (s *Store) GetDashUpdateChannel(ctx context.Context) (DashUpdateChannel, er
 	if err != nil {
 		return DashUpdateChannelRelease, err
 	}
-	channel, ok := NormalizeDashUpdateChannel(DashUpdateChannel(item.DashUpdateChannel))
+	channel, ok := ParseDashUpdateChannel(DashUpdateChannel(item.DashUpdateChannel))
 	if !ok {
-		return DashUpdateChannelRelease, nil
+		return DashUpdateChannelRelease, fmt.Errorf("invalid dash update channel %q", item.DashUpdateChannel)
 	}
 	return channel, nil
 }
@@ -181,9 +167,9 @@ func (s *Store) GetDashUpdateMode(ctx context.Context) (DashUpdateMode, error) {
 	if err != nil {
 		return DashUpdateModeManual, err
 	}
-	mode, ok := NormalizeDashUpdateMode(DashUpdateMode(item.DashUpdateMode))
+	mode, ok := ParseDashUpdateMode(DashUpdateMode(item.DashUpdateMode))
 	if !ok {
-		return DashUpdateModeManual, nil
+		return DashUpdateModeManual, fmt.Errorf("invalid dash update mode %q", item.DashUpdateMode)
 	}
 	return mode, nil
 }

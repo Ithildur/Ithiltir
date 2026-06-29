@@ -36,42 +36,33 @@ func (h *handler) replaceHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var channel *systemstore.DashUpdateChannel
-	if in.DashUpdateChannel != nil {
-		normalized, ok := systemstore.ParseDashUpdateChannel(*in.DashUpdateChannel)
-		if !ok {
-			httperr.Write(w, http.StatusBadRequest, "invalid_fields", "invalid dash_update_channel")
-			return
-		}
-		channel = &normalized
+	if in.DashUpdateChannel == nil {
+		httperr.Write(w, http.StatusBadRequest, "invalid_fields", "dash_update_channel is required")
+		return
+	}
+	channel, ok := systemstore.ParseDashUpdateChannel(*in.DashUpdateChannel)
+	if !ok {
+		httperr.Write(w, http.StatusBadRequest, "invalid_fields", "invalid dash_update_channel")
+		return
 	}
 
-	var updateMode *systemstore.DashUpdateMode
-	if in.DashUpdateMode != nil {
-		normalized, ok := systemstore.ParseDashUpdateMode(*in.DashUpdateMode)
-		if !ok {
-			httperr.Write(w, http.StatusBadRequest, "invalid_fields", "invalid dash_update_mode")
-			return
-		}
-		updateMode = &normalized
+	if in.DashUpdateMode == nil {
+		httperr.Write(w, http.StatusBadRequest, "invalid_fields", "dash_update_mode is required")
+		return
+	}
+	updateMode, ok := systemstore.ParseDashUpdateMode(*in.DashUpdateMode)
+	if !ok {
+		httperr.Write(w, http.StatusBadRequest, "invalid_fields", "invalid dash_update_mode")
+		return
 	}
 
-	var brand *systemstore.SiteBrand
-	if in.hasSiteBrandFields() {
-		current, err := loadSiteBrand(r.Context(), h.system)
-		if err != nil {
-			httperr.Write(w, http.StatusServiceUnavailable, "db_error", "failed to fetch settings")
-			return
-		}
-		next, err := in.applySiteBrand(current)
-		if err != nil {
-			httperr.Write(w, http.StatusBadRequest, "invalid_fields", "invalid site brand fields")
-			return
-		}
-		brand = &next
+	brand, err := in.siteBrand()
+	if err != nil {
+		httperr.Write(w, http.StatusBadRequest, "invalid_fields", "invalid site brand fields")
+		return
 	}
 
-	if err := saveSettings(r.Context(), h.metric, h.system, &mode, channel, updateMode, brand); err != nil {
+	if err := saveSettings(r.Context(), h.metric, h.system, &mode, &channel, &updateMode, &brand); err != nil {
 		httperr.Write(w, http.StatusServiceUnavailable, "db_error", "failed to update settings")
 		return
 	}

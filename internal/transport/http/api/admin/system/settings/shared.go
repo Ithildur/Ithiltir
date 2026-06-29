@@ -99,18 +99,10 @@ func settingsViewFrom(
 	brand systemstore.SiteBrand,
 ) settingsView {
 	normalized := systemstore.NormalizeSiteBrand(brand)
-	normalizedChannel, ok := systemstore.NormalizeDashUpdateChannel(channel)
-	if !ok {
-		normalizedChannel = systemstore.DashUpdateChannelRelease
-	}
-	normalizedUpdateMode, ok := systemstore.NormalizeDashUpdateMode(updateMode)
-	if !ok {
-		normalizedUpdateMode = systemstore.DashUpdateModeManual
-	}
 	return settingsView{
 		HistoryGuestAccessMode: mode,
-		DashUpdateChannel:      normalizedChannel,
-		DashUpdateMode:         normalizedUpdateMode,
+		DashUpdateChannel:      channel,
+		DashUpdateMode:         updateMode,
 		LogoURL:                normalized.LogoURL,
 		PageTitle:              normalized.PageTitle,
 		TopbarText:             normalized.TopbarText,
@@ -133,6 +125,17 @@ func (in settingsInput) applySiteBrand(current systemstore.SiteBrand) (systemsto
 		next.TopbarText = *in.TopbarText
 	}
 	return validateSiteBrand(next)
+}
+
+func (in settingsInput) siteBrand() (systemstore.SiteBrand, error) {
+	if in.LogoURL == nil || in.PageTitle == nil || in.TopbarText == nil {
+		return systemstore.SiteBrand{}, errInvalidSiteBrand
+	}
+	return validateSiteBrand(systemstore.SiteBrand{
+		LogoURL:    *in.LogoURL,
+		PageTitle:  *in.PageTitle,
+		TopbarText: *in.TopbarText,
+	})
 }
 
 const (

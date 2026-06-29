@@ -80,7 +80,7 @@ Optional bearer endpoints treat a missing, malformed, expired, revoked, or other
 
 - `GET /api/admin/system/settings` returns `history_guest_access_mode`, `dash_update_channel`, `dash_update_mode`, `logo_url`, `page_title`, and `topbar_text`. `dash_update_channel` is `release` or `prerelease`; `dash_update_mode` is `manual`, `notify`, or `auto`.
 - `PATCH /api/admin/system/settings` accepts partial updates for those fields. An empty update returns `400 no_fields`; invalid values return `400 invalid_fields`.
-- `PUT /api/admin/system/settings` requires `history_guest_access_mode` and accepts the same optional fields as `PATCH`. Omitted optional fields remain unchanged for compatibility.
+- `PUT /api/admin/system/settings` replaces the full settings document and requires `history_guest_access_mode`, `dash_update_channel`, `dash_update_mode`, `logo_url`, `page_title`, and `topbar_text`.
 
 ## Admin Dash Update
 

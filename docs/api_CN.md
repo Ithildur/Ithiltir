@@ -80,7 +80,7 @@ Bearer 可选端点会把缺失、格式错误、过期、已撤销或其他无�
 
 - `GET /api/admin/system/settings` 返回 `history_guest_access_mode`、`dash_update_channel`、`dash_update_mode`、`logo_url`、`page_title` 和 `topbar_text`。`dash_update_channel` 为 `release` 或 `prerelease`；`dash_update_mode` 为 `manual`、`notify` 或 `auto`。
 - `PATCH /api/admin/system/settings` 接受这些字段的局部更新。空更新返回 `400 no_fields`；非法值返回 `400 invalid_fields`。
-- `PUT /api/admin/system/settings` 必须提交 `history_guest_access_mode`，并接受与 `PATCH` 相同的可选字段。未提交的可选字段为兼容性保持不变。
+- `PUT /api/admin/system/settings` 全量替换设置文档，必须提交 `history_guest_access_mode`、`dash_update_channel`、`dash_update_mode`、`logo_url`、`page_title` 和 `topbar_text`。
 
 ## 管理 Dash 更新
 
