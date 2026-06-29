@@ -12,7 +12,6 @@ import { AuthRuntime } from '@runtime/AuthRuntime';
 import { SiteBrandRuntime } from '@runtime/SiteBrandRuntime';
 import { ThemeRuntime } from '@runtime/ThemeRuntime';
 import { TopBannerHost } from '@runtime/TopBannerHost';
-import { TrafficRebuildRuntime } from '@runtime/TrafficRebuildRuntime';
 import { SearchShortcutRuntime } from '@runtime/SearchShortcutRuntime';
 import { installBrowserRuntime } from '@runtime/bootstrap';
 
@@ -31,7 +30,6 @@ const renderApp = () => {
       <TopBannerHost />
       <SiteBrandRuntime />
       <AuthRuntime />
-      <TrafficRebuildRuntime />
       <ThemeRuntime />
       <SearchShortcutRuntime />
       <App />

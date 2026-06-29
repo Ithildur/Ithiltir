@@ -6,6 +6,7 @@ import FullScreenLoader from '@components/ui/FullScreenLoader';
 import { useI18n, type TranslationKey } from '@i18n';
 import { useAuthStore } from '@stores/authStore';
 import { refreshStatisticsAccess, useStatisticsAccessStore } from '@stores/statisticsAccessStore';
+import { TrafficRebuildRuntime } from '@runtime/TrafficRebuildRuntime';
 import { isCanceledRequestError } from '@utils/errors';
 
 const AdminConsolePage = React.lazy(() => import('@pages/AdminConsolePage'));
@@ -114,6 +115,7 @@ const RequireStatisticsAccess: React.FC<{
 
 const App: React.FC = () => (
   <BrowserRouter>
+    <TrafficRebuildRuntime />
     <Routes>
       <Route path="/login" element={<LoginPage />} />
       <Route path="/" element={<DashboardPage />} />

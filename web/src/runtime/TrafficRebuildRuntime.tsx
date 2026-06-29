@@ -1,4 +1,5 @@
 import React from 'react';
+import { useLocation } from 'react-router-dom';
 import { pushTopBanner } from '@runtime/topBannerRuntime';
 import { useAuthStore } from '@stores/authStore';
 import { useI18n } from '@i18n';
@@ -13,12 +14,16 @@ import {
 import { isCanceledRequestError } from '@utils/errors';
 
 const activePollMs = 3000;
-const idlePollMs = 15000;
 
 export const TrafficRebuildRuntime: React.FC = () => {
+  const location = useLocation();
   const token = useAuthStore((state) => state.accessToken);
   const { t } = useI18n();
   const event = useTrafficRebuildStore((state) => state.event);
+  const active = useTrafficRebuildStore(
+    (state) => state.status.running || state.local.phase !== 'idle',
+  );
+  const syncKey = `${location.pathname}${location.search}`;
 
   React.useEffect(() => {
     if (!event) return;
@@ -41,38 +46,53 @@ export const TrafficRebuildRuntime: React.FC = () => {
     }
 
     const controller = new AbortController();
-    let timer: number | undefined;
 
-    const poll = async () => {
-      let delay = idlePollMs;
-      const wasBusy = isTrafficRebuildBusy();
+    const sync = async () => {
       try {
-        const next = await syncTrafficRebuildStatus(controller.signal);
-        if (controller.signal.aborted) return;
-        delay = next.running || isTrafficRebuildBusy() ? activePollMs : idlePollMs;
+        await syncTrafficRebuildStatus(controller.signal);
       } catch (error) {
         if (isCanceledRequestError(error)) return;
-        if (wasBusy || isTrafficRebuildBusy()) {
+        if (isTrafficRebuildBusy()) {
           reportTrafficRebuildSyncError();
-          delay = activePollMs;
-        } else {
-          delay = idlePollMs;
-        }
-      } finally {
-        if (!controller.signal.aborted) {
-          timer = window.setTimeout(() => void poll(), delay);
         }
       }
     };
 
-    void poll();
+    void sync();
+    return () => {
+      controller.abort();
+    };
+  }, [syncKey, token]);
+
+  React.useEffect(() => {
+    if (!token || !active) return;
+
+    const controller = new AbortController();
+    let timer: number | undefined;
+
+    const poll = async () => {
+      try {
+        await syncTrafficRebuildStatus(controller.signal);
+      } catch (error) {
+        if (isCanceledRequestError(error)) return;
+        if (isTrafficRebuildBusy()) {
+          reportTrafficRebuildSyncError();
+        }
+      } finally {
+        if (!controller.signal.aborted && isTrafficRebuildBusy()) {
+          timer = window.setTimeout(() => void poll(), activePollMs);
+        }
+      }
+    };
+
+    timer = window.setTimeout(() => void poll(), activePollMs);
     return () => {
       controller.abort();
       if (timer !== undefined) {
         window.clearTimeout(timer);
       }
     };
-  }, [token]);
+  }, [active, token]);
 
   return null;
 };
