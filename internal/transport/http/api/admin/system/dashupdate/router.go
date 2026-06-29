@@ -24,7 +24,7 @@ func Router(runner *updater.Runner) *routes.Blueprint {
 		runner = updater.NewRunner()
 	}
 	h := &handler{
-		client: &http.Client{Timeout: releaseNotesTimeout},
+		client: releaseNotesClient(),
 		runner: runner,
 	}
 
@@ -36,4 +36,21 @@ func Router(runner *updater.Runner) *routes.Blueprint {
 	runRoute(r, h)
 	releaseNotesRoute(r, h)
 	return r
+}
+
+func releaseNotesClient() *http.Client {
+	return &http.Client{
+		Timeout:       releaseNotesTimeout,
+		CheckRedirect: releaseNotesRedirect,
+	}
+}
+
+func releaseNotesRedirect(req *http.Request, via []*http.Request) error {
+	if len(via) >= 5 {
+		return http.ErrUseLastResponse
+	}
+	if req.URL.Scheme != "https" || req.URL.Hostname() != "www.ithiltir.dev" {
+		return http.ErrUseLastResponse
+	}
+	return nil
 }

@@ -26,18 +26,7 @@ func DefaultAppDirOptions() appdir.Options {
 }
 
 func HomeDir() (string, error) {
-	home := strings.TrimSpace(os.Getenv(envDashHome))
-	if home == "" {
-		discovered, err := appdir.DiscoverHome(DefaultAppDirOptions())
-		if err != nil {
-			return "", fmt.Errorf("resolve app home: %w", err)
-		}
-		home = strings.TrimSpace(discovered)
-	}
-	if home == "" {
-		return "", fmt.Errorf("resolve app home: empty")
-	}
-	return home, nil
+	return discoverHome("app home")
 }
 
 func ThemeRootDir() (string, error) {
@@ -55,16 +44,21 @@ func ThemeRootDir() (string, error) {
 }
 
 func InstallIDPath() (string, error) {
-	home := strings.TrimSpace(os.Getenv(envDashHome))
-	if home == "" {
-		discovered, err := appdir.DiscoverHome(DefaultAppDirOptions())
-		if err != nil {
-			return "", fmt.Errorf("resolve install id home: %w", err)
-		}
-		home = strings.TrimSpace(discovered)
-	}
-	if home == "" {
-		return "", fmt.Errorf("resolve install id home: empty")
+	home, err := discoverHome("install id home")
+	if err != nil {
+		return "", err
 	}
 	return filepath.Join(home, "install_id"), nil
+}
+
+func discoverHome(name string) (string, error) {
+	home, err := appdir.DiscoverHome(DefaultAppDirOptions())
+	if err != nil {
+		return "", fmt.Errorf("resolve %s: %w", name, err)
+	}
+	home = strings.TrimSpace(home)
+	if home == "" {
+		return "", fmt.Errorf("resolve %s: empty", name)
+	}
+	return home, nil
 }

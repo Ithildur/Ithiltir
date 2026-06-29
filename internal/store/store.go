@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"fmt"
 
 	alertstore "dash/internal/store/alert"
@@ -17,6 +18,7 @@ import (
 // Stores is the application store wiring. Leaf code should depend on the
 // specific store it needs, not on this aggregate.
 type Stores struct {
+	db      *gorm.DB
 	Traffic *traffic.Store
 	Metric  *metricdata.Store
 	Front   *frontcache.Store
@@ -32,6 +34,7 @@ func New(db *gorm.DB, redisClient *redis.Client) *Stores {
 	alert := alertstore.New(db, redisClient)
 
 	return &Stores{
+		db:      db,
 		Traffic: traffic.New(db),
 		Metric:  metricdata.New(db),
 		Front:   front,
@@ -53,6 +56,15 @@ func (s *Stores) Validate() error {
 		return err
 	}
 	return nil
+}
+
+func (s *Stores) WithSettingsTx(ctx context.Context, fn func(metric *metricdata.Store, system *system.Store) error) error {
+	if s == nil || s.db == nil {
+		return fmt.Errorf("store: db is nil")
+	}
+	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		return fn(metricdata.New(tx), system.New(tx))
+	})
 }
 
 func MustNew(db *gorm.DB, redisClient *redis.Client) *Stores {

@@ -76,7 +76,7 @@ func (h *handler) patchHandler(w http.ResponseWriter, r *http.Request) {
 		brand = &next
 	}
 
-	if err := saveSettings(r.Context(), h.metric, h.system, mode, channel, updateMode, brand); err != nil {
+	if err := saveSettingsPatch(r.Context(), h.tx, mode, channel, updateMode, brand); err != nil {
 		httperr.Write(w, http.StatusServiceUnavailable, "db_error", "failed to update settings")
 		return
 	}

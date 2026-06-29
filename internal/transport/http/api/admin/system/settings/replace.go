@@ -56,13 +56,14 @@ func (h *handler) replaceHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	brand, err := in.siteBrand()
+	brand, err := in.requiredSiteBrand()
 	if err != nil {
 		httperr.Write(w, http.StatusBadRequest, "invalid_fields", "invalid site brand fields")
 		return
 	}
+	doc := settingsViewFrom(mode, channel, updateMode, brand)
 
-	if err := saveSettings(r.Context(), h.metric, h.system, &mode, &channel, &updateMode, &brand); err != nil {
+	if err := saveSettingsDoc(r.Context(), h.tx, doc); err != nil {
 		httperr.Write(w, http.StatusServiceUnavailable, "db_error", "failed to update settings")
 		return
 	}

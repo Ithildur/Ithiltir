@@ -129,18 +129,19 @@ func (s *Service) checkAndAct(ctx context.Context) error {
 		if state.LastAvailableKey == availableKey {
 			return nil
 		}
-		if err := s.send(ctx, s.availableMessage(check)); err != nil {
+		sent, err := s.send(ctx, s.availableMessage(check))
+		if !sent {
 			return err
 		}
 		state.LastAvailableKey = availableKey
-		return writeAutoStateFile(autoStatePath, state)
+		return errors.Join(writeAutoStateFile(autoStatePath, state), err)
 	}
 
 	if policy.Mode != systemstore.DashUpdateModeAuto {
 		return nil
 	}
 
-	if err := s.send(ctx, s.startingMessage(check)); err != nil {
+	if _, err := s.send(ctx, s.startingMessage(check)); err != nil {
 		s.logger.Warn("send dash update starting notification failed", err)
 	}
 	next, err := s.runner.Start(ctx, RunInput{
@@ -152,7 +153,7 @@ func (s *Service) checkAndAct(ctx context.Context) error {
 		if errors.Is(err, ErrRunning) {
 			return nil
 		}
-		notifyErr := s.send(ctx, s.startFailedMessage(check, err))
+		_, notifyErr := s.send(ctx, s.startFailedMessage(check, err))
 		if notifyErr != nil {
 			return errors.Join(err, notifyErr)
 		}
@@ -193,9 +194,12 @@ func (s *Service) notifyFinishedAutoUpdate(ctx context.Context) {
 		return
 	}
 
-	if err := s.send(ctx, s.finishedMessage(status)); err != nil {
+	sent, err := s.send(ctx, s.finishedMessage(status))
+	if err != nil {
 		s.logger.Warn("send dash update finish notification failed", err)
-		return
+		if !sent {
+			return
+		}
 	}
 	state.LastFinishedID = state.LastStartedID
 	if err := writeAutoStateFile(autoStatePath, state); err != nil {
@@ -220,27 +224,30 @@ func (s *Service) loadPolicy(ctx context.Context) (autoPolicy, error) {
 	})
 }
 
-func (s *Service) send(ctx context.Context, msg notify.Message) error {
+func (s *Service) send(ctx context.Context, msg notify.Message) (bool, error) {
 	channels, err := infra.WithPGReadTimeout(ctx, func(c context.Context) ([]model.NotifyChannel, error) {
 		return s.alert.ListDefaultNotifyChannels(c)
 	})
 	if err != nil {
-		return fmt.Errorf("load dash update notify channels: %w", err)
+		return false, fmt.Errorf("load dash update notify channels: %w", err)
 	}
 	if len(channels) == 0 {
-		return nil
+		return false, nil
 	}
 
 	sendCtx, cancel := context.WithTimeout(ctx, autoNotifyTimeout)
 	defer cancel()
 	var errs []error
+	var sent bool
 	for _, channel := range channels {
 		item := channel
 		if err := notify.Send(sendCtx, &item, msg); err != nil {
 			errs = append(errs, err)
+			continue
 		}
+		sent = true
 	}
-	return errors.Join(errs...)
+	return sent, errors.Join(errs...)
 }
 
 func (s *Service) availableMessage(check Check) notify.Message {

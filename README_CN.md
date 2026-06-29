@@ -146,7 +146,7 @@ bash update_dash_linux.sh reinstall --test
 
 默认更新到最新 release。加 `--test` 时更新到最新 prerelease。如果当前部署的是高于最新 release 的 prerelease，默认 release 更新会警告并停止。
 `reinstall` 会在 Dash 版本号不变时重新安装所选通道的最新包，适合测试发布包只更新了内置 node 资产的情况。
-更新器要求系统已安装 `bash`、`git`、`tar`、`systemctl`、`systemd-run`，以及 `curl` 或 `wget`；缺失时直接失败，不会自动安装系统软件包。
+手工更新脚本要求系统已安装 `bash`、`git`、`tar`、`systemctl`，以及 `curl` 或 `wget`；缺失时直接失败，不会自动安装系统软件包。管理台后台更新还要求 `systemd-run`。
 Linux 更新器把官方 GitHub release 源作为根信任源。GitHub 账号、token、仓库、workflow 或 release 权限被攻破，等价于更新源被攻破。
 
 ## 仓库结构

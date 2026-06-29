@@ -132,8 +132,9 @@ const SystemSettings: React.FC = () => {
       setSavingHistoryMode(true);
       try {
         await adminApi.updateSystemSettings({ history_guest_access_mode: mode });
-        const nextSettings = { ...settings, history_guest_access_mode: mode };
-        setSettings(nextSettings);
+        setSettings((current) =>
+          current ? { ...current, history_guest_access_mode: mode } : current,
+        );
         cacheHistoryGuestAccess(mode);
         pushTopBanner(t('admin_system_settings_saved'), { tone: 'info' });
       } catch (error) {
@@ -151,7 +152,7 @@ const SystemSettings: React.FC = () => {
     setSavingBrand(true);
     try {
       await adminApi.updateSystemSettings(nextBrand);
-      setSettings({ ...settings, ...nextBrand });
+      setSettings((current) => (current ? { ...current, ...nextBrand } : current));
       const savedBrand = setBrand(nextBrand);
       brandDirty.current = false;
       setBrandDraft(savedBrand);
@@ -169,7 +170,9 @@ const SystemSettings: React.FC = () => {
       setSavingDashUpdateChannel(true);
       try {
         await adminApi.updateSystemSettings({ dash_update_channel: channel });
-        setSettings({ ...settings, dash_update_channel: channel });
+        setSettings((current) =>
+          current ? { ...current, dash_update_channel: channel } : current,
+        );
         pushTopBanner(t('admin_system_settings_saved'), { tone: 'info' });
       } catch (error) {
         apiError(error, t('admin_system_settings_save_failed'));
@@ -186,7 +189,7 @@ const SystemSettings: React.FC = () => {
       setSavingDashUpdateMode(true);
       try {
         await adminApi.updateSystemSettings({ dash_update_mode: mode });
-        setSettings({ ...settings, dash_update_mode: mode });
+        setSettings((current) => (current ? { ...current, dash_update_mode: mode } : current));
         pushTopBanner(t('admin_system_settings_saved'), { tone: 'info' });
       } catch (error) {
         apiError(error, t('admin_system_settings_save_failed'));

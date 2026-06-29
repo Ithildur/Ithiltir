@@ -11,11 +11,30 @@ export interface DashReleaseNote {
 }
 
 const cleanText = (value: string | null | undefined): string =>
-  (value ?? '').replace(/\u200b/g, '').replace(/\s+/g, ' ').trim();
+  (value ?? '')
+    .replace(/\u200b/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
 
 const releaseDateFromText = (value: string): string => {
   const match = value.match(/(?:发布日期|Release date)[:：]\s*(.+)$/i);
   return cleanText(match?.[1]);
+};
+
+const releasePath = '/Ithildur/Ithiltir/releases';
+
+const cleanReleaseURL = (value: string | null | undefined): string => {
+  const href = cleanText(value);
+  if (!href) return '';
+
+  try {
+    const url = new URL(href, 'https://github.com');
+    const validPath = url.pathname === releasePath || url.pathname.startsWith(`${releasePath}/`);
+    if (url.protocol !== 'https:' || url.hostname !== 'github.com' || !validPath) return '';
+    return url.toString();
+  } catch {
+    return '';
+  }
 };
 
 export const parseDashReleaseNotes = (html: string): DashReleaseNote[] => {
@@ -69,10 +88,10 @@ export const parseDashReleaseNotes = (html: string): DashReleaseNote[] => {
       const publishedAt = releaseDateFromText(text);
       if (publishedAt) currentNote.publishedAt = publishedAt;
 
-      const releaseLink = element.querySelector<HTMLAnchorElement>(
-        'a[href*="github.com/Ithildur/Ithiltir/releases"]',
-      );
-      if (releaseLink?.href) currentNote.releaseUrl = releaseLink.href;
+      const releaseLink = Array.from(element.querySelectorAll<HTMLAnchorElement>('a[href]'))
+        .map((link) => cleanReleaseURL(link.getAttribute('href')))
+        .find(Boolean);
+      if (releaseLink) currentNote.releaseUrl = releaseLink;
       return;
     }
 

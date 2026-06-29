@@ -306,6 +306,10 @@ func (r *Runner) Start(ctx context.Context, in RunInput) (State, error) {
 }
 
 func (r *Runner) Check(ctx context.Context, channel Channel) (Check, error) {
+	if err := r.available(); err != nil {
+		return Check{}, err
+	}
+
 	latest, err := latestRemoteVersion(ctx, channel)
 	if err != nil {
 		return Check{}, err

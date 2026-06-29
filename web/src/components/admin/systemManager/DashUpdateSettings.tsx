@@ -306,6 +306,8 @@ const DashUpdateSettings: React.FC<Props> = ({
   const actionHint = updateUnavailable
     ? updateStatus?.unavailable_reason || t('admin_dash_update_job_unavailable')
     : '';
+  const checkDisabled =
+    !settings || loadingSettings || savingChannel || checking || isUpdateRunning;
   const lastCheckedLabel = React.useMemo(() => {
     if (!lastCheckedAt) return '';
     return new Intl.DateTimeFormat(lang === 'en' ? 'en-US' : 'zh-CN', {
@@ -587,7 +589,9 @@ const DashUpdateSettings: React.FC<Props> = ({
         <UpdateRow label={t('admin_dash_update_channel_prerelease')}>
           <IOSSwitch
             checked={isPrerelease}
-            disabled={!settings || loadingSettings || savingChannel || savingMode || isUpdateRunning}
+            disabled={
+              !settings || loadingSettings || savingChannel || savingMode || isUpdateRunning
+            }
             ariaLabel={t('admin_dash_update_channel_prerelease')}
             onChange={() => void togglePrerelease()}
           />
@@ -704,11 +708,7 @@ const DashUpdateSettings: React.FC<Props> = ({
       </section>
 
       <div className="flex justify-start">
-        <Button
-          type="button"
-          disabled={checking || isUpdateRunning}
-          onClick={() => void checkUpdate()}
-        >
+        <Button type="button" disabled={checkDisabled} onClick={() => void checkUpdate()}>
           {checkingUpdate
             ? t('admin_dash_update_checking')
             : hasChecked

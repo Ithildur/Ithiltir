@@ -29,6 +29,10 @@ type settingsInput struct {
 	TopbarText             *string                            `json:"topbar_text"`
 }
 
+type settingsTx interface {
+	WithSettingsTx(context.Context, func(*metricdata.Store, *systemstore.Store) error) error
+}
+
 func loadSettings(ctx context.Context, metric *metricdata.Store, system *systemstore.Store) (settingsView, error) {
 	return infra.WithPGReadTimeout(ctx, func(c context.Context) (settingsView, error) {
 		mode, err := metric.GetHistoryGuestAccessMode(c)
@@ -57,39 +61,52 @@ func loadSiteBrand(ctx context.Context, st *systemstore.Store) (systemstore.Site
 	})
 }
 
-func saveSettings(
+func saveSettingsPatch(
 	ctx context.Context,
-	metric *metricdata.Store,
-	system *systemstore.Store,
+	tx settingsTx,
 	mode *metricdata.HistoryGuestAccessMode,
 	channel *systemstore.DashUpdateChannel,
 	updateMode *systemstore.DashUpdateMode,
 	brand *systemstore.SiteBrand,
 ) error {
 	_, err := infra.WithPGWriteTimeout(ctx, func(c context.Context) (struct{}, error) {
-		if mode != nil {
-			if err := metric.SetHistoryGuestAccessMode(c, *mode); err != nil {
-				return struct{}{}, err
+		return struct{}{}, tx.WithSettingsTx(c, func(metric *metricdata.Store, system *systemstore.Store) error {
+			if mode != nil {
+				if err := metric.SetHistoryGuestAccessMode(c, *mode); err != nil {
+					return err
+				}
 			}
-		}
-		if channel != nil {
-			if err := system.SetDashUpdateChannel(c, *channel); err != nil {
-				return struct{}{}, err
+			if channel != nil {
+				if err := system.SetDashUpdateChannel(c, *channel); err != nil {
+					return err
+				}
 			}
-		}
-		if updateMode != nil {
-			if err := system.SetDashUpdateMode(c, *updateMode); err != nil {
-				return struct{}{}, err
+			if updateMode != nil {
+				if err := system.SetDashUpdateMode(c, *updateMode); err != nil {
+					return err
+				}
 			}
-		}
-		if brand != nil {
-			if err := system.SetSiteBrand(c, *brand); err != nil {
-				return struct{}{}, err
+			if brand != nil {
+				if err := system.SetSiteBrand(c, *brand); err != nil {
+					return err
+				}
 			}
-		}
-		return struct{}{}, nil
+			return nil
+		})
 	})
 	return err
+}
+
+func saveSettingsDoc(ctx context.Context, tx settingsTx, doc settingsView) error {
+	brand := doc.siteBrand()
+	return saveSettingsPatch(
+		ctx,
+		tx,
+		&doc.HistoryGuestAccessMode,
+		&doc.DashUpdateChannel,
+		&doc.DashUpdateMode,
+		&brand,
+	)
 }
 
 func settingsViewFrom(
@@ -106,6 +123,14 @@ func settingsViewFrom(
 		LogoURL:                normalized.LogoURL,
 		PageTitle:              normalized.PageTitle,
 		TopbarText:             normalized.TopbarText,
+	}
+}
+
+func (v settingsView) siteBrand() systemstore.SiteBrand {
+	return systemstore.SiteBrand{
+		LogoURL:    v.LogoURL,
+		PageTitle:  v.PageTitle,
+		TopbarText: v.TopbarText,
 	}
 }
 
@@ -127,7 +152,7 @@ func (in settingsInput) applySiteBrand(current systemstore.SiteBrand) (systemsto
 	return validateSiteBrand(next)
 }
 
-func (in settingsInput) siteBrand() (systemstore.SiteBrand, error) {
+func (in settingsInput) requiredSiteBrand() (systemstore.SiteBrand, error) {
 	if in.LogoURL == nil || in.PageTitle == nil || in.TopbarText == nil {
 		return systemstore.SiteBrand{}, errInvalidSiteBrand
 	}

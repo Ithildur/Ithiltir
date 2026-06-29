@@ -220,8 +220,7 @@ export const zh = {
   admin_dash_update_run_failed: '启动 Dash 更新失败。',
   admin_dash_update_run_confirm_title: '执行 Dash 更新？',
   admin_dash_update_reinstall_confirm_title: '重新安装 Dash？',
-  admin_dash_update_run_confirm_message:
-    '将按{{channel}}启动后台更新，服务可能会短暂重启。',
+  admin_dash_update_run_confirm_message: '将按{{channel}}启动后台更新，服务可能会短暂重启。',
   admin_dash_update_job_title: '更新任务',
   admin_dash_update_action_title: '更新操作',
   admin_dash_update_action_requires_check: '请先手动检查更新。',
