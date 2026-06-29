@@ -25,6 +25,21 @@ func DefaultAppDirOptions() appdir.Options {
 	}
 }
 
+func HomeDir() (string, error) {
+	home := strings.TrimSpace(os.Getenv(envDashHome))
+	if home == "" {
+		discovered, err := appdir.DiscoverHome(DefaultAppDirOptions())
+		if err != nil {
+			return "", fmt.Errorf("resolve app home: %w", err)
+		}
+		home = strings.TrimSpace(discovered)
+	}
+	if home == "" {
+		return "", fmt.Errorf("resolve app home: empty")
+	}
+	return home, nil
+}
+
 func ThemeRootDir() (string, error) {
 	home := strings.TrimSpace(os.Getenv(envDashHome))
 	if home == "" {

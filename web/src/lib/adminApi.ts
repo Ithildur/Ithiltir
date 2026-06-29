@@ -304,10 +304,8 @@ export interface DashUpdateCheck {
   bundled_node_version: string;
 }
 
-export const fetchDashReleaseNotes = (
-  params: { lang?: 'zh' | 'en'; signal?: AbortSignal } = {},
-) => {
-  const query = params.lang ? `?lang=${encodeURIComponent(params.lang)}` : '';
+export const fetchDashReleaseNotes = (params: { lang: 'zh' | 'en'; signal?: AbortSignal }) => {
+  const query = `?lang=${encodeURIComponent(params.lang)}`;
   return apiFetch<DashReleaseNotesDocument>(`/admin/system/dash-update/release-notes${query}`, {
     method: 'GET',
     signal: params.signal,

@@ -1,7 +1,6 @@
 package dashupdate
 
 import (
-	"bufio"
 	"context"
 	"errors"
 	"fmt"
@@ -117,7 +116,11 @@ func (s *Service) checkAndAct(ctx context.Context) error {
 		return nil
 	}
 
-	state, err := readAutoStateFile(s.autoStatePath())
+	autoStatePath, err := s.autoStatePath()
+	if err != nil {
+		return err
+	}
+	state, err := readAutoStateFile(autoStatePath)
 	if err != nil {
 		return err
 	}
@@ -130,7 +133,7 @@ func (s *Service) checkAndAct(ctx context.Context) error {
 			return err
 		}
 		state.LastAvailableKey = availableKey
-		return writeAutoStateFile(s.autoStatePath(), state)
+		return writeAutoStateFile(autoStatePath, state)
 	}
 
 	if policy.Mode != systemstore.DashUpdateModeAuto {
@@ -158,7 +161,7 @@ func (s *Service) checkAndAct(ctx context.Context) error {
 	if next.ID != "" {
 		state.LastAvailableKey = availableKey
 		state.LastStartedID = next.ID
-		if err := writeAutoStateFile(s.autoStatePath(), state); err != nil {
+		if err := writeAutoStateFile(autoStatePath, state); err != nil {
 			return err
 		}
 	}
@@ -166,7 +169,12 @@ func (s *Service) checkAndAct(ctx context.Context) error {
 }
 
 func (s *Service) notifyFinishedAutoUpdate(ctx context.Context) {
-	state, err := readAutoStateFile(s.autoStatePath())
+	autoStatePath, err := s.autoStatePath()
+	if err != nil {
+		s.logger.Warn("resolve dash update auto state path failed", err)
+		return
+	}
+	state, err := readAutoStateFile(autoStatePath)
 	if err != nil {
 		s.logger.Warn("read dash update auto state failed", err)
 		return
@@ -190,7 +198,7 @@ func (s *Service) notifyFinishedAutoUpdate(ctx context.Context) {
 		return
 	}
 	state.LastFinishedID = state.LastStartedID
-	if err := writeAutoStateFile(s.autoStatePath(), state); err != nil {
+	if err := writeAutoStateFile(autoStatePath, state); err != nil {
 		s.logger.Warn("write dash update auto state failed", err)
 	}
 }
@@ -405,34 +413,20 @@ func (s *Service) isEnglish() bool {
 	return lang.Normalize(s.language) == lang.English
 }
 
-func (s *Service) autoStatePath() string {
-	return filepath.Join(s.runner.stateDir(), updateAutoStateName)
+func (s *Service) autoStatePath() (string, error) {
+	paths, err := s.runner.paths()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(paths.stateDir, updateAutoStateName), nil
 }
 
 func readAutoStateFile(path string) (autoState, error) {
-	f, err := os.Open(path)
-	if errors.Is(err, os.ErrNotExist) {
-		return autoState{}, nil
-	}
+	fields, err := readStatusFields(path)
 	if err != nil {
-		return autoState{}, err
-	}
-	defer f.Close()
-
-	fields := make(map[string]string)
-	scanner := bufio.NewScanner(f)
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" || strings.HasPrefix(line, "#") {
-			continue
+		if errors.Is(err, os.ErrNotExist) {
+			return autoState{}, nil
 		}
-		key, value, ok := strings.Cut(line, "=")
-		if !ok {
-			continue
-		}
-		fields[strings.TrimSpace(key)] = strings.TrimSpace(value)
-	}
-	if err := scanner.Err(); err != nil {
 		return autoState{}, err
 	}
 	return autoState{
@@ -443,7 +437,7 @@ func readAutoStateFile(path string) (autoState, error) {
 }
 
 func writeAutoStateFile(path string, state autoState) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return err
 	}
 	tmp := path + ".tmp"
@@ -451,7 +445,7 @@ func writeAutoStateFile(path string, state autoState) error {
 	writeStatusField(&b, "last_available_key", state.LastAvailableKey)
 	writeStatusField(&b, "last_started_id", state.LastStartedID)
 	writeStatusField(&b, "last_finished_id", state.LastFinishedID)
-	if err := os.WriteFile(tmp, []byte(b.String()), 0o644); err != nil {
+	if err := os.WriteFile(tmp, []byte(b.String()), 0o600); err != nil {
 		return err
 	}
 	return os.Rename(tmp, path)

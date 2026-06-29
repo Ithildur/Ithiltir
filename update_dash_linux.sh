@@ -22,8 +22,8 @@ BIN_PATH="${INSTALL_DIR}/bin/dash"
 SCRIPT_DIR="${DASH_UPDATE_ORIGINAL_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
 SCRIPT_BIN_PATH="${SCRIPT_DIR}/bin/dash"
 CONFIG_LOCAL="${INSTALL_DIR}/configs/config.local.yaml"
-REMOTE_URL="${REMOTE_URL:-https://github.com/Ithildur/Ithiltir.git}"
-REPO_SLUG="${REPO_SLUG:-Ithildur/Ithiltir}"
+REMOTE_URL="https://github.com/Ithildur/Ithiltir.git"
+REPO_SLUG="Ithildur/Ithiltir"
 
 ASSUME_YES="false"
 CHECK_ONLY="false"
@@ -151,122 +151,16 @@ start_service_if_needed() {
   fi
 }
 
-detect_package_manager() {
-  if [[ -r /etc/os-release ]]; then
-    # shellcheck disable=SC1091
-    . /etc/os-release
-    case "${ID:-}" in
-      ubuntu|debian)
-        echo "apt-get"
-        return 0
-        ;;
-      fedora)
-        echo "dnf"
-        return 0
-        ;;
-      rhel|centos|rocky|almalinux|ol)
-        if need_cmd dnf; then echo "dnf"; else echo "yum"; fi
-        return 0
-        ;;
-      arch|manjaro)
-        echo "pacman"
-        return 0
-        ;;
-      alpine)
-        echo "apk"
-        return 0
-        ;;
-      opensuse*|sles)
-        echo "zypper"
-        return 0
-        ;;
-    esac
-
-    for like in ${ID_LIKE:-}; do
-      case "$like" in
-        debian)
-          echo "apt-get"
-          return 0
-          ;;
-        fedora|rhel)
-          if need_cmd dnf; then echo "dnf"; else echo "yum"; fi
-          return 0
-          ;;
-        arch)
-          echo "pacman"
-          return 0
-          ;;
-        alpine)
-          echo "apk"
-          return 0
-          ;;
-        suse)
-          echo "zypper"
-          return 0
-          ;;
-      esac
-    done
-  fi
-
-  for pm in apt-get dnf yum pacman apk zypper; do
-    if need_cmd "$pm"; then
-      echo "$pm"
-      return 0
-    fi
-  done
-  return 1
-}
-
-install_packages() {
-  local pm="$1"
-  shift
-  case "$pm" in
-    apt-get)
-      as_root apt-get update -y
-      as_root env DEBIAN_FRONTEND=noninteractive apt-get install -y "$@"
-      ;;
-    dnf)
-      as_root dnf install -y "$@"
-      ;;
-    yum)
-      as_root yum install -y "$@"
-      ;;
-    pacman)
-      as_root pacman -Sy --noconfirm "$@"
-      ;;
-    apk)
-      as_root apk add --no-cache "$@"
-      ;;
-    zypper)
-      as_root zypper --non-interactive install "$@"
-      ;;
-    *)
-      return 1
-      ;;
-  esac
-}
-
-ensure_cmd() {
-  local cmd="$1" pkg="${2:-$1}" pm
-  if need_cmd "$cmd"; then
-    return 0
-  fi
-  pm="$(detect_package_manager)" || die "$(txt "$cmd 是必需命令，但未找到支持的包管理器" "$cmd is required and no supported package manager was found")"
-  say_err "未找到 $cmd，正在安装包：$pkg" "$cmd not found. installing package: $pkg"
-  install_packages "$pm" "$pkg"
-  need_cmd "$cmd" || die "$(txt "$cmd 安装完成但命令仍不可用" "$cmd installation finished but command is still unavailable")"
-}
-
 ensure_download_tool() {
   if need_cmd curl || need_cmd wget; then
     return 0
   fi
-  ensure_cmd curl curl
+  die "$(txt "更新需要 curl 或 wget" "curl or wget is required for updates")"
 }
 
 ensure_dependencies() {
-  ensure_cmd git git
-  ensure_cmd tar tar
+  need_cmd git || die "$(txt "更新需要 git" "git is required for updates")"
+  need_cmd tar || die "$(txt "更新需要 tar" "tar is required for updates")"
   ensure_download_tool
   need_cmd systemctl || die "$(txt "更新 ${SERVICE} 需要 systemctl" "systemctl is required to update ${SERVICE}")"
 }
@@ -289,9 +183,6 @@ usage() {
   --lang       设置脚本语言：zh 或 en
   -h|--help    显示帮助
 
-环境变量：
-  REMOTE_URL   用于发现 tag 的 Git remote
-  REPO_SLUG    用于下载 release asset 的 GitHub owner/repo
 EOF
     return
   fi
@@ -312,9 +203,6 @@ Options:
   --lang       Set script language: zh or en
   -h|--help    Show this help
 
-Environment:
-  REMOTE_URL   Git remote used for tag discovery
-  REPO_SLUG    GitHub owner/repo used for release asset downloads
 EOF
 }
 
@@ -494,14 +382,14 @@ version_gt() {
 
 current_version() {
   if [[ -x "$BIN_PATH" ]]; then
-    "$BIN_PATH" --version 2>/dev/null || true
+    "$BIN_PATH" --version
     return
   fi
   if [[ -x "$SCRIPT_BIN_PATH" ]]; then
-    "$SCRIPT_BIN_PATH" --version 2>/dev/null || true
+    "$SCRIPT_BIN_PATH" --version
     return
   fi
-  printf '0.0.0-dev\n'
+  die "$(txt "缺少 Dash 可执行文件：$BIN_PATH" "missing Dash executable: $BIN_PATH")"
 }
 
 latest_remote_version() {
@@ -685,7 +573,7 @@ choose_script_lang
 ensure_dependencies
 
 current="$(trim "$(current_version)")"
-current_channel="$(release_channel_for_version "$current" || echo release)"
+current_channel="$(release_channel_for_version "$current")" || die "$(txt "当前 Dash 版本非法：$current" "current Dash version is invalid: $current")"
 target_channel="release"
 if [[ "$TEST_CHANNEL" == "true" ]]; then
   target_channel="prerelease"

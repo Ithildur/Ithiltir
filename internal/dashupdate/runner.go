@@ -16,7 +16,6 @@ import (
 
 	"dash/internal/config"
 	appversion "dash/internal/version"
-	"github.com/Ithildur/EiluneKit/appdir"
 )
 
 const (
@@ -39,7 +38,6 @@ const (
 	updateStartGrace   = 15 * time.Second
 	updateCommandLimit = 10 * time.Second
 	updateRemoteURL    = "https://github.com/Ithildur/Ithiltir.git"
-	updateRepoSlug     = "Ithildur/Ithiltir"
 )
 
 var (
@@ -95,6 +93,15 @@ type statusFile struct {
 	LogFile    string
 }
 
+type runnerPaths struct {
+	home       string
+	stateDir   string
+	statusPath string
+	logPath    string
+	runnerPath string
+	scriptPath string
+}
+
 type Check struct {
 	CurrentVersion     string        `json:"current_version"`
 	CurrentChannel     Channel       `json:"current_channel,omitempty"`
@@ -116,24 +123,43 @@ func (r *Runner) Status(ctx context.Context) State {
 
 func (r *Runner) statusLocked(ctx context.Context) State {
 	view := State{Status: StatusIdle}
+	paths, pathErr := r.paths()
+	var statusErr error
 
-	item, err := readUpdateStatusFile(r.statusPath())
-	if err == nil {
-		item = r.reconcileRunningStatus(ctx, item)
-		view.ID = item.ID
-		view.Status = item.Status
-		view.Action = item.Action
-		view.Channel = item.Channel
-		view.StartedAt = item.StartedAt
-		view.FinishedAt = item.FinishedAt
-		view.ExitCode = item.ExitCode
-		view.LogTail = readLogTail(item.LogFile)
+	if pathErr == nil {
+		item, err := readUpdateStatusFile(paths.statusPath)
+		switch {
+		case errors.Is(err, os.ErrNotExist):
+		case err != nil:
+			statusErr = err
+		default:
+			item.LogFile = paths.logPath
+			var reconcileErr error
+			item, reconcileErr = r.reconcileRunningStatus(ctx, item, paths)
+			if reconcileErr != nil {
+				statusErr = reconcileErr
+			}
+			view.ID = item.ID
+			view.Status = item.Status
+			view.Action = item.Action
+			view.Channel = item.Channel
+			view.StartedAt = item.StartedAt
+			view.FinishedAt = item.FinishedAt
+			view.ExitCode = item.ExitCode
+			view.LogTail = readLogTail(paths.logPath)
+		}
 	}
 
 	if view.Status == "" {
 		view.Status = StatusIdle
 	}
-	if err := r.available(); err != nil {
+	if pathErr != nil {
+		view.Available = false
+		view.UnavailableReason = updateUnavailableReason(pathErr)
+	} else if statusErr != nil {
+		view.Available = false
+		view.UnavailableReason = "read update status: " + statusErr.Error()
+	} else if err := r.availableWithPaths(paths); err != nil {
 		view.Available = false
 		view.UnavailableReason = updateUnavailableReason(err)
 	} else {
@@ -142,20 +168,21 @@ func (r *Runner) statusLocked(ctx context.Context) State {
 	return view
 }
 
-func (r *Runner) reconcileRunningStatus(ctx context.Context, item statusFile) statusFile {
+func (r *Runner) reconcileRunningStatus(ctx context.Context, item statusFile, paths runnerPaths) (statusFile, error) {
 	if item.Status != StatusRunning || runningStatusFresh(item.StartedAt) {
-		return item
+		return item, nil
 	}
 	active, ok := systemdUnitActive(ctx, item.Unit)
 	if !ok || active {
-		return item
+		return item, nil
 	}
 	item.Status = StatusFailed
 	item.FinishedAt = time.Now().UTC().Format(time.RFC3339)
 	item.ExitCode = nil
-	// Return the reconciled state even if persisting this recovery update fails.
-	_ = writeUpdateStatusFile(r.statusPath(), item)
-	return item
+	if err := writeUpdateStatusFile(paths.statusPath, item); err != nil {
+		return item, fmt.Errorf("write reconciled update status: %w", err)
+	}
+	return item, nil
 }
 
 func (r *Runner) Start(ctx context.Context, in RunInput) (State, error) {
@@ -189,20 +216,17 @@ func (r *Runner) Start(ctx context.Context, in RunInput) (State, error) {
 	if current.Status == StatusRunning {
 		return current, ErrRunning
 	}
-	if err := r.available(); err != nil {
-		return current, err
-	}
-
-	home := r.home()
-	stateDir := r.stateDir()
-	if err := os.MkdirAll(stateDir, 0o755); err != nil {
-		return current, fmt.Errorf("%w: create state dir: %v", ErrUnavailable, err)
-	}
-
-	scriptPath, err := r.updaterScriptPath()
+	paths, err := r.paths()
 	if err != nil {
 		return current, err
 	}
+	if err := r.availableWithPaths(paths); err != nil {
+		return current, err
+	}
+	if err := os.MkdirAll(paths.stateDir, 0o700); err != nil {
+		return current, fmt.Errorf("%w: create state dir: %v", ErrUnavailable, err)
+	}
+
 	systemdRun, err := exec.LookPath("systemd-run")
 	if err != nil {
 		return current, fmt.Errorf("%w: systemd-run not found", ErrUnavailable)
@@ -215,41 +239,36 @@ func (r *Runner) Start(ctx context.Context, in RunInput) (State, error) {
 	now := time.Now().UTC()
 	id := now.Format("20060102T150405Z")
 	startedAt := now.Format(time.RFC3339)
-	statusPath := r.statusPath()
-	logFile := filepath.Join(stateDir, updateLogName)
-	runnerPath := filepath.Join(stateDir, updateRunnerName)
 	unit := "ithiltir-dash-update-" + id
 
-	if err := os.WriteFile(runnerPath, []byte(updateRunnerScript), 0o755); err != nil {
+	if err := os.WriteFile(paths.runnerPath, []byte(updateRunnerScript), 0o755); err != nil {
 		return current, fmt.Errorf("%w: write runner script: %v", ErrUnavailable, err)
 	}
-	if err := writeUpdateStatusFile(statusPath, statusFile{
+	if err := os.WriteFile(paths.logPath, nil, 0o600); err != nil {
+		return current, fmt.Errorf("%w: initialize log: %v", ErrUnavailable, err)
+	}
+	if err := writeUpdateStatusFile(paths.statusPath, statusFile{
 		ID:        id,
 		Unit:      unit,
 		Status:    StatusRunning,
 		Action:    action,
 		Channel:   channel,
 		StartedAt: startedAt,
-		LogFile:   logFile,
+		LogFile:   paths.logPath,
 	}); err != nil {
 		return current, fmt.Errorf("%w: write status: %v", ErrUnavailable, err)
-	}
-	if err := os.WriteFile(logFile, nil, 0o644); err != nil {
-		return current, fmt.Errorf("%w: initialize log: %v", ErrUnavailable, err)
 	}
 
 	cmdCtx, cancel := context.WithTimeout(ctx, updateCommandLimit)
 	cmd := exec.CommandContext(cmdCtx, systemdRun,
 		"--unit", unit,
 		"--property=Type=exec",
-		"--setenv=DASH_HOME="+home,
-		"--setenv=REMOTE_URL="+remoteURL(),
-		"--setenv=REPO_SLUG="+repoSlug(),
+		"--setenv=DASH_HOME="+paths.home,
 		bashPath,
-		runnerPath,
-		statusPath,
-		logFile,
-		scriptPath,
+		paths.runnerPath,
+		paths.statusPath,
+		paths.logPath,
+		paths.scriptPath,
 		string(action),
 		string(channel),
 		lang,
@@ -261,10 +280,9 @@ func (r *Runner) Start(ctx context.Context, in RunInput) (State, error) {
 	cmdErr := cmdCtx.Err()
 	cancel()
 	if err != nil {
-		// Keep the systemd-run error as the returned failure; local status writes are best-effort cleanup.
-		_ = os.WriteFile(logFile, out, 0o644)
 		exitCode := 1
-		_ = writeUpdateStatusFile(statusPath, statusFile{
+		logErr := os.WriteFile(paths.logPath, out, 0o600)
+		statusErr := writeUpdateStatusFile(paths.statusPath, statusFile{
 			ID:         id,
 			Unit:       unit,
 			Status:     StatusFailed,
@@ -273,12 +291,15 @@ func (r *Runner) Start(ctx context.Context, in RunInput) (State, error) {
 			StartedAt:  startedAt,
 			FinishedAt: time.Now().UTC().Format(time.RFC3339),
 			ExitCode:   &exitCode,
-			LogFile:    logFile,
+			LogFile:    paths.logPath,
 		})
+		var startErr error
 		if errors.Is(cmdErr, context.DeadlineExceeded) {
-			return r.statusLocked(ctx), fmt.Errorf("%w: start systemd unit timed out", ErrUnavailable)
+			startErr = fmt.Errorf("%w: start systemd unit timed out", ErrUnavailable)
+		} else {
+			startErr = fmt.Errorf("%w: start systemd unit: %v", ErrUnavailable, err)
 		}
-		return r.statusLocked(ctx), fmt.Errorf("%w: start systemd unit: %v", ErrUnavailable, err)
+		return r.statusLocked(ctx), errors.Join(startErr, logErr, statusErr)
 	}
 
 	return r.statusLocked(ctx), nil
@@ -303,59 +324,72 @@ func (r *Runner) Check(ctx context.Context, channel Channel) (Check, error) {
 }
 
 func (r *Runner) available() error {
-	if _, err := exec.LookPath("systemd-run"); err != nil {
-		return fmt.Errorf("%w: systemd-run not found", ErrUnavailable)
-	}
-	if _, err := exec.LookPath("bash"); err != nil {
-		return fmt.Errorf("%w: bash not found", ErrUnavailable)
-	}
-	if _, err := r.updaterScriptPath(); err != nil {
+	paths, err := r.paths()
+	if err != nil {
 		return err
+	}
+	return r.availableWithPaths(paths)
+}
+
+func (r *Runner) availableWithPaths(paths runnerPaths) error {
+	if err := requireCommand("systemd-run"); err != nil {
+		return err
+	}
+	if err := requireCommand("bash"); err != nil {
+		return err
+	}
+	if err := requireCommand("git"); err != nil {
+		return err
+	}
+	if err := requireCommand("tar"); err != nil {
+		return err
+	}
+	if err := requireCommand("systemctl"); err != nil {
+		return err
+	}
+	if !hasCommand("curl") && !hasCommand("wget") {
+		return fmt.Errorf("%w: curl or wget not found", ErrUnavailable)
+	}
+	info, err := os.Stat(paths.scriptPath)
+	if err != nil {
+		return fmt.Errorf("%w: update_dash_linux.sh not found: %v", ErrUnavailable, err)
+	}
+	if info.IsDir() {
+		return fmt.Errorf("%w: update_dash_linux.sh is a directory", ErrUnavailable)
 	}
 	return nil
 }
 
-func (r *Runner) home() string {
-	home := strings.TrimSpace(os.Getenv("DASH_HOME"))
-	if home != "" {
-		return home
+func requireCommand(name string) error {
+	if hasCommand(name) {
+		return nil
 	}
-	discovered, err := appdir.DiscoverHome(config.DefaultAppDirOptions())
-	if err == nil && strings.TrimSpace(discovered) != "" {
-		return strings.TrimSpace(discovered)
-	}
-	return "."
+	return fmt.Errorf("%w: %s not found", ErrUnavailable, name)
 }
 
-func (r *Runner) stateDir() string {
-	return filepath.Join(r.home(), "runtime", updateStateDirName)
+func hasCommand(name string) bool {
+	_, err := exec.LookPath(name)
+	return err == nil
 }
 
-func (r *Runner) statusPath() string {
-	return filepath.Join(r.stateDir(), updateStatusName)
-}
-
-func (r *Runner) updaterScriptPath() (string, error) {
-	var candidates []string
-	home := r.home()
-	if home != "" {
-		candidates = append(candidates, filepath.Join(home, "update_dash_linux.sh"))
+func (r *Runner) paths() (runnerPaths, error) {
+	home, err := config.HomeDir()
+	if err != nil {
+		return runnerPaths{}, fmt.Errorf("%w: %v", ErrUnavailable, err)
 	}
-	if wd, err := os.Getwd(); err == nil {
-		candidates = append(candidates, filepath.Join(wd, "update_dash_linux.sh"))
+	stateDir := filepath.Join(home, "runtime", updateStateDirName)
+	scriptPath, err := filepath.Abs(filepath.Join(home, "update_dash_linux.sh"))
+	if err != nil {
+		return runnerPaths{}, fmt.Errorf("%w: resolve update_dash_linux.sh: %v", ErrUnavailable, err)
 	}
-
-	for _, path := range candidates {
-		info, err := os.Stat(path)
-		if err == nil && !info.IsDir() {
-			abs, absErr := filepath.Abs(path)
-			if absErr == nil {
-				return abs, nil
-			}
-			return path, nil
-		}
-	}
-	return "", fmt.Errorf("%w: update_dash_linux.sh not found", ErrUnavailable)
+	return runnerPaths{
+		home:       home,
+		stateDir:   stateDir,
+		statusPath: filepath.Join(stateDir, updateStatusName),
+		logPath:    filepath.Join(stateDir, updateLogName),
+		runnerPath: filepath.Join(stateDir, updateRunnerName),
+		scriptPath: scriptPath,
+	}, nil
 }
 
 func ParseAction(action Action) (Action, bool) {
@@ -378,11 +412,10 @@ func ParseChannel(channel Channel) (Channel, bool) {
 }
 
 func normalizeUpdateLang(lang string) (string, bool) {
-	normalized := strings.ToLower(strings.TrimSpace(lang))
-	switch {
-	case strings.HasPrefix(normalized, "zh"):
+	switch strings.ToLower(strings.TrimSpace(lang)) {
+	case "zh":
 		return "zh", true
-	case strings.HasPrefix(normalized, "en"):
+	case "en":
 		return "en", true
 	default:
 		return "zh", false
@@ -425,7 +458,7 @@ func latestRemoteVersion(ctx context.Context, channel Channel) (string, error) {
 		"ls-remote",
 		"--tags",
 		"--refs",
-		remoteURL(),
+		updateRemoteURL,
 	).Output()
 	cmdErr := cmdCtx.Err()
 	cancel()
@@ -441,20 +474,6 @@ func latestRemoteVersion(ctx context.Context, channel Channel) (string, error) {
 		return "", fmt.Errorf("no %s dash update tags found", channel)
 	}
 	return latest, nil
-}
-
-func remoteURL() string {
-	if remote := strings.TrimSpace(os.Getenv("REMOTE_URL")); remote != "" {
-		return remote
-	}
-	return updateRemoteURL
-}
-
-func repoSlug() string {
-	if slug := strings.TrimSpace(os.Getenv("REPO_SLUG")); slug != "" {
-		return slug
-	}
-	return updateRepoSlug
 }
 
 func latestVersionFromRefs(refs string, channel Channel) (string, bool) {
@@ -505,50 +524,105 @@ func systemdUnitActive(ctx context.Context, unit string) (bool, bool) {
 }
 
 func readUpdateStatusFile(path string) (statusFile, error) {
-	f, err := os.Open(path)
+	fields, err := readStatusFields(path)
 	if err != nil {
 		return statusFile{}, err
+	}
+
+	status, ok := parseStatus(Status(fields["status"]))
+	if !ok {
+		return statusFile{}, fmt.Errorf("invalid status %q", fields["status"])
+	}
+	id, err := requiredStatusField(fields, "id")
+	if err != nil {
+		return statusFile{}, err
+	}
+	unit, err := requiredStatusField(fields, "unit")
+	if err != nil {
+		return statusFile{}, err
+	}
+	action, ok := ParseAction(Action(fields["action"]))
+	if !ok {
+		return statusFile{}, fmt.Errorf("invalid action %q", fields["action"])
+	}
+	channel, ok := ParseChannel(Channel(fields["channel"]))
+	if !ok {
+		return statusFile{}, fmt.Errorf("invalid channel %q", fields["channel"])
+	}
+	startedAt, err := requiredStatusField(fields, "started_at")
+	if err != nil {
+		return statusFile{}, err
+	}
+	item := statusFile{
+		ID:         id,
+		Unit:       unit,
+		Status:     status,
+		Action:     action,
+		Channel:    channel,
+		StartedAt:  startedAt,
+		FinishedAt: fields["finished_at"],
+	}
+	if raw := fields["exit_code"]; raw != "" {
+		code, err := strconv.Atoi(raw)
+		if err != nil {
+			return statusFile{}, fmt.Errorf("invalid exit_code %q: %w", raw, err)
+		}
+		item.ExitCode = &code
+	}
+	return item, nil
+}
+
+func parseStatus(status Status) (Status, bool) {
+	switch Status(strings.TrimSpace(string(status))) {
+	case StatusRunning:
+		return StatusRunning, true
+	case StatusCompleted:
+		return StatusCompleted, true
+	case StatusFailed:
+		return StatusFailed, true
+	default:
+		return StatusIdle, false
+	}
+}
+
+func requiredStatusField(fields map[string]string, key string) (string, error) {
+	value := strings.TrimSpace(fields[key])
+	if value == "" {
+		return "", fmt.Errorf("missing %s", key)
+	}
+	return value, nil
+}
+
+func readStatusFields(path string) (map[string]string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
 	}
 	defer f.Close()
 
 	fields := make(map[string]string)
 	scanner := bufio.NewScanner(f)
+	lineNo := 0
 	for scanner.Scan() {
+		lineNo++
 		line := strings.TrimSpace(scanner.Text())
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue
 		}
 		key, value, ok := strings.Cut(line, "=")
 		if !ok {
-			continue
+			return nil, fmt.Errorf("%s:%d: expected key=value", path, lineNo)
 		}
-		fields[strings.TrimSpace(key)] = strings.TrimSpace(value)
+		key = strings.TrimSpace(key)
+		if key == "" {
+			return nil, fmt.Errorf("%s:%d: empty key", path, lineNo)
+		}
+		fields[key] = strings.TrimSpace(value)
 	}
 	if err := scanner.Err(); err != nil {
-		return statusFile{}, err
+		return nil, err
 	}
-
-	status := Status(fields["status"])
-	if status == "" {
-		status = StatusIdle
-	}
-	item := statusFile{
-		ID:         fields["id"],
-		Unit:       fields["unit"],
-		Status:     status,
-		Action:     Action(fields["action"]),
-		Channel:    Channel(fields["channel"]),
-		StartedAt:  fields["started_at"],
-		FinishedAt: fields["finished_at"],
-		LogFile:    fields["log_file"],
-	}
-	if raw := fields["exit_code"]; raw != "" {
-		code, err := strconv.Atoi(raw)
-		if err == nil {
-			item.ExitCode = &code
-		}
-	}
-	return item, nil
+	return fields, nil
 }
 
 func writeUpdateStatusFile(path string, item statusFile) error {
@@ -568,7 +642,7 @@ func writeUpdateStatusFile(path string, item statusFile) error {
 	}
 	writeStatusField(&b, "log_file", item.LogFile)
 
-	if err := os.WriteFile(tmp, []byte(b.String()), 0o644); err != nil {
+	if err := os.WriteFile(tmp, []byte(b.String()), 0o600); err != nil {
 		return err
 	}
 	return os.Rename(tmp, path)
@@ -618,7 +692,8 @@ func updateUnavailableReason(err error) string {
 }
 
 const updateRunnerScript = `#!/usr/bin/env bash
-set -uo pipefail
+set -euo pipefail
+umask 077
 
 status_file="$1"
 log_file="$2"

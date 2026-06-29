@@ -27,7 +27,11 @@ func releaseNotesRoute(r *routes.Blueprint, h *handler) {
 func (h *handler) releaseNotesHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 
-	sourceURL := releaseNotesURL(r.URL.Query().Get("lang"))
+	sourceURL, ok := releaseNotesURL(r.URL.Query().Get("lang"))
+	if !ok {
+		httperr.Write(w, http.StatusBadRequest, "invalid_fields", "invalid lang")
+		return
+	}
 	html, err := h.fetchReleaseNotes(r, sourceURL)
 	if err != nil {
 		httperr.Write(w, http.StatusBadGateway, "release_notes_fetch_failed", "failed to fetch release notes")
@@ -40,11 +44,15 @@ func (h *handler) releaseNotesHandler(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func releaseNotesURL(lang string) string {
-	if strings.HasPrefix(strings.ToLower(strings.TrimSpace(lang)), "en") {
-		return "https://www.ithiltir.dev/en/docs/ReleaseNotes"
+func releaseNotesURL(lang string) (string, bool) {
+	switch strings.ToLower(strings.TrimSpace(lang)) {
+	case "zh":
+		return "https://www.ithiltir.dev/docs/ReleaseNotes", true
+	case "en":
+		return "https://www.ithiltir.dev/en/docs/ReleaseNotes", true
+	default:
+		return "", false
 	}
-	return "https://www.ithiltir.dev/docs/ReleaseNotes"
 }
 
 func (h *handler) fetchReleaseNotes(r *http.Request, sourceURL string) (string, error) {
