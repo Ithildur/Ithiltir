@@ -134,7 +134,7 @@ export const alertEventCustomRangeLabel = (
   if (filter.range !== 'custom') return '';
   const from = isoFromLocal(filter.fromLocal);
   const to = isoFromLocal(filter.toLocal);
-  if (!timeRangeReady(from, to)) return '';
+  if (!from || !to || !timeRangeReady(from, to)) return '';
   const options: Intl.DateTimeFormatOptions = {
     month: '2-digit',
     day: '2-digit',
