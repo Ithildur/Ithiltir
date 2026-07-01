@@ -193,6 +193,13 @@ const conflictStatus = (error: unknown): adminApi.DashUpdateStatus | null => {
   return details as adminApi.DashUpdateStatus;
 };
 
+const updateStatusKey = (
+  status: adminApi.DashUpdateStatusValue,
+  id?: string,
+  startedAt?: string,
+  finishedAt?: string,
+): string => id || `${status}:${startedAt ?? ''}:${finishedAt ?? ''}`;
+
 const CheckFailedDialog: React.FC<{
   message: string;
   title: string;
@@ -291,9 +298,16 @@ const DashUpdateSettings: React.FC<Props> = ({
   const checkSeqRef = React.useRef(0);
   const checkRequestRef = React.useRef<{ seq: number; controller: AbortController } | null>(null);
   const lastUpdateStatusRef = React.useRef<adminApi.DashUpdateStatusValue | null>(null);
+  const announcedUpdateRef = React.useRef('');
+  const syncedCompletedUpdateRef = React.useRef('');
 
   const channel = settings?.dash_update_channel ?? 'release';
   const updateMode = settings?.dash_update_mode ?? 'manual';
+  const updateStatusValue = updateStatus?.status ?? null;
+  const updateStatusID = updateStatus?.id;
+  const updateStartedAt = updateStatus?.started_at;
+  const updateFinishedAt = updateStatus?.finished_at;
+  const updateChannel = updateStatus?.channel;
   const isPrerelease = channel === 'prerelease';
   const needsNotifyTarget = updateMode === 'notify' || updateMode === 'auto';
   const latestNote = React.useMemo(
@@ -304,8 +318,8 @@ const DashUpdateSettings: React.FC<Props> = ({
   const checkingStatus = loadingVersion || loadingUpdateStatus;
   const checking = checkingStatus || loadingNotes;
   const checkingUpdate = checkRequested && checking;
-  const isUpdateRunning = updateStatus?.status === 'running' || startingUpdate !== null;
-  const hasUpdateJob = Boolean(updateStatus && updateStatus.status !== 'idle');
+  const isUpdateRunning = updateStatusValue === 'running' || startingUpdate !== null;
+  const hasUpdateJob = Boolean(updateStatus && updateStatusValue !== 'idle');
   const showJob = hasChecked || hasUpdateJob;
   const versionStatus = statusFromCheck(versionCheck?.version_status);
   const jobBadge = updateJobBadge(updateStatus);
@@ -331,12 +345,12 @@ const DashUpdateSettings: React.FC<Props> = ({
     }).format(new Date(lastCheckedAt));
   }, [lang, lastCheckedAt]);
   const currentVersionText =
-    versionCheck?.current_version ??
     version?.version ??
+    versionCheck?.current_version ??
     (loadingVersion ? t('loading') : t('common_unknown'));
   const nodeVersionText =
-    versionCheck?.bundled_node_version ??
     version?.node_version ??
+    versionCheck?.bundled_node_version ??
     (loadingVersion ? t('loading') : t('common_unknown'));
   const latestVersionText = versionCheck?.latest_version ?? '-';
   const updaterBadge = React.useMemo((): { label: string; color: BadgeColor } => {
@@ -442,26 +456,49 @@ const DashUpdateSettings: React.FC<Props> = ({
     [],
   );
 
-  const refreshVersionCheck = React.useCallback(
+  const syncCompletedUpdate = React.useCallback(
     async (targetChannel: DashUpdateChannel, signal: AbortSignal) => {
       setCheckRequested(true);
       setLoadingVersion(true);
+      setVersionCheck(null);
+
+      const versionTask = fetchAppVersion({ signal }).then(
+        (next) => ({ ok: true as const, next }),
+        (error: unknown) => ({ ok: false as const, error }),
+      );
+      const checkTask = adminApi.fetchDashUpdateCheck({ channel: targetChannel, signal }).then(
+        (next) => ({ ok: true as const, next }),
+        (error: unknown) => ({ ok: false as const, error }),
+      );
+
       try {
-        const nextCheck = await adminApi.fetchDashUpdateCheck({
-          channel: targetChannel,
-          signal,
-        });
+        const [versionResult, checkResult] = await Promise.all([versionTask, checkTask]);
         if (signal.aborted) return;
-        setVersionCheck(nextCheck);
-        setVersion({
-          version: nextCheck.current_version,
-          node_version: nextCheck.bundled_node_version,
-        });
-        setBundledNodeVersion(nextCheck.bundled_node_version);
-        setLastCheckedAt(Date.now());
-      } catch (error) {
-        if (isCanceledRequestError(error)) return;
-        apiError(error, { key: 'admin_dash_update_version_fetch_failed' });
+
+        if (versionResult.ok) {
+          setVersion(versionResult.next);
+          setBundledNodeVersion(versionResult.next.node_version ?? '');
+        }
+        if (checkResult.ok) {
+          setVersionCheck(checkResult.next);
+          if (!versionResult.ok) {
+            setVersion({
+              version: checkResult.next.current_version,
+              node_version: checkResult.next.bundled_node_version,
+            });
+            setBundledNodeVersion(checkResult.next.bundled_node_version);
+          }
+          setLastCheckedAt(Date.now());
+        }
+
+        const error = !checkResult.ok
+          ? checkResult.error
+          : !versionResult.ok
+            ? versionResult.error
+            : null;
+        if (error && !isCanceledRequestError(error)) {
+          apiError(error, { key: 'admin_dash_update_version_fetch_failed' });
+        }
       } finally {
         if (!signal.aborted) setLoadingVersion(false);
       }
@@ -505,7 +542,7 @@ const DashUpdateSettings: React.FC<Props> = ({
   }, [cancelCheck, channel, lang]);
 
   React.useEffect(() => {
-    if (!enabled || updateStatus?.status !== 'running') return;
+    if (!enabled || updateStatusValue !== 'running') return;
     const controller = new AbortController();
     const timer = window.setInterval(() => {
       void loadUpdateStatus(controller.signal, true);
@@ -514,41 +551,55 @@ const DashUpdateSettings: React.FC<Props> = ({
       window.clearInterval(timer);
       controller.abort();
     };
-  }, [enabled, loadUpdateStatus, updateStatus?.status]);
+  }, [enabled, loadUpdateStatus, updateStatusValue]);
 
   React.useEffect(() => {
     const previous = lastUpdateStatusRef.current;
-    const current = updateStatus?.status ?? null;
-    lastUpdateStatusRef.current = current;
+    lastUpdateStatusRef.current = updateStatusValue;
 
     if (
       !enabled ||
-      previous !== 'running' ||
-      (current !== 'completed' && current !== 'failed')
+      (updateStatusValue !== 'completed' && updateStatusValue !== 'failed')
     ) {
       return;
     }
 
-    pushTopBanner(
-      current === 'completed'
-        ? t('admin_dash_update_job_completed')
-        : t('admin_dash_update_job_failed'),
-      { tone: current === 'completed' ? 'info' : 'error', durationMs: 6000 },
+    const statusKey = updateStatusKey(
+      updateStatusValue,
+      updateStatusID,
+      updateStartedAt,
+      updateFinishedAt,
     );
+    if (previous === 'running' && announcedUpdateRef.current !== statusKey) {
+      announcedUpdateRef.current = statusKey;
+      pushTopBanner(
+        updateStatusValue === 'completed'
+          ? t('admin_dash_update_job_completed')
+          : t('admin_dash_update_job_failed'),
+        { tone: updateStatusValue === 'completed' ? 'info' : 'error', durationMs: 6000 },
+      );
+    }
+
+    if (updateStatusValue !== 'completed' || syncedCompletedUpdateRef.current === statusKey) {
+      return;
+    }
+    syncedCompletedUpdateRef.current = statusKey;
 
     const controller = new AbortController();
-    void refreshVersionCheck(updateStatus?.channel ?? channel, controller.signal);
+    void syncCompletedUpdate(updateChannel ?? channel, controller.signal);
     return () => {
       controller.abort();
     };
   }, [
     channel,
     enabled,
-    refreshVersionCheck,
+    syncCompletedUpdate,
     t,
-    updateStatus?.channel,
-    updateStatus?.id,
-    updateStatus?.status,
+    updateChannel,
+    updateFinishedAt,
+    updateStartedAt,
+    updateStatusID,
+    updateStatusValue,
   ]);
 
   const checkUpdate = React.useCallback(async () => {
