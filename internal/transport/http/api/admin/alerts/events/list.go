@@ -22,7 +22,9 @@ const (
 )
 
 type listView struct {
-	Items []eventView `json:"items"`
+	Items      []eventView `json:"items"`
+	NextCursor *string     `json:"next_cursor"`
+	HasMore    bool        `json:"has_more"`
 }
 
 type eventView struct {
@@ -64,14 +66,31 @@ func (h *handler) listHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	items, err := infra.WithPGReadTimeout(r.Context(), func(c context.Context) ([]alertstore.AlertEventItem, error) {
-		return h.alerts.ListEvents(c, query)
+		storeQuery := query
+		storeQuery.Limit = query.Limit + 1
+		return h.alerts.ListEvents(c, storeQuery)
 	})
 	if err != nil {
 		httperr.Write(w, http.StatusServiceUnavailable, "db_error", "failed to fetch alert events")
 		return
 	}
 
-	response.WriteJSON(w, http.StatusOK, listView{Items: eventViews(items)})
+	hasMore := len(items) > query.Limit
+	if hasMore {
+		items = items[:query.Limit]
+	}
+
+	var nextCursor *string
+	if hasMore && len(items) > 0 {
+		cursor := eventCursor(items[len(items)-1])
+		nextCursor = &cursor
+	}
+
+	response.WriteJSON(w, http.StatusOK, listView{
+		Items:      eventViews(items),
+		NextCursor: nextCursor,
+		HasMore:    hasMore,
+	})
 }
 
 func parseListQuery(q url.Values) (alertstore.AlertEventQuery, error) {
@@ -95,6 +114,10 @@ func parseListQuery(q url.Values) (alertstore.AlertEventQuery, error) {
 	if err != nil {
 		return alertstore.AlertEventQuery{}, errors.New("invalid to")
 	}
+	cursor, err := parseEventCursor(q.Get("cursor"))
+	if err != nil {
+		return alertstore.AlertEventQuery{}, err
+	}
 	if from != nil && to != nil && from.After(*to) {
 		return alertstore.AlertEventQuery{}, errors.New("from must be before to")
 	}
@@ -105,6 +128,7 @@ func parseListQuery(q url.Values) (alertstore.AlertEventQuery, error) {
 		Metric:   strings.TrimSpace(q.Get("metric")),
 		From:     from,
 		To:       to,
+		Cursor:   cursor,
 		Limit:    limit,
 	}, nil
 }
@@ -160,6 +184,30 @@ func parseTimeParam(raw string) (*time.Time, error) {
 	}
 	t = t.UTC()
 	return &t, nil
+}
+
+func parseEventCursor(raw string) (*alertstore.AlertEventCursor, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil, nil
+	}
+	rawAt, rawID, ok := strings.Cut(raw, ",")
+	if !ok {
+		return nil, errors.New("invalid cursor")
+	}
+	at, err := time.Parse(time.RFC3339Nano, rawAt)
+	if err != nil {
+		return nil, errors.New("invalid cursor")
+	}
+	id, err := strconv.ParseInt(rawID, 10, 64)
+	if err != nil || id <= 0 {
+		return nil, errors.New("invalid cursor")
+	}
+	return &alertstore.AlertEventCursor{LastTriggerAt: at.UTC(), ID: id}, nil
+}
+
+func eventCursor(item alertstore.AlertEventItem) string {
+	return item.LastTriggerAt.UTC().Format(time.RFC3339Nano) + "," + strconv.FormatInt(item.ID, 10)
 }
 
 func eventViews(items []alertstore.AlertEventItem) []eventView {

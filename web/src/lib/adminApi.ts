@@ -5,6 +5,7 @@ import type {
   AlertEventServerList,
   AlertEventStatusFilter,
   AlertEventSummaryList,
+  AlertSettings,
   AlertRule,
   AlertRuleInput,
   AlertMounts,
@@ -163,12 +164,26 @@ export const updateAlertMounts = (input: {
     responseType: 'empty',
   });
 
+export const fetchAlertSettings = (params: { signal?: AbortSignal } = {}) =>
+  apiFetch<AlertSettings>('/admin/alerts/settings', {
+    method: 'GET',
+    signal: params.signal,
+  });
+
+export const updateAlertSettings = (input: { enabled: boolean; channel_ids: number[] }) =>
+  apiFetch('/admin/alerts/settings', {
+    method: 'PUT',
+    json: input,
+    responseType: 'empty',
+  });
+
 export interface FetchAlertEventsParams {
   serverId?: number;
   status?: AlertEventStatusFilter;
   metric?: string;
   from?: string;
   to?: string;
+  cursor?: string;
   limit?: number;
   signal?: AbortSignal;
 }
@@ -180,6 +195,7 @@ const alertEventSearchParams = (params: FetchAlertEventsParams): URLSearchParams
   if (params.metric) search.set('metric', params.metric);
   if (params.from) search.set('from', params.from);
   if (params.to) search.set('to', params.to);
+  if (params.cursor) search.set('cursor', params.cursor);
   if (params.limit && params.limit > 0) search.set('limit', String(params.limit));
   return search;
 };

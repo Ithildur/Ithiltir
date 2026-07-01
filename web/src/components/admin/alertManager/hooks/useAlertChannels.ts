@@ -1,9 +1,10 @@
 import React from 'react';
 import { useI18n, type TranslationKey } from '@i18n';
-import type { AlertChannel } from '@app-types/admin';
+import type { AlertChannel, AlertSettings } from '@app-types/admin';
 import { pushTopBanner } from '@runtime/topBannerRuntime';
 import { useApiErrorHandler } from '@hooks/useApiErrorHandler';
 import type { ConfirmAction } from '@hooks/useConfirmDialog';
+import * as adminApi from '@lib/adminApi';
 import {
   deleteAlertChannel,
   loadAlertChannels,
@@ -40,6 +41,9 @@ export const useAlertChannels = ({
   const testingIds = useAlertChannelsStore((state) => state.testingIds);
   const togglingIds = useAlertChannelsStore((state) => state.togglingIds);
   const saving = useAlertChannelsStore((state) => state.saving);
+  const [settings, setSettings] = React.useState<AlertSettings | null>(null);
+  const [loadingSettings, setLoadingSettings] = React.useState(false);
+  const [savingSettings, setSavingSettings] = React.useState(false);
   const [modal, setModal] = React.useState<{ editingChannelId: number | null } | null>(null);
   const isModalOpen = modal !== null;
   const editingChannelId = modal?.editingChannelId ?? null;
@@ -69,14 +73,82 @@ export const useAlertChannels = ({
     [apiError],
   );
 
+  const fetchSettings = React.useCallback(
+    async (params: { signal?: AbortSignal } = {}) => {
+      setLoadingSettings(true);
+      try {
+        setSettings(await adminApi.fetchAlertSettings(params));
+      } catch (error) {
+        if (isCanceledRequestError(error)) return;
+        apiError(error, { key: 'admin_alerts_settings_fetch_failed' });
+      } finally {
+        if (!params.signal?.aborted) setLoadingSettings(false);
+      }
+    },
+    [apiError],
+  );
+
   React.useEffect(() => {
     if (!enabled) return;
     const controller = new AbortController();
     void fetchChannels({ signal: controller.signal });
+    void fetchSettings({ signal: controller.signal });
     return () => {
       controller.abort();
     };
-  }, [enabled, fetchChannels]);
+  }, [enabled, fetchChannels, fetchSettings]);
+
+  const saveSettings = React.useCallback(
+    async (next: { enabled: boolean; channelIds: number[] }) => {
+      if (!settings || savingSettings) return;
+      const channelIds = [...new Set(next.channelIds)].filter((id) => id > 0);
+      setSavingSettings(true);
+      try {
+        await adminApi.updateAlertSettings({
+          enabled: next.enabled,
+          channel_ids: channelIds,
+        });
+        setSettings((current) =>
+          current
+            ? {
+                ...current,
+                enabled: next.enabled,
+                channel_ids: channelIds,
+              }
+            : current,
+        );
+        pushTopBanner(t('admin_alerts_settings_saved'), { tone: 'info' });
+      } catch (error) {
+        apiError(error, { key: 'admin_alerts_settings_save_failed' });
+      } finally {
+        setSavingSettings(false);
+      }
+    },
+    [apiError, savingSettings, settings, t],
+  );
+
+  const toggleSettingsEnabled = React.useCallback(() => {
+    if (!settings) return;
+    void saveSettings({
+      enabled: !settings.enabled,
+      channelIds: settings.channel_ids,
+    });
+  }, [saveSettings, settings]);
+
+  const toggleSettingsChannel = React.useCallback(
+    (id: number) => {
+      if (!settings) return;
+      const selected = new Set(settings.channel_ids);
+      if (selected.has(id)) selected.delete(id);
+      else selected.add(id);
+      void saveSettings({
+        enabled: settings.enabled,
+        channelIds: [...selected],
+      });
+    },
+    [saveSettings, settings],
+  );
+
 
   const openAdd = React.useCallback(() => {
     setModal({ editingChannelId: null });
@@ -163,6 +235,9 @@ export const useAlertChannels = ({
           try {
             const didDelete = await deleteAlertChannel(channel.id);
             if (!didDelete) return;
+            if (settings?.channel_ids.includes(channel.id)) {
+              await fetchSettings();
+            }
             pushTopBanner(t('admin_alerts_channels_delete_success'), { tone: 'info' });
           } catch (error) {
             apiError(error, t('admin_alerts_channels_delete_failed'));
@@ -170,7 +245,7 @@ export const useAlertChannels = ({
         },
       );
     },
-    [confirmAction, apiError, t],
+    [confirmAction, apiError, fetchSettings, settings, t],
   );
 
   const modalForm = React.useMemo(
@@ -181,6 +256,9 @@ export const useAlertChannels = ({
   return {
     channels,
     loading,
+    settings,
+    loadingSettings,
+    savingSettings,
     testingIds,
     togglingIds,
     saving,
@@ -195,6 +273,8 @@ export const useAlertChannels = ({
     testChannel,
     saveChannel,
     deleteChannel,
+    toggleSettingsEnabled,
+    toggleSettingsChannel,
     refresh: fetchChannels,
   };
 };

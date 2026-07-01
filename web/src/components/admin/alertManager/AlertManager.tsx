@@ -142,8 +142,13 @@ const AlertManager: React.FC = () => {
         <AlertChannelsPanel
           channels={channels.channels}
           loading={channels.loading}
+          settings={channels.settings}
+          loadingSettings={channels.loadingSettings}
+          savingSettings={channels.savingSettings}
           togglingIds={channels.togglingIds}
           testingIds={channels.testingIds}
+          onToggleSettingsEnabled={channels.toggleSettingsEnabled}
+          onToggleSettingsChannel={channels.toggleSettingsChannel}
           onToggleEnabled={channels.toggleEnabled}
           onEdit={channels.openEdit}
           onDelete={channels.deleteChannel}

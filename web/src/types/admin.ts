@@ -136,6 +136,13 @@ export interface AlertMounts {
   nodes: AlertMountNode[];
 }
 
+export interface AlertSettings {
+  enabled: boolean;
+  channel_ids: number[];
+  created_at: ISODateString;
+  updated_at: ISODateString;
+}
+
 export interface TelegramBotConfig {
   mode?: 'bot';
   chat_id: string;
@@ -241,6 +248,8 @@ export interface AlertEvent {
 
 export interface AlertEventList {
   items: AlertEvent[];
+  next_cursor: string | null;
+  has_more: boolean;
 }
 
 export interface AlertEventSummary {
@@ -249,6 +258,7 @@ export interface AlertEventSummary {
   last_trigger_at: ISODateString;
   metric: string;
   rule_name: string;
+  metrics?: string[];
 }
 
 export interface AlertEventSummaryList {

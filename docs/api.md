@@ -79,9 +79,9 @@ Optional bearer endpoints treat a missing, malformed, expired, revoked, or other
 
 ## Admin Alert Events
 
-- `GET /api/admin/alerts/events` returns alert events for active nodes as `{ "items": [...] }`. Deleted nodes are not included. Each item includes `id`, `rule_id`, `rule_generation`, `server_id`, `server_name`, `server_hostname`, `status`, `metric`, `rule_name`, `first_trigger_at`, and `last_trigger_at`. `server_ip`, `closed_at`, `current_value`, `effective_threshold`, `close_reason`, `title`, and `message` are present when available.
-- Query parameters: `server_id` filters by node; `status` allows `open`, `closed`, and `all`, defaulting to `open`; `metric` filters by alert metric name; `from` and `to` are optional RFC3339 timestamps and filter on `last_trigger_at` when supplied; `limit` defaults to 200 and is capped at 500.
-- `GET /api/admin/alerts/events/summary` returns current open alert summaries as `{ "items": [...] }`. Each item includes `server_id`, `open_count`, `last_trigger_at`, `metric`, and `rule_name` for the node overview. The summary has no time filter.
+- `GET /api/admin/alerts/events` returns alert events for active nodes as `{ "items": [...], "next_cursor": "...", "has_more": true }`. Deleted nodes are not included. When `has_more=false`, `next_cursor` is `null`. Each item includes `id`, `rule_id`, `rule_generation`, `server_id`, `server_name`, `server_hostname`, `status`, `metric`, `rule_name`, `first_trigger_at`, and `last_trigger_at`. `server_ip`, `closed_at`, `current_value`, `effective_threshold`, `close_reason`, `title`, and `message` are present when available.
+- Query parameters: `server_id` filters by node; `status` allows `open`, `closed`, and `all`, defaulting to `open`; `metric` filters by alert metric name; `from` and `to` are optional RFC3339 timestamps and filter on `last_trigger_at` when supplied; `limit` defaults to 200 and is capped at 500; `cursor` uses the previous response `next_cursor` to continue the `last_trigger_at DESC, id DESC` order.
+- `GET /api/admin/alerts/events/summary` returns current open alert summaries as `{ "items": [...] }`. Each item includes `server_id`, `open_count`, `last_trigger_at`, `metric`, `rule_name`, and `metrics` for the node overview. `metric` and `rule_name` describe the latest open event; `metrics` lists open event metrics in latest-first order. The summary has no time filter.
 - `GET /api/admin/alerts/events/servers` returns active server filter options as `{ "items": [{ "id": 1, "name": "..." }] }`.
 
 ## Admin System Settings

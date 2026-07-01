@@ -3,6 +3,7 @@ package alert
 import (
 	"context"
 	"errors"
+	"strings"
 	"time"
 
 	"dash/internal/model"
@@ -25,7 +26,13 @@ type AlertEventQuery struct {
 	Metric   string
 	From     *time.Time
 	To       *time.Time
+	Cursor   *AlertEventCursor
 	Limit    int
+}
+
+type AlertEventCursor struct {
+	LastTriggerAt time.Time
+	ID            int64
 }
 
 type AlertEventItem struct {
@@ -55,6 +62,16 @@ type OpenEventSummary struct {
 	LastTriggerAt time.Time
 	Metric        string
 	RuleName      string
+	Metrics       []string
+}
+
+type openEventSummaryRow struct {
+	ServerID      int64
+	OpenCount     int64
+	LastTriggerAt time.Time
+	Metric        string
+	RuleName      string
+	MetricsText   string
 }
 
 func (s *Store) ListOpenEvents(ctx context.Context) ([]model.AlertEvent, error) {
@@ -142,6 +159,14 @@ func (s *Store) ListEvents(ctx context.Context, q AlertEventQuery) ([]AlertEvent
 	if q.To != nil {
 		db = db.Where("alert_events.last_trigger_at <= ?", *q.To)
 	}
+	if q.Cursor != nil {
+		db = db.Where(
+			"(alert_events.last_trigger_at < ? OR (alert_events.last_trigger_at = ? AND alert_events.id < ?))",
+			q.Cursor.LastTriggerAt,
+			q.Cursor.LastTriggerAt,
+			q.Cursor.ID,
+		)
+	}
 
 	var items []AlertEventItem
 	db = db.
@@ -163,6 +188,11 @@ func (s *Store) ListOpenEventSummaries(ctx context.Context) ([]OpenEventSummary,
 			alert_events.last_trigger_at,
 			COALESCE(alert_events.rule_snapshot ->> 'metric', '') AS metric,
 			COALESCE(alert_events.rule_snapshot ->> 'name', '') AS rule_name,
+			STRING_AGG(COALESCE(alert_events.rule_snapshot ->> 'metric', ''), E'\n') OVER (
+				PARTITION BY alert_events.object_id
+				ORDER BY alert_events.last_trigger_at DESC, alert_events.id DESC
+				ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING
+			) AS metrics_text,
 			ROW_NUMBER() OVER (
 				PARTITION BY alert_events.object_id
 				ORDER BY alert_events.last_trigger_at DESC, alert_events.id DESC
@@ -176,15 +206,45 @@ func (s *Store) ListOpenEventSummaries(ctx context.Context) ([]OpenEventSummary,
 			false,
 		)
 
-	var items []OpenEventSummary
+	var rows []openEventSummaryRow
 	err := s.db.WithContext(ctx).
 		Table("(?) AS ranked", ranked).
-		Select("server_id, open_count, last_trigger_at, metric, rule_name").
+		Select("server_id, open_count, last_trigger_at, metric, rule_name, metrics_text").
 		Where("row_rank = 1").
 		Order("last_trigger_at DESC").
 		Order("server_id ASC").
-		Scan(&items).Error
-	return items, err
+		Scan(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+	items := make([]OpenEventSummary, 0, len(rows))
+	for _, row := range rows {
+		items = append(items, OpenEventSummary{
+			ServerID:      row.ServerID,
+			OpenCount:     row.OpenCount,
+			LastTriggerAt: row.LastTriggerAt,
+			Metric:        row.Metric,
+			RuleName:      row.RuleName,
+			Metrics:       splitSummaryMetrics(row.MetricsText, row.Metric),
+		})
+	}
+	return items, nil
+}
+
+func splitSummaryMetrics(raw, fallback string) []string {
+	parts := strings.Split(raw, "\n")
+	out := make([]string, 0, len(parts))
+	for _, part := range parts {
+		metric := strings.TrimSpace(part)
+		if metric == "" {
+			continue
+		}
+		out = append(out, metric)
+	}
+	if len(out) == 0 && fallback != "" {
+		out = append(out, fallback)
+	}
+	return out
 }
 
 func (s *Store) TouchOpenEvent(ctx context.Context, eventID int64, triggeredAt time.Time, currentValue, effectiveThreshold float64) (bool, error) {

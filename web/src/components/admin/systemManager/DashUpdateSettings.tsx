@@ -3,6 +3,7 @@ import ExternalLink from 'lucide-react/dist/esm/icons/external-link';
 import LoaderCircle from 'lucide-react/dist/esm/icons/loader-circle';
 import RefreshCw from 'lucide-react/dist/esm/icons/refresh-cw';
 import RotateCcw from 'lucide-react/dist/esm/icons/rotate-ccw';
+import { Link } from 'react-router-dom';
 import type { AppVersion } from '@app-types/api';
 import type { DashUpdateChannel, DashUpdateMode, SystemSettings } from '@app-types/admin';
 import Badge, { type BadgeColor } from '@components/ui/Badge';
@@ -12,6 +13,7 @@ import IOSSwitch from '@components/ui/IOSSwitch';
 import { Modal, ModalBody, ModalFooter, ModalHeader } from '@components/ui/Modal';
 import { Tooltip } from '@components/ui/Tooltip';
 import { pushTopBanner } from '@runtime/topBannerRuntime';
+import { setBundledNodeVersion } from '@stores/adminNodesStore';
 import { useI18n, type TranslationKey } from '@i18n';
 import { ApiError } from '@lib/api';
 import * as adminApi from '@lib/adminApi';
@@ -39,6 +41,12 @@ type VersionStatus = {
     | 'admin_dash_update_status_ahead'
     | 'admin_dash_update_status_unknown';
   color: BadgeColor;
+};
+
+type NotifyTargets = {
+  settingsEnabled: boolean;
+  selectedCount: number;
+  activeCount: number;
 };
 
 const unknownVersionStatus: VersionStatus = {
@@ -118,6 +126,8 @@ const updateJobBadge = (
       return { labelKey: 'admin_dash_update_job_status_idle', color: 'slate' };
   }
 };
+
+const notificationTargetPath = '/admin?tab=alerts&alerts_tab=channels';
 
 const UpdateRow: React.FC<{
   label: string;
@@ -272,15 +282,20 @@ const DashUpdateSettings: React.FC<Props> = ({
   const [lastCheckedAt, setLastCheckedAt] = React.useState<number | null>(null);
   const [updateStatus, setUpdateStatus] = React.useState<adminApi.DashUpdateStatus | null>(null);
   const [loadingUpdateStatus, setLoadingUpdateStatus] = React.useState(false);
+  const [notifyTargets, setNotifyTargets] = React.useState<NotifyTargets | null>(null);
+  const [loadingNotifyTargets, setLoadingNotifyTargets] = React.useState(false);
+  const [notifyTargetsFailed, setNotifyTargetsFailed] = React.useState(false);
   const [startingUpdate, setStartingUpdate] = React.useState<adminApi.DashUpdateAction | null>(
     null,
   );
   const checkSeqRef = React.useRef(0);
   const checkRequestRef = React.useRef<{ seq: number; controller: AbortController } | null>(null);
+  const lastUpdateStatusRef = React.useRef<adminApi.DashUpdateStatusValue | null>(null);
 
   const channel = settings?.dash_update_channel ?? 'release';
   const updateMode = settings?.dash_update_mode ?? 'manual';
   const isPrerelease = channel === 'prerelease';
+  const needsNotifyTarget = updateMode === 'notify' || updateMode === 'auto';
   const latestNote = React.useMemo(
     () => latestNoteForChannel(releaseNotes, channel),
     [channel, releaseNotes],
@@ -307,7 +322,7 @@ const DashUpdateSettings: React.FC<Props> = ({
     ? updateStatus?.unavailable_reason || t('admin_dash_update_job_unavailable')
     : '';
   const checkDisabled =
-    !settings || loadingSettings || savingChannel || checking || isUpdateRunning;
+    !settings || loadingSettings || savingChannel || checking || isUpdateRunning || updateUnavailable;
   const lastCheckedLabel = React.useMemo(() => {
     if (!lastCheckedAt) return '';
     return new Intl.DateTimeFormat(lang === 'en' ? 'en-US' : 'zh-CN', {
@@ -324,12 +339,53 @@ const DashUpdateSettings: React.FC<Props> = ({
     version?.node_version ??
     (loadingVersion ? t('loading') : t('common_unknown'));
   const latestVersionText = versionCheck?.latest_version ?? '-';
+  const updaterBadge = React.useMemo((): { label: string; color: BadgeColor } => {
+    if (loadingUpdateStatus && !updateStatus) return { label: t('loading'), color: 'slate' };
+    if (updateStatus?.available === false) {
+      return { label: t('admin_dash_update_runner_unavailable'), color: 'rose' };
+    }
+    if (updateStatus?.available === true) {
+      return { label: t('admin_dash_update_runner_available'), color: 'emerald' };
+    }
+    return { label: t('admin_dash_update_status_unknown'), color: 'slate' };
+  }, [loadingUpdateStatus, t, updateStatus]);
+  const updaterStatusHint =
+    updateStatus?.available === false
+      ? updateStatus.unavailable_reason || t('admin_dash_update_job_unavailable')
+      : t('admin_dash_update_runner_available_hint');
+  const notifyTargetBadge = React.useMemo((): { label: string; color: BadgeColor } => {
+    if (loadingNotifyTargets) return { label: t('loading'), color: 'slate' };
+    if (notifyTargetsFailed) {
+      return { label: t('admin_dash_update_notify_target_failed'), color: 'rose' };
+    }
+    if (!notifyTargets?.settingsEnabled) {
+      return { label: t('admin_dash_update_notify_target_disabled'), color: 'amber' };
+    }
+    if (notifyTargets.activeCount > 0) {
+      return {
+        label: t('admin_dash_update_notify_target_ready', {
+          count: String(notifyTargets.activeCount),
+        }),
+        color: 'emerald',
+      };
+    }
+    return { label: t('admin_dash_update_notify_target_missing'), color: 'rose' };
+  }, [loadingNotifyTargets, notifyTargets, notifyTargetsFailed, t]);
+  const notifyTargetHint = React.useMemo(() => {
+    if (!notifyTargets?.settingsEnabled) return t('admin_dash_update_notify_target_disabled_hint');
+    if ((notifyTargets?.selectedCount ?? 0) > 0 && notifyTargets?.activeCount === 0) {
+      return t('admin_dash_update_notify_target_paused_hint');
+    }
+    return t('admin_dash_update_notify_target_hint');
+  }, [notifyTargets, t]);
 
   const loadVersion = React.useCallback(
     async (signal: AbortSignal) => {
       setLoadingVersion(true);
       try {
-        setVersion(await fetchAppVersion({ signal }));
+        const next = await fetchAppVersion({ signal });
+        setVersion(next);
+        setBundledNodeVersion(next.node_version ?? '');
       } catch (error) {
         if (isCanceledRequestError(error)) return;
         apiError(error, { key: 'admin_dash_update_version_fetch_failed' });
@@ -355,15 +411,74 @@ const DashUpdateSettings: React.FC<Props> = ({
     [apiError],
   );
 
+  const loadNotifyTargets = React.useCallback(
+    async (signal: AbortSignal) => {
+      setLoadingNotifyTargets(true);
+      setNotifyTargetsFailed(false);
+      try {
+        const [settingsDoc, channels] = await Promise.all([
+          adminApi.fetchAlertSettings({ signal }),
+          adminApi.fetchAlertChannels({ signal }),
+        ]);
+        if (signal.aborted) return;
+        const selectedIDs = new Set(settingsDoc.channel_ids);
+        let activeCount = 0;
+        for (const channel of channels) {
+          if (channel.enabled && selectedIDs.has(channel.id)) activeCount += 1;
+        }
+        setNotifyTargets({
+          settingsEnabled: settingsDoc.enabled,
+          selectedCount: settingsDoc.channel_ids.length,
+          activeCount,
+        });
+      } catch (error) {
+        if (isCanceledRequestError(error)) return;
+        setNotifyTargets(null);
+        setNotifyTargetsFailed(true);
+      } finally {
+        if (!signal.aborted) setLoadingNotifyTargets(false);
+      }
+    },
+    [],
+  );
+
+  const refreshVersionCheck = React.useCallback(
+    async (targetChannel: DashUpdateChannel, signal: AbortSignal) => {
+      setCheckRequested(true);
+      setLoadingVersion(true);
+      try {
+        const nextCheck = await adminApi.fetchDashUpdateCheck({
+          channel: targetChannel,
+          signal,
+        });
+        if (signal.aborted) return;
+        setVersionCheck(nextCheck);
+        setVersion({
+          version: nextCheck.current_version,
+          node_version: nextCheck.bundled_node_version,
+        });
+        setBundledNodeVersion(nextCheck.bundled_node_version);
+        setLastCheckedAt(Date.now());
+      } catch (error) {
+        if (isCanceledRequestError(error)) return;
+        apiError(error, { key: 'admin_dash_update_version_fetch_failed' });
+      } finally {
+        if (!signal.aborted) setLoadingVersion(false);
+      }
+    },
+    [apiError],
+  );
+
   React.useEffect(() => {
     if (!enabled) return;
     const controller = new AbortController();
     void loadVersion(controller.signal);
     void loadUpdateStatus(controller.signal, true);
+    void loadNotifyTargets(controller.signal);
     return () => {
       controller.abort();
     };
-  }, [enabled, loadUpdateStatus, loadVersion]);
+  }, [enabled, loadNotifyTargets, loadUpdateStatus, loadVersion]);
 
   const cancelCheck = React.useCallback((resetLoading = true) => {
     const current = checkRequestRef.current;
@@ -400,6 +515,41 @@ const DashUpdateSettings: React.FC<Props> = ({
       controller.abort();
     };
   }, [enabled, loadUpdateStatus, updateStatus?.status]);
+
+  React.useEffect(() => {
+    const previous = lastUpdateStatusRef.current;
+    const current = updateStatus?.status ?? null;
+    lastUpdateStatusRef.current = current;
+
+    if (
+      !enabled ||
+      previous !== 'running' ||
+      (current !== 'completed' && current !== 'failed')
+    ) {
+      return;
+    }
+
+    pushTopBanner(
+      current === 'completed'
+        ? t('admin_dash_update_job_completed')
+        : t('admin_dash_update_job_failed'),
+      { tone: current === 'completed' ? 'info' : 'error', durationMs: 6000 },
+    );
+
+    const controller = new AbortController();
+    void refreshVersionCheck(updateStatus?.channel ?? channel, controller.signal);
+    return () => {
+      controller.abort();
+    };
+  }, [
+    channel,
+    enabled,
+    refreshVersionCheck,
+    t,
+    updateStatus?.channel,
+    updateStatus?.id,
+    updateStatus?.status,
+  ]);
 
   const checkUpdate = React.useCallback(async () => {
     cancelCheck(false);
@@ -441,6 +591,7 @@ const DashUpdateSettings: React.FC<Props> = ({
         version: nextCheck.current_version,
         node_version: nextCheck.bundled_node_version,
       });
+      setBundledNodeVersion(nextCheck.bundled_node_version);
       setUpdateStatus(nextStatus);
       setLastCheckedAt(Date.now());
       setLoadingVersion(false);
@@ -555,6 +706,15 @@ const DashUpdateSettings: React.FC<Props> = ({
       />
 
       <section className="overflow-hidden rounded-lg border border-(--theme-border-subtle) bg-(--theme-bg-default) dark:border-(--theme-border-default)">
+        <UpdateRow label={t('admin_dash_update_runner_title')}>
+          <div className="flex min-w-0 flex-col gap-2">
+            <div className="flex min-w-0 flex-wrap items-center gap-2">
+              <Badge color={updaterBadge.color}>{updaterBadge.label}</Badge>
+            </div>
+            <p className="wrap-break-word text-xs/5 text-(--theme-fg-muted)">{updaterStatusHint}</p>
+          </div>
+        </UpdateRow>
+
         <UpdateRow label={t('admin_dash_update_current_version')}>
           <VersionText>{currentVersionText}</VersionText>
         </UpdateRow>
@@ -619,6 +779,23 @@ const DashUpdateSettings: React.FC<Props> = ({
             })}
           </div>
         </UpdateRow>
+
+        {needsNotifyTarget ? (
+          <UpdateRow label={t('admin_dash_update_notify_target')}>
+            <div className="flex min-w-0 flex-col gap-2">
+              <div className="flex min-w-0 flex-wrap items-center gap-2">
+                <Badge color={notifyTargetBadge.color}>{notifyTargetBadge.label}</Badge>
+                <Link
+                  to={notificationTargetPath}
+                  className="text-xs font-semibold text-(--theme-fg-interactive) underline-offset-2 hover:underline"
+                >
+                  {t('admin_dash_update_notify_target_configure')}
+                </Link>
+              </div>
+              <p className="text-xs/5 text-(--theme-fg-muted)">{notifyTargetHint}</p>
+            </div>
+          </UpdateRow>
+        ) : null}
 
         {showJob ? (
           <UpdateRow label={t('admin_dash_update_job_title')}>

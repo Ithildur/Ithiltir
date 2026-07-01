@@ -167,6 +167,10 @@ export const loadBundledNodeVersion = async (
   );
 };
 
+export const setBundledNodeVersion = (bundledNodeVersion: string): void => {
+  useAdminNodesStore.setState({ bundledNodeVersion: bundledNodeVersion.trim() });
+};
+
 export const clearBundledNodeVersion = (): void => {
   versionGate.invalidate();
   useAdminNodesStore.setState({ bundledNodeVersion: '' });

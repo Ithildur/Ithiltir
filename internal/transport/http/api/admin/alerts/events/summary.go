@@ -17,11 +17,12 @@ type summaryView struct {
 }
 
 type summaryItemView struct {
-	ServerID      int64  `json:"server_id"`
-	OpenCount     int64  `json:"open_count"`
-	LastTriggerAt string `json:"last_trigger_at"`
-	Metric        string `json:"metric"`
-	RuleName      string `json:"rule_name"`
+	ServerID      int64    `json:"server_id"`
+	OpenCount     int64    `json:"open_count"`
+	LastTriggerAt string   `json:"last_trigger_at"`
+	Metric        string   `json:"metric"`
+	RuleName      string   `json:"rule_name"`
+	Metrics       []string `json:"metrics"`
 }
 
 func summaryRoute(r *routes.Blueprint, h *handler) {
@@ -52,12 +53,17 @@ func summaryViews(items []alertstore.OpenEventSummary) []summaryItemView {
 	}
 	out := make([]summaryItemView, 0, len(items))
 	for _, item := range items {
+		metrics := item.Metrics
+		if metrics == nil {
+			metrics = []string{}
+		}
 		out = append(out, summaryItemView{
 			ServerID:      item.ServerID,
 			OpenCount:     item.OpenCount,
 			LastTriggerAt: item.LastTriggerAt.UTC().Format(time.RFC3339),
 			Metric:        item.Metric,
 			RuleName:      item.RuleName,
+			Metrics:       metrics,
 		})
 	}
 	return out

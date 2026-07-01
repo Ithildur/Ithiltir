@@ -1,5 +1,6 @@
 import React from 'react';
 import ArrowUpFromLine from 'lucide-react/dist/esm/icons/arrow-up-from-line';
+import CircleAlert from 'lucide-react/dist/esm/icons/circle-alert';
 import Copy from 'lucide-react/dist/esm/icons/copy';
 import GripVertical from 'lucide-react/dist/esm/icons/grip-vertical';
 import Settings from 'lucide-react/dist/esm/icons/settings';
@@ -61,7 +62,7 @@ const NodeTable: React.FC<Props> = ({
   onDrop,
   onDragEnd,
 }) => {
-  const { t } = useI18n();
+  const { lang, t } = useI18n();
   const [editingId, setEditingId] = React.useState<number | null>(null);
   const [draftName, setDraftName] = React.useState('');
   const deployButtonClass =
@@ -91,18 +92,22 @@ const NodeTable: React.FC<Props> = ({
   const renderAlertSummary = (node: NodeRow) => {
     const summary = alertSummaryByServer.get(node.id);
     if (!summary) return null;
+    const rawMetrics = summary.metrics && summary.metrics.length > 0 ? summary.metrics : [summary.metric];
+    const metrics = rawMetrics.filter(Boolean);
+    const label =
+      metrics.length > 0
+        ? metrics.map((metric) => alertMetricName(metric, t)).join(lang === 'zh' ? '，' : ', ')
+        : t('admin_nodes_alerts_label');
     return (
-      <Link
-        to={nodeAlertEventsPath(node.id)}
-        className="mt-1 inline-flex max-w-full items-center gap-1.5 rounded-md border border-(--theme-border-danger-muted) bg-(--theme-bg-danger-subtle) px-1.5 py-0.5 text-[11px] font-semibold text-(--theme-fg-danger) transition-colors hover:bg-(--theme-bg-danger-muted) dark:border-(--theme-border-danger-muted) dark:bg-(--theme-bg-danger-soft)"
-      >
-        <span className="shrink-0">
-          {t('admin_nodes_alerts_open_count', {
-            count: String(summary.open_count),
-          })}
-        </span>
-        <span className="min-w-0 truncate font-normal">{alertMetricName(summary.metric, t)}</span>
-      </Link>
+      <Tooltip content={label} className="ml-auto inline-flex shrink-0">
+        <Link
+          to={nodeAlertEventsPath(node.id)}
+          className="ui-focus-ring inline-flex size-7 items-center justify-center rounded-md border border-(--theme-border-danger-muted) bg-(--theme-bg-danger-subtle) text-(--theme-fg-danger) transition-colors hover:bg-(--theme-bg-danger-muted) dark:border-(--theme-border-danger-muted) dark:bg-(--theme-bg-danger-soft)"
+          aria-label={label}
+        >
+          <CircleAlert size={15} aria-hidden="true" />
+        </Link>
+      </Tooltip>
     );
   };
 
@@ -146,44 +151,46 @@ const NodeTable: React.FC<Props> = ({
               </button>
             </td>
             <td className="px-3 py-2">
-              <div className="min-w-0">
-                {editingId === node.id ? (
-                  <Input
-                    autoFocus
-                    enterKeyHint="done"
-                    value={draftName}
-                    onChange={(event) => setDraftName(event.target.value)}
-                    onBlur={() => commitName(node)}
-                    onKeyDown={(event) => {
-                      if (event.key === 'Enter' && !event.nativeEvent.isComposing) {
-                        event.preventDefault();
-                        event.currentTarget.blur();
-                      }
-                      if (event.key === 'Escape') {
-                        setDraftName(node.name);
-                        setEditingId(null);
-                      }
-                    }}
-                  />
-                ) : (
-                  <button
-                    type="button"
-                    className="ui-focus-ring rounded-sm font-semibold text-(--theme-fg-default) dark:text-(--theme-fg-default) hover:text-(--theme-bg-accent-emphasis) hover:underline transition-colors"
-                    onClick={() => startEditName(node)}
-                  >
-                    {node.name}
-                  </button>
-                )}
-                <div className="mt-1 flex min-w-0 items-center gap-2 text-xs text-(--theme-fg-muted) dark:text-(--theme-fg-muted)">
-                  <span className="shrink-0 font-mono">
-                    {node.ip || t('admin_nodes_unconfigured')}
-                  </span>
-                  <span
-                    className="min-w-0 max-w-80 truncate font-mono"
-                    title={node.hostname || t('admin_nodes_hostname_unknown')}
-                  >
-                    {node.hostname || t('admin_nodes_hostname_unknown')}
-                  </span>
+              <div className="flex min-w-0 items-center gap-3">
+                <div className="min-w-0 flex-1">
+                  {editingId === node.id ? (
+                    <Input
+                      autoFocus
+                      enterKeyHint="done"
+                      value={draftName}
+                      onChange={(event) => setDraftName(event.target.value)}
+                      onBlur={() => commitName(node)}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Enter' && !event.nativeEvent.isComposing) {
+                          event.preventDefault();
+                          event.currentTarget.blur();
+                        }
+                        if (event.key === 'Escape') {
+                          setDraftName(node.name);
+                          setEditingId(null);
+                        }
+                      }}
+                    />
+                  ) : (
+                    <button
+                      type="button"
+                      className="ui-focus-ring block max-w-full truncate rounded-sm font-semibold text-(--theme-fg-default) transition-colors hover:text-(--theme-bg-accent-emphasis) hover:underline dark:text-(--theme-fg-default)"
+                      onClick={() => startEditName(node)}
+                    >
+                      {node.name}
+                    </button>
+                  )}
+                  <div className="mt-1 flex min-w-0 items-center gap-2 text-xs text-(--theme-fg-muted) dark:text-(--theme-fg-muted)">
+                    <span className="shrink-0 font-mono">
+                      {node.ip || t('admin_nodes_unconfigured')}
+                    </span>
+                    <span
+                      className="min-w-0 max-w-80 truncate font-mono"
+                      title={node.hostname || t('admin_nodes_hostname_unknown')}
+                    >
+                      {node.hostname || t('admin_nodes_hostname_unknown')}
+                    </span>
+                  </div>
                 </div>
                 {renderAlertSummary(node)}
               </div>

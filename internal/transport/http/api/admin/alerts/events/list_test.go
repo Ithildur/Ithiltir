@@ -3,6 +3,7 @@ package events
 import (
 	"net/url"
 	"testing"
+	"time"
 
 	alertstore "dash/internal/store/alert"
 )
@@ -61,5 +62,33 @@ func TestParseListQueryRejectsInvalidStatus(t *testing.T) {
 	_, err := parseListQuery(url.Values{"status": {"pending"}})
 	if err == nil {
 		t.Fatalf("parseListQuery accepted invalid status")
+	}
+}
+
+func TestParseListQueryCursor(t *testing.T) {
+	rawAt := "2026-06-29T00:00:00.123456789Z"
+	got, err := parseListQuery(url.Values{"cursor": {rawAt + ",99"}})
+	if err != nil {
+		t.Fatalf("parseListQuery cursor: %v", err)
+	}
+	if got.Cursor == nil {
+		t.Fatalf("Cursor = nil, want value")
+	}
+	wantAt, err := time.Parse(time.RFC3339Nano, rawAt)
+	if err != nil {
+		t.Fatalf("parse want cursor time: %v", err)
+	}
+	if !got.Cursor.LastTriggerAt.Equal(wantAt) {
+		t.Fatalf("Cursor.LastTriggerAt = %v, want %v", got.Cursor.LastTriggerAt, wantAt)
+	}
+	if got.Cursor.ID != 99 {
+		t.Fatalf("Cursor.ID = %d, want 99", got.Cursor.ID)
+	}
+}
+
+func TestParseListQueryRejectsInvalidCursor(t *testing.T) {
+	_, err := parseListQuery(url.Values{"cursor": {"bad"}})
+	if err == nil {
+		t.Fatalf("parseListQuery accepted invalid cursor")
 	}
 }

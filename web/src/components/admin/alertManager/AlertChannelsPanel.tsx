@@ -11,15 +11,20 @@ import Badge from '@components/ui/Badge';
 import Card from '@components/ui/Card';
 import IOSSwitch from '@components/ui/IOSSwitch';
 import SearchInput from '@components/ui/SearchInput';
-import type { AlertChannel, AlertChannelType } from '@app-types/admin';
+import type { AlertChannel, AlertChannelType, AlertSettings } from '@app-types/admin';
 import { useI18n } from '@i18n';
 import { formatTimeAgo } from '@utils/time';
 
 interface Props {
   channels: AlertChannel[];
   loading: boolean;
+  settings: AlertSettings | null;
+  loadingSettings: boolean;
+  savingSettings: boolean;
   togglingIds: number[];
   testingIds: number[];
+  onToggleSettingsEnabled: () => void;
+  onToggleSettingsChannel: (id: number) => void;
   onToggleEnabled: (channel: AlertChannel) => void;
   onEdit: (channel: AlertChannel) => void;
   onDelete: (channel: AlertChannel) => void;
@@ -31,8 +36,13 @@ type AlertChannelFilter = 'all' | 'active' | 'paused';
 const AlertChannelsPanel: React.FC<Props> = ({
   channels,
   loading,
+  settings,
+  loadingSettings,
+  savingSettings,
   togglingIds,
   testingIds,
+  onToggleSettingsEnabled,
+  onToggleSettingsChannel,
   onToggleEnabled,
   onEdit,
   onDelete,
@@ -96,9 +106,95 @@ const AlertChannelsPanel: React.FC<Props> = ({
     { key: 'active', label: t('admin_alerts_channels_filter_active') },
     { key: 'paused', label: t('admin_alerts_channels_filter_paused') },
   ];
+  const selectedChannelIds = React.useMemo(
+    () => new Set(settings?.channel_ids ?? []),
+    [settings?.channel_ids],
+  );
+  const selectedActiveCount = React.useMemo(() => {
+    if (!settings?.enabled) return 0;
+    let count = 0;
+    for (const channel of channels) {
+      if (channel.enabled && selectedChannelIds.has(channel.id)) count += 1;
+    }
+    return count;
+  }, [channels, selectedChannelIds, settings?.enabled]);
+  const settingsDisabled = !settings || loadingSettings || savingSettings;
 
   return (
     <div className="space-y-4 md:space-y-6">
+      <Card className="p-4">
+        <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2">
+              <h3 className="text-sm font-semibold text-(--theme-fg-default)">
+                {t('admin_alerts_settings_title')}
+              </h3>
+              {loadingSettings ? (
+                <Badge color="slate">{t('loading')}</Badge>
+              ) : selectedActiveCount > 0 ? (
+                <Badge color="emerald">
+                  {t('admin_alerts_settings_active_count', {
+                    count: String(selectedActiveCount),
+                  })}
+                </Badge>
+              ) : (
+                <Badge color="amber">{t('admin_alerts_settings_no_target')}</Badge>
+              )}
+            </div>
+            <p className="mt-1 text-xs/5 text-(--theme-fg-muted)">
+              {t('admin_alerts_settings_desc')}
+            </p>
+          </div>
+          <IOSSwitch
+            checked={settings?.enabled ?? false}
+            disabled={settingsDisabled}
+            ariaLabel={t('admin_alerts_settings_enabled')}
+            onChange={onToggleSettingsEnabled}
+          />
+        </div>
+
+        <div className="mt-4 grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+          {channels.length === 0 ? (
+            <div className="rounded-lg border border-dashed border-(--theme-border-subtle) p-4 text-sm text-(--theme-fg-muted) dark:border-(--theme-border-default)">
+              {t('admin_alerts_settings_empty')}
+            </div>
+          ) : (
+            channels.map((channel) => {
+              const selected = selectedChannelIds.has(channel.id);
+              return (
+                <label
+                  key={channel.id}
+                  className={`flex min-w-0 items-start gap-3 rounded-lg border p-3 text-sm transition-colors ${
+                    selected
+                      ? 'border-(--theme-border-interactive-muted) bg-(--theme-bg-interactive-muted)'
+                      : 'border-(--theme-border-subtle) bg-(--theme-bg-default) dark:border-(--theme-border-default)'
+                  } ${settingsDisabled ? 'cursor-not-allowed opacity-60' : 'cursor-pointer hover:bg-(--theme-surface-row-hover)'}`}
+                >
+                  <input
+                    type="checkbox"
+                    className="mt-0.5 size-4 accent-(--theme-fg-interactive)"
+                    checked={selected}
+                    disabled={settingsDisabled}
+                    onChange={() => onToggleSettingsChannel(channel.id)}
+                  />
+                  <span className="min-w-0">
+                    <span className="block truncate font-semibold text-(--theme-fg-default)">
+                      {channel.name}
+                    </span>
+                    <span className="mt-1 flex flex-wrap items-center gap-1.5 text-xs text-(--theme-fg-muted)">
+                      <span>{channelTypeMeta[channel.type].label}</span>
+                      {!channel.enabled && (
+                        <Badge color="amber">{t('admin_alerts_settings_channel_paused')}</Badge>
+                      )}
+                    </span>
+                  </span>
+                </label>
+              );
+            })
+          )}
+        </div>
+      </Card>
+
       <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
         <SearchInput
           icon={Search}

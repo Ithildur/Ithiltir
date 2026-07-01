@@ -1,4 +1,5 @@
 import React from 'react';
+import ChevronDown from 'lucide-react/dist/esm/icons/chevron-down';
 import RotateCcw from 'lucide-react/dist/esm/icons/rotate-ccw';
 import Search from 'lucide-react/dist/esm/icons/search';
 import Button from '@components/ui/Button';
@@ -29,6 +30,9 @@ interface Props {
   setSearchParams: (next: URLSearchParams) => void;
 }
 
+const eventPageLimit = 200;
+type AlertEventBounds = ReturnType<typeof alertEventRequestBounds>;
+
 export const AlertEventsPanel: React.FC<Props> = ({
   searchParams,
   setSearchParams,
@@ -43,7 +47,12 @@ export const AlertEventsPanel: React.FC<Props> = ({
   );
   const [servers, setServers] = React.useState<AlertEventServer[]>([]);
   const [items, setItems] = React.useState<AlertEvent[]>([]);
+  const [nextCursor, setNextCursor] = React.useState<string | null>(null);
+  const [hasMore, setHasMore] = React.useState(false);
   const [loading, setLoading] = React.useState(false);
+  const [loadingMore, setLoadingMore] = React.useState(false);
+  const moreController = React.useRef<AbortController | null>(null);
+  const pageBounds = React.useRef<AlertEventBounds>({});
 
   React.useEffect(() => {
     const controller = new AbortController();
@@ -71,30 +80,44 @@ export const AlertEventsPanel: React.FC<Props> = ({
 
   React.useEffect(() => {
     if (!alertEventFilterReady(applied)) {
+      moreController.current?.abort();
+      pageBounds.current = {};
       setLoading(false);
+      setLoadingMore(false);
       setItems([]);
+      setNextCursor(null);
+      setHasMore(false);
       return;
     }
 
     const controller = new AbortController();
     const bounds = alertEventRequestBounds(applied);
+    pageBounds.current = bounds;
+    moreController.current?.abort();
     setLoading(true);
+    setLoadingMore(false);
     setItems([]);
+    setNextCursor(null);
+    setHasMore(false);
     fetchAlertEvents({
       serverId: applied.serverId,
       status: applied.status,
       metric: applied.metric,
       from: bounds.from,
       to: bounds.to,
-      limit: 200,
+      limit: eventPageLimit,
       signal: controller.signal,
     })
       .then((res) => {
         if (controller.signal.aborted) return;
         setItems(res.items);
+        setNextCursor(res.next_cursor);
+        setHasMore(res.has_more);
       })
       .catch((error) => {
         if (isCanceledRequestError(error)) return;
+        setNextCursor(null);
+        setHasMore(false);
         apiError(error, { key: 'admin_alerts_events_fetch_failed' });
       })
       .finally(() => {
@@ -105,6 +128,13 @@ export const AlertEventsPanel: React.FC<Props> = ({
     };
   }, [apiError, applied]);
 
+  React.useEffect(
+    () => () => {
+      moreController.current?.abort();
+    },
+    [],
+  );
+
   const apply = React.useCallback(() => {
     setSearchParams(urlParamsForAlertEventFilter(searchParams, draft));
   }, [draft, searchParams, setSearchParams]);
@@ -112,6 +142,61 @@ export const AlertEventsPanel: React.FC<Props> = ({
   const reset = React.useCallback(() => {
     setSearchParams(urlParamsForAlertEventFilter(searchParams, defaultAlertEventFilter));
   }, [searchParams, setSearchParams]);
+
+  const loadMore = React.useCallback(() => {
+    if (
+      loading ||
+      loadingMore ||
+      !hasMore ||
+      !nextCursor ||
+      !alertEventFilterReady(applied)
+    ) {
+      return;
+    }
+
+    moreController.current?.abort();
+    const controller = new AbortController();
+    moreController.current = controller;
+    const bounds = pageBounds.current;
+    setLoadingMore(true);
+    fetchAlertEvents({
+      serverId: applied.serverId,
+      status: applied.status,
+      metric: applied.metric,
+      from: bounds.from,
+      to: bounds.to,
+      cursor: nextCursor,
+      limit: eventPageLimit,
+      signal: controller.signal,
+    })
+      .then((res) => {
+        if (controller.signal.aborted) return;
+        setItems((current) => {
+          const seen = new Set(current.map((item) => item.id));
+          const next = [...current];
+          for (const item of res.items) {
+            if (seen.has(item.id)) continue;
+            seen.add(item.id);
+            next.push(item);
+          }
+          return next;
+        });
+        setNextCursor(res.next_cursor);
+        setHasMore(res.has_more);
+      })
+      .catch((error) => {
+        if (isCanceledRequestError(error)) return;
+        apiError(error, { key: 'admin_alerts_events_fetch_failed' });
+      })
+      .finally(() => {
+        if (moreController.current === controller) {
+          moreController.current = null;
+        }
+        if (!controller.signal.aborted) {
+          setLoadingMore(false);
+        }
+      });
+  }, [apiError, applied, hasMore, loading, loadingMore, nextCursor]);
 
   const customRangeLabel = alertEventCustomRangeLabel(applied, lang);
   const canSearch = alertEventFilterReady(draft);
@@ -278,6 +363,27 @@ export const AlertEventsPanel: React.FC<Props> = ({
         loading={loading}
         customRangeLabel={customRangeLabel}
       />
+
+      {hasMore && (
+        <div className="flex justify-center">
+          <Button
+            variant="secondary"
+            icon={ChevronDown}
+            onClick={loadMore}
+            disabled={loading || loadingMore || !nextCursor}
+          >
+            {loadingMore
+              ? t('admin_alerts_events_loading_more')
+              : t('admin_alerts_events_load_more')}
+          </Button>
+        </div>
+      )}
+
+      {!loading && !hasMore && items.length > 0 && (
+        <div className="text-center text-xs text-(--theme-fg-muted)">
+          {t('admin_alerts_events_all_loaded')}
+        </div>
+      )}
     </div>
   );
 };
