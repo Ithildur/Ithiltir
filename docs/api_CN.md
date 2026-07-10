@@ -113,8 +113,8 @@ Bearer 可选端点会把缺失、格式错误、过期、已撤销或其他无�
 - `metrics.disk.smart` 是磁盘 SMART 运行时状态，进入独立热点缓存，不写入 PostgreSQL 指标快照。确认是物理盘的 SMART 温度可归约成按设备区分的 `disk.temp_c` 历史值。`metrics.thermal` 保存硬件温度传感器，位置在 metrics 根级；thermal 会写入 PostgreSQL 指标快照，但在前台缓存中作为独立字段缓存保存。
 - `metrics.pressure` 是 Linux PSI（Pressure Stall Information）。它可以包含 `cpu`、`memory`、`io`，每项可带 `some` 和 `full` 数值组。每个组包含 `avg10`、`avg60`、`avg300` 百分比和累计 `total` 微秒。Dashboard 会把这些值保存成固定数值时序列；采集状态/原因字符串不持久化。缺失的组保持 `NULL`，表示不可用，不会当成 0 压力。
 - `disk.smart.devices` 和 `thermal.sensors` 是数组。字段存在但结果为空时使用 `[]`，不是 `null`。
-- `temp_c`、`power_on_hours`、`lifetime_used_percent`、`critical_warning`、`high_c`、`critical_c` 等可选数值读不到时省略，不转换成 `0`。
-- `disk.smart.devices[].critical_warning` 是 NVMe 的原始 critical warning bitset。`disk.smart.devices[].failing_attrs[]` 只包含当前 `FAILING_NOW` 的 ATA SMART 属性。
+- `temp_c`、`power_on_hours`、`lifetime_used_percent`、`critical_warning`、`media_errors`、`high_c`、`critical_c` 等可选数值读不到时省略，不转换成 `0`。
+- `disk.smart.devices[].critical_warning` 是 NVMe 的原始 critical warning bitset。`disk.smart.devices[].media_errors` 是可读到时上报的 NVMe SMART `media_errors` 计数；告警文案会用 SMART UI 条目号 `0E` 标识。`disk.smart.devices[].failing_attrs[]` 只包含当前 `FAILING_NOW` 的 ATA SMART 属性。
 - SMART 和 thermal 的 `status` 是开放字符串。已知值包括 `ok`、`partial`、`unsupported`、`not_found`、`no_permission`、`timeout`、`error`、`no_cache`、`stale`、`no_tool`、`standby`。
 - `disk.smart.status` 是采集状态，`disk.smart.devices[].health` 是磁盘健康结果。`status=ok` 且 `health=failed` 表示采集成功但磁盘健康失败。
 - `status=no_cache`、`no_tool` 或 `unsupported` 不表示磁盘故障。`status=stale` 会保留最后一次 `devices[]`，同时标记缓存过期。

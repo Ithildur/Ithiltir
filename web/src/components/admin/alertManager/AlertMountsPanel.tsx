@@ -5,7 +5,7 @@ import MultiSelectFilter from '@components/ui/MultiSelectFilter';
 import SearchInput from '@components/ui/SearchInput';
 import type { AlertMountNode, AlertMountRule } from '@app-types/admin';
 import { useI18n } from '@i18n';
-import { alertMetricName, alertRuleName } from './alertLabels';
+import { alertRuleName, alertSummaryMetricName } from './alertLabels';
 import { AlertMountsBatchModal, AlertMountsCustomModal } from './AlertMountsModals';
 import { AlertMountsTable } from './AlertMountsTable';
 import { useAlertMountsPanel } from './useAlertMountsPanel';
@@ -24,8 +24,8 @@ const AlertMountsPanel: React.FC<Props> = ({ rules, nodes, loading, saving, onSe
   const batchTitleId = React.useId();
 
   const ruleName = React.useCallback((rule: AlertMountRule) => alertRuleName(rule, t), [t]);
-  const metricName = React.useCallback(
-    (rule: AlertMountRule) => alertMetricName(rule.metric, t),
+  const summaryMetricName = React.useCallback(
+    (rule: AlertMountRule) => alertSummaryMetricName(rule.metric, t),
     [t],
   );
 
@@ -129,7 +129,7 @@ const AlertMountsPanel: React.FC<Props> = ({ rules, nodes, loading, saving, onSe
         onToggleAll={batch.toggleAllRules}
         onToggleRule={batch.toggleRule}
         ruleName={ruleName}
-        metricName={metricName}
+        metricName={summaryMetricName}
       />
 
       <AlertMountsCustomModal
@@ -140,7 +140,7 @@ const AlertMountsPanel: React.FC<Props> = ({ rules, nodes, loading, saving, onSe
         onClose={custom.close}
         onSetMounts={onSetMounts}
         ruleName={ruleName}
-        metricName={metricName}
+        metricName={summaryMetricName}
         mounted={table.mounted}
       />
     </div>

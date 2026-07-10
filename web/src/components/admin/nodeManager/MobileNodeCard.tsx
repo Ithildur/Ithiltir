@@ -12,7 +12,7 @@ import { PlatformLogo } from '@components/system/SystemLogo';
 import type { NodeDeployPlatform } from '@app-types/api';
 import type { AlertEventSummary, NodeRow } from '@app-types/admin';
 import { useI18n } from '@i18n';
-import { alertMetricName } from '@components/admin/alertManager/alertLabels';
+import { alertSummaryMetricName } from '@components/admin/alertManager/alertLabels';
 import { nodeAlertEventsPath } from './nodeManagerModel';
 
 export interface Props {
@@ -141,7 +141,7 @@ const MobileNodeCard: React.FC<Props> = ({
                   })}
                 </span>
                 <span className="truncate font-normal">
-                  {alertMetricName(alertSummary.metric, t)}
+                  {alertSummaryMetricName(alertSummary.metric, t)}
                 </span>
               </Link>
             ) : (

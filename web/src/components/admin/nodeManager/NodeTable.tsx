@@ -14,7 +14,7 @@ import { PlatformLogo } from '@components/system/SystemLogo';
 import type { NodeDeployPlatform } from '@app-types/api';
 import type { AlertEventSummary, NodeRow } from '@app-types/admin';
 import { useI18n } from '@i18n';
-import { alertMetricName } from '@components/admin/alertManager/alertLabels';
+import { alertSummaryMetricName } from '@components/admin/alertManager/alertLabels';
 import { nodeAlertEventsPath } from './nodeManagerModel';
 
 export interface Props {
@@ -96,7 +96,9 @@ const NodeTable: React.FC<Props> = ({
     const metrics = rawMetrics.filter(Boolean);
     const label =
       metrics.length > 0
-        ? metrics.map((metric) => alertMetricName(metric, t)).join(lang === 'zh' ? '，' : ', ')
+        ? metrics
+            .map((metric) => alertSummaryMetricName(metric, t))
+            .join(lang === 'zh' ? '，' : ', ')
         : t('admin_nodes_alerts_label');
     return (
       <Tooltip content={label} className="ml-auto inline-flex shrink-0">

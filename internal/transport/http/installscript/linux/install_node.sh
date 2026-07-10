@@ -771,6 +771,7 @@ while IFS= read -r raw; do
   power_hours="$(extract_power_hours "$DETAIL_TMP")"
   lifetime_used="$(extract_number "percentage_used" "$DETAIL_TMP")"
   critical_warning="$(extract_number "critical_warning" "$DETAIL_TMP")"
+  media_errors="$(extract_number "media_errors" "$DETAIL_TMP")"
   failing_attrs="$(extract_failing_attrs "$DETAIL_TMP")"
   protocol="$(extract_string "protocol" "$DETAIL_TMP")"
   model="$(extract_string "model_name" "$DETAIL_TMP")"
@@ -810,6 +811,7 @@ while IFS= read -r raw; do
   device+="$(json_number_field "power_on_hours" "$power_hours")"
   device+="$(json_number_field "lifetime_used_percent" "$lifetime_used")"
   device+="$(json_number_field "critical_warning" "$critical_warning")"
+  device+="$(json_number_field "media_errors" "$media_errors")"
   if [[ -n "$failing_attrs" ]]; then
     device+=",\"failing_attrs\":[${failing_attrs}]"
   fi

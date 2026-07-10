@@ -27,6 +27,7 @@ export type DiskSmart = {
     power_on_hours?: number;
     lifetime_used_percent?: number;
     critical_warning?: number;
+    media_errors?: number;
     failing_attrs?: Array<{
       id?: number;
       name: string;

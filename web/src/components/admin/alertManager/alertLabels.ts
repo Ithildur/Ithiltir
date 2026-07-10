@@ -34,6 +34,12 @@ const metricKeys: Record<string, TranslationKey> = {
   'thermal.max_temp_c': 'admin_alerts_metric_thermal_max_temp_c',
 };
 
+const summaryMetricKeys: Partial<Record<string, TranslationKey>> = {
+  'disk.smart.failed': 'admin_alerts_summary_metric_smart_failed',
+  'disk.smart.nvme.critical_warning': 'admin_alerts_summary_metric_smart_nvme_critical',
+  'disk.smart.attribute_failing': 'admin_alerts_summary_metric_smart_attribute_failing',
+};
+
 export const alertMetricValues = Object.keys(metricKeys);
 
 export const alertRuleName = (rule: NamedRule, t: T): string => {
@@ -45,4 +51,9 @@ export const alertRuleName = (rule: NamedRule, t: T): string => {
 export const alertMetricName = (metric: string, t: T): string => {
   const key = metricKeys[metric];
   return key ? t(key) : metric;
+};
+
+export const alertSummaryMetricName = (metric: string, t: T): string => {
+  const key = summaryMetricKeys[metric];
+  return key ? t(key) : alertMetricName(metric, t);
 };

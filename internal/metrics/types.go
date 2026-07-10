@@ -93,6 +93,7 @@ type DiskSmartDevice struct {
 	PowerOnHours        *uint64         `json:"power_on_hours,omitempty"`
 	LifetimeUsedPercent *float64        `json:"lifetime_used_percent,omitempty"`
 	CriticalWarning     *uint64         `json:"critical_warning,omitempty"`
+	MediaErrors         *uint64         `json:"media_errors,omitempty"`
 	FailingAttrs        []DiskSmartAttr `json:"failing_attrs,omitempty"`
 }
 
