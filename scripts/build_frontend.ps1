@@ -1,5 +1,6 @@
 ﻿param(
-	[string]$OutDir = "build/frontend/dist"
+	[string]$OutDir = "build/frontend/dist",
+	[string]$Version = "0.0.0-dev"
 )
 
 $ErrorActionPreference = "Stop"
@@ -34,24 +35,45 @@ if (-not $bun) {
 }
 
 $outPath = Resolve-RepoPath $OutDir
+$buildVersion = $Version.Trim()
+if ([string]::IsNullOrWhiteSpace($buildVersion)) {
+	throw "frontend build version must not be empty"
+}
 $outParent = Split-Path -Parent $outPath
 if (-not (Test-Path $outParent)) {
 	New-Item -ItemType Directory -Path $outParent -Force | Out-Null
 }
 
-Push-Location $webRoot
+$previousBuildVersion = [Environment]::GetEnvironmentVariable("DASH_BUILD_VERSION", "Process")
 try {
-	& $bun.Source install --frozen-lockfile
-	if ($LASTEXITCODE -ne 0) {
-		throw ("bun install failed (exit {0})" -f $LASTEXITCODE)
-	}
+	$env:DASH_BUILD_VERSION = $buildVersion
+	Push-Location $webRoot
+	try {
+		& $bun.Source install --frozen-lockfile
+		if ($LASTEXITCODE -ne 0) {
+			throw ("bun install failed (exit {0})" -f $LASTEXITCODE)
+		}
 
-	& $bun.Source run build -- --outDir $outPath --emptyOutDir
-	if ($LASTEXITCODE -ne 0) {
-		throw ("vite build failed (exit {0})" -f $LASTEXITCODE)
+		& $bun.Source run build -- --outDir $outPath --emptyOutDir
+		if ($LASTEXITCODE -ne 0) {
+			throw ("vite build failed (exit {0})" -f $LASTEXITCODE)
+		}
+	} finally {
+		Pop-Location
 	}
 } finally {
-	Pop-Location
+	if ($null -eq $previousBuildVersion) {
+		Remove-Item Env:DASH_BUILD_VERSION -ErrorAction SilentlyContinue
+	} else {
+		$env:DASH_BUILD_VERSION = $previousBuildVersion
+	}
+}
+
+foreach ($asset in @("index.html", "theme-bootstrap.js")) {
+	$assetPath = Join-Path $outPath $asset
+	if (-not (Test-Path $assetPath -PathType Leaf) -or (Get-Item $assetPath).Length -eq 0) {
+		throw ("frontend build is missing required runtime asset: {0}" -f $assetPath)
+	}
 }
 
 Write-Host ("frontend built: {0}" -f $outPath)

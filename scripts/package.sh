@@ -14,6 +14,15 @@ NODE_LOCAL_DEFAULT_DIR="deploy/node"
 NODE_REMOTE_URL="https://github.com/Ithildur/Ithiltir-node.git"
 NODE_REPO_SLUG="Ithildur/Ithiltir-node"
 BUILD_CHANNEL="release"
+NODE_ASSET_MANIFEST=(
+  "node_linux_amd64_sha256=linux/node_linux_amd64"
+  "node_linux_arm64_sha256=linux/node_linux_arm64"
+  "node_macos_arm64_sha256=macos/node_macos_arm64"
+  "node_windows_amd64_sha256=windows/node_windows_amd64.exe"
+  "node_windows_arm64_sha256=windows/node_windows_arm64.exe"
+  "runner_windows_amd64_sha256=windows/runner_windows_amd64.exe"
+  "runner_windows_arm64_sha256=windows/runner_windows_arm64.exe"
+)
 
 usage() {
   cat <<'EOF'
@@ -54,6 +63,24 @@ trim() {
   s="${s#"${s%%[![:space:]]*}"}"
   s="${s%"${s##*[![:space:]]}"}"
   printf '%s' "$s"
+}
+
+sha256_file() {
+  local file="$1"
+  local sum
+  if command -v sha256sum >/dev/null 2>&1; then
+    sum="$(sha256sum "$file" | awk '{print $1}')"
+  elif command -v shasum >/dev/null 2>&1; then
+    sum="$(shasum -a 256 "$file" | awk '{print $1}')"
+  else
+    echo "sha256sum or shasum is required to package node assets" >&2
+    return 1
+  fi
+  if [[ ! "$sum" =~ ^[0-9a-fA-F]{64}$ ]]; then
+    echo "invalid SHA-256 output for $file" >&2
+    return 1
+  fi
+  printf '%s' "$sum" | tr '[:upper:]' '[:lower:]'
 }
 
 version_tool() {
@@ -187,11 +214,11 @@ download_file() {
   local output="$2"
 
   if command -v curl >/dev/null 2>&1; then
-    curl -fL --retry 3 --connect-timeout 10 --max-time 600 -o "$output" "$url"
+    curl --proto '=https' --proto-redir '=https' --tlsv1.2 -fL --retry 3 --connect-timeout 10 --max-time 600 -o "$output" "$url"
     return
   fi
   if command -v wget >/dev/null 2>&1; then
-    wget -O "$output" "$url"
+    wget --https-only --secure-protocol=TLSv1_2 -O "$output" "$url"
     return
   fi
   echo "curl or wget is required to download Ithiltir-node release assets" >&2
@@ -567,6 +594,13 @@ else
   prepare_remote_node_deploy "$node_deploy_dir"
 fi
 
+node_asset_sums=()
+for spec in "${NODE_ASSET_MANIFEST[@]}"; do
+  field="${spec%%=*}"
+  asset="${spec#*=}"
+  node_asset_sums+=("${field}=$(sha256_file "$node_deploy_dir/$asset")")
+done
+
 binary_path_for_target() {
   local os="$1"
   local arch="$2"
@@ -595,6 +629,7 @@ build_dash_binary() {
     cd "$repo_root"
     env GOOS="$os" GOARCH="$arch" CGO_ENABLED=0 go build -trimpath -ldflags "$ldflags" -o "$output" ./cmd/dash
   )
+
 }
 
 for t in "${target_list[@]}"; do
@@ -607,7 +642,7 @@ for t in "${target_list[@]}"; do
   build_dash_binary "$os" "$arch"
 done
 
-bash "$repo_root/scripts/build_frontend.sh" -o "$FRONTEND_DIST_DIR"
+bash "$repo_root/scripts/build_frontend.sh" -o "$FRONTEND_DIST_DIR" --version "$VERSION"
 
 frontend_dist_dir="$repo_root/$FRONTEND_DIST_DIR"
 if [[ ! -d "$frontend_dist_dir" ]]; then
@@ -650,6 +685,11 @@ for t in "${target_list[@]}"; do
   fi
 
   cp "$source_bin" "$pkg_root/bin/$exe_name"
+  {
+    printf 'format_version=1\ndash_version=%s\nnode_version=%s\ntarget_os=%s\ntarget_arch=%s\n' \
+      "$VERSION" "$NODE_RELEASE_VERSION" "$os" "$arch"
+    printf '%s\n' "${node_asset_sums[@]}"
+  } >"$pkg_root/release.env"
 
   cp -R "$repo_root/configs" "$pkg_root/configs"
   cp -R "$frontend_dist_dir" "$pkg_root/dist"

@@ -18,6 +18,15 @@ $NodeLocalDefaultDir = "deploy/node"
 $NodeRemoteUrl = "https://github.com/Ithildur/Ithiltir-node.git"
 $NodeRepoSlug = "Ithildur/Ithiltir-node"
 $BuildChannel = "release"
+$NodeAssetManifest = [ordered]@{
+	"node_linux_amd64_sha256" = "linux/node_linux_amd64"
+	"node_linux_arm64_sha256" = "linux/node_linux_arm64"
+	"node_macos_arm64_sha256" = "macos/node_macos_arm64"
+	"node_windows_amd64_sha256" = "windows/node_windows_amd64.exe"
+	"node_windows_arm64_sha256" = "windows/node_windows_arm64.exe"
+	"runner_windows_amd64_sha256" = "windows/runner_windows_amd64.exe"
+	"runner_windows_arm64_sha256" = "windows/runner_windows_arm64.exe"
+}
 
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 
@@ -229,6 +238,15 @@ function Set-UnixExecutable {
 			throw ("chmod failed: {0}" -f $path)
 		}
 	}
+}
+
+function Get-FileSHA256 {
+	param(
+		[Parameter(Mandatory = $true)]
+		[string]$Path
+	)
+
+	return (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant()
 }
 
 function Set-NodeDeployPermissions {
@@ -445,7 +463,7 @@ try {
 		throw ("frontend build script not found: {0}" -f $frontendScript)
 	}
 
-	& $frontendScript -OutDir $FrontendDistDir
+	& $frontendScript -OutDir $FrontendDistDir -Version $buildVersion
 	if ($LASTEXITCODE -ne 0) {
 		throw ("frontend build failed (exit {0})" -f $LASTEXITCODE)
 	}
@@ -460,6 +478,10 @@ try {
 		Prepare-RemoteNodeDeploy -Version $nodeBuildVersion -DeployDir $nodeDeployPath
 	} else {
 		Prepare-LocalNodeDeploy -SourceDir (Resolve-RepoPath $NodeLocalDir) -DeployDir $nodeDeployPath
+	}
+	$nodeAssetSHA256 = @{}
+	foreach ($field in $NodeAssetManifest.Keys) {
+		$nodeAssetSHA256[$field] = Get-FileSHA256 -Path (Join-Path $nodeDeployPath $NodeAssetManifest[$field])
 	}
 
 	foreach ($t in $targetList) {
@@ -493,12 +515,35 @@ try {
 		}
 
 		Copy-Item -Force $sourceExe $exePath
+		$releaseMetadata = [string[]]@(
+			"format_version=1"
+			"dash_version=$buildVersion"
+			"node_version=$nodeBuildVersion"
+			"target_os=$os"
+			"target_arch=$arch"
+		)
+		foreach ($field in $NodeAssetManifest.Keys) {
+			$releaseMetadata += "{0}={1}" -f $field, $nodeAssetSHA256[$field]
+		}
+		$utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+		[System.IO.File]::WriteAllText(
+			(Join-Path $pkgRoot "release.env"),
+			(($releaseMetadata -join "`n") + "`n"),
+			$utf8NoBom
+		)
 
 		Copy-Item -Recurse -Force (Join-Path $repoRoot "configs") (Join-Path $pkgRoot "configs")
 		Copy-Item -Recurse -Force $frontendDistPath (Join-Path $pkgRoot "dist")
 		Copy-Item -Recurse -Force $nodeDeployPath (Join-Path $pkgRoot "deploy")
 		Copy-Item -Force (Join-Path $repoRoot "install_dash_linux.sh") $pkgRoot
 		Copy-Item -Force (Join-Path $repoRoot "update_dash_linux.sh") $pkgRoot
+		if ($os -eq "linux") {
+			Set-UnixExecutable -Paths @(
+				$exePath,
+				(Join-Path $pkgRoot "install_dash_linux.sh"),
+				(Join-Path $pkgRoot "update_dash_linux.sh")
+			)
+		}
 
 		if ($Zip) {
 			$zipPath = Join-Path $outRoot ("Ithiltir_dash_{0}_{1}.zip" -f $os, $arch)
