@@ -83,6 +83,8 @@ func mountDeployRoute(router chi.Router, node *nodestore.Store, opts kitstatic.O
 
 func requireDeployAccess(node *nodestore.Store, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "private, no-store")
+		w.Header().Set("Vary", request.NodeSecretHeader)
 		ok, err := validDeployAccess(r, node)
 		if err != nil {
 			http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
@@ -92,7 +94,10 @@ func requireDeployAccess(node *nodestore.Store, next http.Handler) http.Handler 
 			http.Error(w, http.StatusText(http.StatusUnauthorized), http.StatusUnauthorized)
 			return
 		}
-		_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(config.DeployWriteTimeout))
+		if err := http.NewResponseController(w).SetWriteDeadline(time.Now().Add(config.DeployWriteTimeout)); err != nil && !errors.Is(err, http.ErrNotSupported) {
+			http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+			return
+		}
 		next.ServeHTTP(w, r)
 	})
 }
@@ -108,7 +113,6 @@ func validDeployAccess(r *http.Request, node *nodestore.Store) (bool, error) {
 		}
 		return true, nil
 	}
-
 	token := strings.TrimSpace(r.URL.Query().Get(request.DeployGrantQuery))
 	return node.ValidDeployGrant(token, r.URL.Path), nil
 }

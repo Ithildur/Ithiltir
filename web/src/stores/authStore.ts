@@ -1,13 +1,17 @@
 import { create } from 'zustand';
 import type { LoginResponse } from '@app-types/api';
 import type { AuthState } from '@app-types/auth';
-import { ApiError, apiFetch, bindApiAuthSession, refreshSession } from '@lib/api';
+import {
+  ApiError,
+  apiControlTimeoutMs,
+  apiFetch,
+  bindApiAuthSession,
+  refreshSession,
+} from '@lib/api';
 import { getCsrfToken, readLoginPersistence, writeLoginPersistence } from '@lib/authSession';
 import { resetPrivateStores } from './privateStores';
 
-export type { AuthState, AuthStatus } from '@app-types/auth';
-
-export type AuthStoreState = AuthState;
+type AuthStoreState = AuthState;
 
 const initialAuthState: AuthState = {
   status: 'unknown',
@@ -25,7 +29,7 @@ export const useAuthStore = create<AuthStoreState>()(() => initialAuthState);
 
 let generation = 0;
 
-export const getAuthState = (): AuthState => pickAuthState(useAuthStore.getState());
+const getAuthState = (): AuthState => pickAuthState(useAuthStore.getState());
 
 const bumpAuthGeneration = (): number => {
   generation += 1;
@@ -88,6 +92,7 @@ export const logout = (): void => {
   if (!tokenToRevoke && !csrfToUse) return;
   void apiFetch('/auth/logout', {
     method: 'POST',
+    keepalive: true,
     auth: 'none',
     csrf: 'none',
     retryOn401: false,
@@ -123,6 +128,7 @@ export const login = async (password: string, remember: boolean): Promise<void> 
   const result = await apiFetch<LoginResponse>('/auth/login', {
     method: 'POST',
     json: { password, persistence: remember ? 'persistent' : 'session' },
+    timeoutMs: apiControlTimeoutMs,
   });
   bumpAuthGeneration();
   resetPrivateStores();

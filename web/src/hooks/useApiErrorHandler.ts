@@ -5,7 +5,7 @@ import type { TranslationKey } from '@i18n';
 import { useI18n } from '@i18n';
 import { pushTopBanner } from '@runtime/topBannerRuntime';
 
-export type ApiErrorFallback =
+type ApiErrorFallback =
   | string
   | {
       key: TranslationKey;
@@ -18,9 +18,11 @@ const errorKeyByCode: Partial<Record<string, TranslationKey>> = {
   node_upgrade_unsupported: 'admin_nodes_auto_update_requires_manual',
   redis_cache_error: 'error_sync_failed_retry',
   redis_error: 'error_state_unavailable_retry',
+  traffic_rebuild_running: 'traffic_rebuild_running_other',
+  traffic_rebuild_requires_billing: 'admin_node_traffic_rebuild_requires_billing',
 };
 
-export type ApiErrorHandler = (error: unknown, fallback: ApiErrorFallback) => void;
+type ApiErrorHandler = (error: unknown, fallback: ApiErrorFallback) => void;
 
 const fallbackText = (
   t: (key: TranslationKey, vars?: Record<string, string | number>) => string,

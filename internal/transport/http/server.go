@@ -3,6 +3,7 @@ package transporthttp
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"net/netip"
@@ -27,8 +28,12 @@ type HTTPServer struct {
 }
 
 func NewHTTPServer(cfg *config.Config, deps httpapi.Dependencies) (*HTTPServer, error) {
+	if cfg == nil {
+		return nil, fmt.Errorf("http server config is nil")
+	}
 	router := chi.NewRouter()
 	router.Use(middleware.RequestID)
+	router.Use(securityHeaders)
 	router.Use(httpmiddleware.AccessLog(httpmiddleware.AccessLogOptions{
 		Disabled: !infra.DebugEnabled(),
 		Logger:   infra.SlogWithModule("http"),
@@ -47,11 +52,13 @@ func NewHTTPServer(cfg *config.Config, deps httpapi.Dependencies) (*HTTPServer, 
 		deps:   deps,
 		router: router,
 		server: &http.Server{
-			Addr:         cfg.App.Listen,
-			Handler:      router,
-			ReadTimeout:  config.HTTPReadTimeout,
-			WriteTimeout: config.HTTPWriteTimeout,
-			IdleTimeout:  config.HTTPIdleTimeout,
+			Addr:              cfg.App.Listen,
+			Handler:           router,
+			ReadHeaderTimeout: config.HTTPReadHeaderTimeout,
+			ReadTimeout:       config.HTTPReadTimeout,
+			WriteTimeout:      config.HTTPWriteTimeout,
+			IdleTimeout:       config.HTTPIdleTimeout,
+			MaxHeaderBytes:    config.HTTPMaxHeaderBytes,
 		},
 	}
 
@@ -59,6 +66,18 @@ func NewHTTPServer(cfg *config.Config, deps httpapi.Dependencies) (*HTTPServer, 
 		return nil, err
 	}
 	return s, nil
+}
+
+func securityHeaders(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		h := w.Header()
+		h.Set("Content-Security-Policy", "default-src 'self'; base-uri 'self'; connect-src 'self'; font-src 'self' data:; form-action 'self'; frame-ancestors 'none'; img-src 'self' data: blob: http: https:; object-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'")
+		h.Set("Permissions-Policy", "camera=(), geolocation=(), microphone=()")
+		h.Set("Referrer-Policy", "no-referrer")
+		h.Set("X-Content-Type-Options", "nosniff")
+		h.Set("X-Frame-Options", "DENY")
+		next.ServeHTTP(w, r)
+	})
 }
 
 func isProductionEnv(env string) bool {
@@ -85,7 +104,7 @@ func (s *HTTPServer) registerRoutes() error {
 
 func (s *HTTPServer) Run(ctx context.Context) error {
 	if ctx == nil {
-		ctx = context.Background()
+		return fmt.Errorf("http server context is nil")
 	}
 
 	errCh := make(chan error, 1)
@@ -105,16 +124,16 @@ func (s *HTTPServer) Run(ctx context.Context) error {
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		shutdownErr := s.server.Shutdown(shutdownCtx)
-		if shutdownErr != nil && !errors.Is(shutdownErr, http.ErrServerClosed) {
-			_ = s.server.Close()
+		if errors.Is(shutdownErr, http.ErrServerClosed) {
+			shutdownErr = nil
 		}
-		serveErr := <-errCh
-		if shutdownErr != nil && !errors.Is(shutdownErr, http.ErrServerClosed) {
-			if serveErr != nil {
-				return errors.Join(serveErr, shutdownErr)
+		var closeErr error
+		if shutdownErr != nil {
+			closeErr = s.server.Close()
+			if errors.Is(closeErr, http.ErrServerClosed) {
+				closeErr = nil
 			}
-			return shutdownErr
 		}
-		return serveErr
+		return errors.Join(<-errCh, shutdownErr, closeErr)
 	}
 }

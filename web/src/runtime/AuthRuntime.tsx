@@ -21,14 +21,33 @@ export const AuthRuntime: React.FC = () => {
     if (status === 'authenticated') {
       bootstrapErrorShown = false;
     }
-    if (status !== 'unknown') return;
-
-    void bootstrap().catch(() => {
-      if (bootstrapErrorShown) return;
-      bootstrapErrorShown = true;
-      pushTopBanner(refreshFailedMessageRef.current, { tone: 'error', durationMs: 4000 });
-    });
   }, [status]);
+
+  React.useEffect(() => {
+    let canceled = false;
+    let retryTimer: number | null = null;
+    let retryDelayMs = 5_000;
+
+    const runBootstrap = async () => {
+      try {
+        await bootstrap();
+      } catch {
+        if (canceled) return;
+        if (!bootstrapErrorShown) {
+          bootstrapErrorShown = true;
+          pushTopBanner(refreshFailedMessageRef.current, { tone: 'error', durationMs: 4000 });
+        }
+        retryTimer = window.setTimeout(runBootstrap, retryDelayMs);
+        retryDelayMs = Math.min(retryDelayMs * 2, 60_000);
+      }
+    };
+
+    void runBootstrap();
+    return () => {
+      canceled = true;
+      if (retryTimer !== null) window.clearTimeout(retryTimer);
+    };
+  }, []);
 
   React.useEffect(() => {
     if (refreshTimerRef.current !== null) {
@@ -47,17 +66,25 @@ export const AuthRuntime: React.FC = () => {
     const delayMs = triggerAt - Date.now();
     const timeoutMs = delayMs <= 0 ? 0 : delayMs;
 
+    let canceled = false;
+    let failureShown = false;
     const runRefresh = async () => {
       try {
         await refresh();
       } catch {
-        pushTopBanner(refreshFailedMessageRef.current, { tone: 'error', durationMs: 4000 });
+        if (canceled) return;
+        if (!failureShown) {
+          failureShown = true;
+          pushTopBanner(refreshFailedMessageRef.current, { tone: 'error', durationMs: 4000 });
+        }
+        refreshTimerRef.current = window.setTimeout(runRefresh, 15_000);
       }
     };
 
     refreshTimerRef.current = window.setTimeout(runRefresh, timeoutMs);
 
     return () => {
+      canceled = true;
       if (refreshTimerRef.current !== null) {
         window.clearTimeout(refreshTimerRef.current);
         refreshTimerRef.current = null;

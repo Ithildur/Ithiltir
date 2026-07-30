@@ -66,8 +66,13 @@ const readRedirectState = (state: unknown): LoginRedirectState => {
   }
 
   const value = state as LoginRedirectState;
+  const redirectPath = typeof value.from === 'string' ? value.from.split(/[?#]/, 1)[0] : '';
   const from =
-    typeof value.from === 'string' && value.from.startsWith('/') && value.from !== '/login'
+    typeof value.from === 'string' &&
+    value.from.startsWith('/') &&
+    !value.from.startsWith('//') &&
+    !value.from.startsWith('/\\') &&
+    redirectPath !== '/login'
       ? value.from
       : undefined;
   const denied =
@@ -80,7 +85,6 @@ const readRedirectState = (state: unknown): LoginRedirectState => {
 
 const LoginPage: React.FC = () => {
   const [password, setPassword] = useState('');
-  const [usernameTrap, setUsernameTrap] = useState('');
   const [remember, setRemember] = useState(() => readLoginPersistence() === 'persistent');
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
@@ -116,23 +120,14 @@ const LoginPage: React.FC = () => {
 
   const submit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (usernameTrap.trim() !== '') {
-      setIsLoading(true);
-      try {
-        await new Promise((resolve) => window.setTimeout(resolve, 400));
-        pushTopBanner(t('login_failed'), { tone: 'error' });
-      } finally {
-        setIsLoading(false);
-      }
-      return;
-    }
-    if (!password.trim()) {
+    const normalizedPassword = password.trim();
+    if (!normalizedPassword) {
       pushTopBanner(t('login_password_required'), { tone: 'warning' });
       return;
     }
     setIsLoading(true);
     try {
-      await login(password.trim(), remember);
+      await login(normalizedPassword, remember);
       pushTopBanner(t('login_success'), { tone: 'info' });
       navigate(redirectTo, { replace: true });
     } catch (error) {
@@ -156,7 +151,7 @@ const LoginPage: React.FC = () => {
         <div className="theme-login-page-grid absolute inset-0 opacity-[0.4] dark:opacity-[0.15]" />
       </div>
 
-      <div className="w-full max-w-lg z-10">
+      <main id="main-content" tabIndex={-1} className="w-full max-w-lg z-10">
         <div className="bg-(--theme-surface-overlay) backdrop-blur-xl border border-(--theme-border-subtle) dark:border-(--theme-border-default) rounded-2xl shadow-2xl overflow-hidden relative group">
           <div className="theme-login-card-edge absolute inset-x-0 top-0 h-px transition-all duration-500 motion-reduce:transition-none" />
           <div className="absolute top-4 right-4">
@@ -177,21 +172,6 @@ const LoginPage: React.FC = () => {
             </div>
 
             <form onSubmit={submit} className="space-y-5">
-              <div className="sr-only" aria-hidden="true">
-                <label htmlFor="login-username-trap" className="sr-only">
-                  {t('login_username')}
-                </label>
-                <input
-                  id="login-username-trap"
-                  name="username"
-                  type="text"
-                  value={usernameTrap}
-                  onChange={(event) => setUsernameTrap(event.target.value)}
-                  autoComplete="off"
-                  tabIndex={-1}
-                />
-              </div>
-
               <div className="space-y-2">
                 <div className="space-y-1.5 group/field">
                   <label
@@ -266,7 +246,7 @@ const LoginPage: React.FC = () => {
             &copy; Powered by Ithiltir
           </p>
         </div>
-      </div>
+      </main>
     </div>
   );
 };

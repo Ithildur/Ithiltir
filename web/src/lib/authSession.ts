@@ -1,4 +1,4 @@
-export type LoginPersistence = 'session' | 'persistent';
+type LoginPersistence = 'session' | 'persistent';
 
 const loginPersistenceKey = 'auth.login_persistence';
 
@@ -65,7 +65,7 @@ export const writeLoginPersistence = (persistence: LoginPersistence | null): voi
   }
 };
 
-export const readCookie = (name: string): string | null => {
+const readCookie = (name: string): string | null => {
   if (typeof document === 'undefined') return null;
   const cookie = document.cookie;
   if (!cookie) return null;

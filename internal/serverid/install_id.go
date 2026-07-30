@@ -93,16 +93,23 @@ func writeFile(path, id string) error {
 	if err != nil {
 		return fmt.Errorf("create server install id: %w", err)
 	}
-	if _, err := f.WriteString(id + "\n"); err != nil {
+	complete := false
+	defer func() {
+		if complete {
+			return
+		}
 		_ = f.Close()
+		_ = os.Remove(path)
+	}()
+	if _, err := f.WriteString(id + "\n"); err != nil {
 		return fmt.Errorf("write server install id: %w", err)
 	}
 	if err := f.Sync(); err != nil {
-		_ = f.Close()
 		return fmt.Errorf("sync server install id: %w", err)
 	}
 	if err := f.Close(); err != nil {
 		return fmt.Errorf("close server install id: %w", err)
 	}
+	complete = true
 	return nil
 }

@@ -39,9 +39,11 @@ const (
 
 // HTTP server timeouts.
 const (
-	HTTPReadTimeout    = 15 * time.Second
-	HTTPWriteTimeout   = 15 * time.Second
-	HTTPIdleTimeout    = 60 * time.Second
-	DeployWriteTimeout = 5 * time.Minute
-	ThemeUploadTimeout = 5 * time.Minute
+	HTTPReadHeaderTimeout = 10 * time.Second
+	HTTPReadTimeout       = 15 * time.Second
+	HTTPWriteTimeout      = 15 * time.Second
+	HTTPIdleTimeout       = 60 * time.Second
+	DeployWriteTimeout    = 5 * time.Minute
+	ThemeUploadTimeout    = 5 * time.Minute
+	HTTPMaxHeaderBytes    = 64 << 10
 )

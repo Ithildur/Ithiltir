@@ -1,4 +1,4 @@
-export type AuthStatus = 'unknown' | 'bootstrapping' | 'authenticated' | 'guest';
+type AuthStatus = 'unknown' | 'bootstrapping' | 'authenticated' | 'guest';
 
 export interface AuthState {
   status: AuthStatus;
