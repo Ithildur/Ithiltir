@@ -101,7 +101,7 @@ const DashboardPage: React.FC = () => {
     const filteredServers: typeof serverViews = [];
     let healthyNodes = 0;
     let cpuTotal = 0;
-    let alerts = 0;
+    let anomalies = 0;
     let throughputIn = 0;
     let throughputOut = 0;
     let allowedNodes: Set<string> | null = null;
@@ -128,9 +128,9 @@ const DashboardPage: React.FC = () => {
       filteredServers.push(view);
       if (view.isAlive) healthyNodes += 1;
       cpuTotal += view.cpu.usagePercent;
-      if (!view.isAlive) alerts += 1;
-      if (view.raid.showAlert) alerts += 1;
-      if (view.cpu.usagePercent > 85 || view.disk.usedPercent > 85) alerts += 1;
+      if (!view.isAlive) anomalies += 1;
+      if (view.raid.showAlert) anomalies += 1;
+      if (view.cpu.usagePercent > 85 || view.disk.usedPercent > 85) anomalies += 1;
       throughputIn += view.network.rateIn;
       throughputOut += view.network.rateOut;
     });
@@ -138,7 +138,7 @@ const DashboardPage: React.FC = () => {
     const totalNodes = filteredServers.length;
 
     return {
-      alerts,
+      anomalies,
       avgCpu: totalNodes === 0 ? 0 : Math.round(cpuTotal / totalNodes),
       filteredServers,
       healthyNodes,
@@ -148,8 +148,15 @@ const DashboardPage: React.FC = () => {
     };
   }, [groupById, serverViews, searchTerm, selectedGroupIds]);
 
-  const { alerts, avgCpu, filteredServers, healthyNodes, throughputIn, throughputOut, totalNodes } =
-    summary;
+  const {
+    anomalies,
+    avgCpu,
+    filteredServers,
+    healthyNodes,
+    throughputIn,
+    throughputOut,
+    totalNodes,
+  } = summary;
   const canOpenHistory =
     isAuthenticated || statisticsAccess?.history_guest_access_mode === 'by_node';
   const canOpenTraffic =
@@ -233,10 +240,10 @@ const DashboardPage: React.FC = () => {
       iconClass: 'bg-(--theme-bg-success-emphasis)/10 text-(--theme-fg-success)',
     },
     {
-      key: 'alerts',
+      key: 'anomalies',
       icon: AlertTriangle,
-      label: t('alerts'),
-      value: alerts,
+      label: t('anomalies'),
+      value: anomalies,
       iconClass: 'bg-(--theme-bg-danger-emphasis)/10 text-(--theme-bg-danger-emphasis)',
     },
     {
@@ -347,9 +354,9 @@ const DashboardPage: React.FC = () => {
                 </div>
                 <div>
                   <p className="text-xs font-medium uppercase text-(--theme-fg-muted)">
-                    {t('alerts')}
+                    {t('anomalies')}
                   </p>
-                  <p className={summaryValueClass}>{alerts}</p>
+                  <p className={summaryValueClass}>{anomalies}</p>
                 </div>
               </div>
 

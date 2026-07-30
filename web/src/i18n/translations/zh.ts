@@ -42,7 +42,7 @@ export const zh = {
   raid_short: 'RAID',
   iops_short: 'IOPS',
   avg_cpu: '平均 CPU',
-  alerts: '告警',
+  anomalies: '异常项',
   no_servers: '没有找到匹配的服务器',
   disk_io: '磁盘 IO',
   rw_read: '读',

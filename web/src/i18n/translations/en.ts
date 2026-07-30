@@ -42,7 +42,7 @@ export const en = {
   raid_short: 'RAID',
   iops_short: 'IOPS',
   avg_cpu: 'Avg CPU',
-  alerts: 'Alerts',
+  anomalies: 'Anomalies',
   no_servers: 'No matching servers',
   disk_io: 'Disk IO',
   rw_read: 'R',
