@@ -50,7 +50,6 @@ const NodeManager: React.FC = () => {
     groups,
     deploy,
     trafficSettings,
-    trafficSettingsLoading,
     trafficSettingsLoaded,
     bundledNodeVersion,
     isLoading,
@@ -81,8 +80,9 @@ const NodeManager: React.FC = () => {
     busy: trafficRebuildBusy,
     start: startTrafficRebuild,
   } = useTrafficRebuild();
-  const { summaryByServer: alertSummaryByServer, loaded: alertSummaryLoaded } =
-    useOpenAlertSummary(activeTab === 'basic');
+  const { summaryByServer: alertSummaryByServer, loaded: alertSummaryLoaded } = useOpenAlertSummary(
+    activeTab === 'basic',
+  );
   const showTrafficRebuildOutcome = useTrafficRebuildBanner();
 
   const savingGuestVisibleNodeIdSet = React.useMemo(
@@ -105,7 +105,7 @@ const NodeManager: React.FC = () => {
     () => nodes.find((node) => node.id === trafficSettingsNodeId) ?? null,
     [nodes, trafficSettingsNodeId],
   );
-  const trafficSettingsUnavailable = trafficSettingsLoading || !trafficSettingsLoaded;
+  const billingEnabled = trafficSettingsLoaded && trafficSettings.usage_mode === 'billing';
 
   React.useEffect(() => {
     if (basicSettingsNodeId !== null && !basicSettingsNode && !isLoading) {
@@ -118,12 +118,6 @@ const NodeManager: React.FC = () => {
       setTrafficSettingsNodeId(null);
     }
   }, [isLoading, setTrafficSettingsNodeId, trafficSettingsNode, trafficSettingsNodeId]);
-
-  React.useEffect(() => {
-    if (trafficSettingsNodeId !== null && !trafficSettingsLoaded) {
-      setTrafficSettingsNodeId(null);
-    }
-  }, [setTrafficSettingsNodeId, trafficSettingsLoaded, trafficSettingsNodeId]);
 
   React.useEffect(() => {
     if (selectedGroupIds.length === 0) return;
@@ -180,7 +174,7 @@ const NodeManager: React.FC = () => {
   }, [bundledNodeVersion, nodes]);
   const upgradingNodeIdSet = React.useMemo(() => new Set(upgradingNodeIds), [upgradingNodeIds]);
 
-  const { draggingId, dragOverId, dragStart, dragOver, drop, dragEnd } = useNodeOrder({
+  const { draggingId, dragOverId, dragStart, dragOver, drop, dragEnd, move } = useNodeOrder({
     token,
     nodes,
     filteredNodeIds,
@@ -206,6 +200,7 @@ const NodeManager: React.FC = () => {
     nodes,
     selectedP95NodeIdSet,
     bundledNodeVersion,
+    billingEnabled,
     trafficRebuildBusy,
     requestConfirm,
     startTrafficRebuild,
@@ -225,6 +220,7 @@ const NodeManager: React.FC = () => {
           <SearchInput
             icon={Search}
             placeholder={t('admin_nodes_search_placeholder')}
+            aria-label={t('admin_nodes_search_placeholder')}
             value={search}
             onChange={(event) => setSearch(event.target.value)}
             wrapperClassName="flex-1 max-w-md"
@@ -280,6 +276,7 @@ const NodeManager: React.FC = () => {
             onDragOver={dragOver}
             onDrop={drop}
             onDragEnd={dragEnd}
+            onMove={(id, offset) => void move(id, offset)}
           />
         </Card>
       ) : (
@@ -291,7 +288,7 @@ const NodeManager: React.FC = () => {
             someVisibleP95Selected={someVisibleP95Selected}
             savingP95NodeIds={savingP95NodeIdSet}
             savingTrafficSettingsNodeIds={savingTrafficSettingsNodeIdSet}
-            trafficSettingsDisabled={trafficSettingsUnavailable}
+            billingEnabled={billingEnabled}
             rebuildingTrafficNodeId={rebuildingTrafficNodeId}
             trafficRebuildBusy={trafficRebuildBusy}
             onToggleVisibleNodes={toggleVisibleP95Nodes}
@@ -363,7 +360,7 @@ const NodeManager: React.FC = () => {
               p95Selected={selectedP95NodeIdSet.has(node.id)}
               savingP95={savingP95NodeIdSet.has(node.id)}
               savingTrafficSettings={savingTrafficSettingsNodeIdSet.has(node.id)}
-              trafficSettingsDisabled={trafficSettingsUnavailable}
+              billingEnabled={billingEnabled}
               rebuilding={rebuildingTrafficNodeId === node.id}
               trafficRebuildBusy={trafficRebuildBusy}
               onToggleP95Node={toggleP95NodeSelection}
@@ -423,11 +420,10 @@ const NodeManager: React.FC = () => {
         />
       )}
 
-      {trafficSettingsNode && trafficSettingsLoaded && (
+      {trafficSettingsNode && (
         <NodeTrafficSettingsModal
           isOpen={!!trafficSettingsNode}
           node={trafficSettingsNode}
-          globalSettings={trafficSettings}
           saving={savingTrafficSettingsNodeIdSet.has(trafficSettingsNode.id)}
           onClose={() => setTrafficSettingsNodeId(null)}
           onSave={(patch) => saveNodeTrafficSettings(trafficSettingsNode.id, patch)}

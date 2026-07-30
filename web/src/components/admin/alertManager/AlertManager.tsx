@@ -113,10 +113,7 @@ const AlertManager: React.FC = () => {
       </div>
 
       {activeTab === 'events' ? (
-        <AlertEventsPanel
-          searchParams={searchParams}
-          setSearchParams={setSearchParams}
-        />
+        <AlertEventsPanel searchParams={searchParams} setSearchParams={setSearchParams} />
       ) : activeTab === 'config' ? (
         <AlertMountsPanel
           rules={mounts.rules}

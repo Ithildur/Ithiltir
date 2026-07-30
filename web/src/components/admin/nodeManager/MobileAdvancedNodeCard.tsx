@@ -5,12 +5,12 @@ import type { NodeRow } from '@app-types/admin';
 import { useI18n } from '@i18n';
 import { NodeP95Switch, TrafficRebuildButton, TrafficSettingsButton } from './NodeAdvancedActions';
 
-export interface Props {
+interface Props {
   node: NodeRow;
   p95Selected: boolean;
   savingP95: boolean;
   savingTrafficSettings: boolean;
-  trafficSettingsDisabled: boolean;
+  billingEnabled: boolean;
   rebuilding: boolean;
   trafficRebuildBusy: boolean;
   onToggleP95Node: (id: number) => void;
@@ -24,7 +24,7 @@ const MobileAdvancedNodeCard: React.FC<Props> = ({
   p95Selected,
   savingP95,
   savingTrafficSettings,
-  trafficSettingsDisabled,
+  billingEnabled,
   rebuilding,
   trafficRebuildBusy,
   onToggleP95Node,
@@ -60,7 +60,7 @@ const MobileAdvancedNodeCard: React.FC<Props> = ({
         </span>
         <TrafficSettingsButton
           node={node}
-          disabled={trafficSettingsDisabled || savingTrafficSettings}
+          disabled={savingTrafficSettings}
           className="max-w-48"
           onOpen={onOpenTrafficSettings}
         />
@@ -68,6 +68,7 @@ const MobileAdvancedNodeCard: React.FC<Props> = ({
       <div className="mt-3 flex justify-end">
         <TrafficRebuildButton
           node={node}
+          billingEnabled={billingEnabled}
           disabled={trafficRebuildBusy}
           rebuilding={rebuilding}
           onRebuild={onRebuildTraffic}

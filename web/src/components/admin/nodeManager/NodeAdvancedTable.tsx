@@ -4,14 +4,14 @@ import type { NodeRow } from '@app-types/admin';
 import { useI18n } from '@i18n';
 import { NodeP95Switch, TrafficRebuildButton, TrafficSettingsButton } from './NodeAdvancedActions';
 
-export interface Props {
+interface Props {
   nodes: NodeRow[];
   selectedP95NodeIds: Set<number>;
   allVisibleP95Selected: boolean;
   someVisibleP95Selected: boolean;
   savingP95NodeIds: Set<number>;
   savingTrafficSettingsNodeIds: Set<number>;
-  trafficSettingsDisabled: boolean;
+  billingEnabled: boolean;
   rebuildingTrafficNodeId: number | null;
   trafficRebuildBusy: boolean;
   onToggleVisibleNodes: () => void;
@@ -28,7 +28,7 @@ const NodeAdvancedTable: React.FC<Props> = ({
   someVisibleP95Selected,
   savingP95NodeIds,
   savingTrafficSettingsNodeIds,
-  trafficSettingsDisabled,
+  billingEnabled,
   rebuildingTrafficNodeId,
   trafficRebuildBusy,
   onToggleVisibleNodes,
@@ -99,7 +99,7 @@ const NodeAdvancedTable: React.FC<Props> = ({
                 <td className="px-3 py-2 text-xs w-44">
                   <TrafficSettingsButton
                     node={node}
-                    disabled={trafficSettingsDisabled || savingTrafficSettingsNodeIds.has(node.id)}
+                    disabled={savingTrafficSettingsNodeIds.has(node.id)}
                     onOpen={onOpenTrafficSettings}
                   />
                 </td>
@@ -113,6 +113,7 @@ const NodeAdvancedTable: React.FC<Props> = ({
                 <td className="px-3 py-2 text-xs w-16">
                   <TrafficRebuildButton
                     node={node}
+                    billingEnabled={billingEnabled}
                     disabled={trafficRebuildBusy}
                     rebuilding={rebuilding}
                     onRebuild={onRebuildTraffic}

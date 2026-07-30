@@ -26,6 +26,7 @@ export const useNodeManagerActions = ({
   nodes,
   selectedP95NodeIdSet,
   bundledNodeVersion,
+  billingEnabled,
   trafficRebuildBusy,
   requestConfirm,
   startTrafficRebuild,
@@ -36,6 +37,7 @@ export const useNodeManagerActions = ({
   nodes: NodeRow[];
   selectedP95NodeIdSet: ReadonlySet<number>;
   bundledNodeVersion: string;
+  billingEnabled: boolean;
   trafficRebuildBusy: boolean;
   requestConfirm: ConfirmRequest;
   startTrafficRebuild: (id: number) => Promise<TrafficRebuildStartOutcome>;
@@ -218,7 +220,7 @@ export const useNodeManagerActions = ({
 
   const rebuildNodeTraffic = React.useCallback(
     async (node: NodeRow) => {
-      if (!token || trafficRebuildBusy) return;
+      if (!token || !billingEnabled || trafficRebuildBusy) return;
       const ok = await requestConfirm({
         title: t('common_confirm'),
         message: t('admin_confirm_rebuild_node_traffic', { name: node.name }),
@@ -231,7 +233,15 @@ export const useNodeManagerActions = ({
       const outcome = await startTrafficRebuild(node.id);
       showTrafficRebuildOutcome(outcome);
     },
-    [requestConfirm, showTrafficRebuildOutcome, startTrafficRebuild, t, token, trafficRebuildBusy],
+    [
+      billingEnabled,
+      requestConfirm,
+      showTrafficRebuildOutcome,
+      startTrafficRebuild,
+      t,
+      token,
+      trafficRebuildBusy,
+    ],
   );
 
   const saveSettings = React.useCallback(

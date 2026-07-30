@@ -17,7 +17,7 @@ import type {
   ThemePackage,
   WebhookConfig,
 } from '@app-types/admin';
-import { apiFetch } from './api';
+import { apiControlTimeoutMs, apiFetch } from './api';
 
 export const fetchGroupList = (params: { signal?: AbortSignal } = {}) =>
   apiFetch<Group[]>('/admin/groups', {
@@ -84,6 +84,7 @@ export const fetchTrafficRebuild = (signal?: AbortSignal) =>
   apiFetch<NodeTrafficRebuildStatus>('/admin/nodes/traffic/rebuild', {
     method: 'GET',
     signal,
+    timeoutMs: apiControlTimeoutMs,
   });
 
 export const rebuildNodeTraffic = (id: number, signal?: AbortSignal) =>
@@ -125,7 +126,7 @@ export const fetchAlertRules = (params: { signal?: AbortSignal } = {}) =>
   });
 
 export type CreateAlertRuleInput = AlertRuleInput;
-export type UpdateAlertRuleInput = Partial<AlertRuleInput>;
+type UpdateAlertRuleInput = Partial<AlertRuleInput>;
 
 export const createAlertRule = (input: CreateAlertRuleInput) =>
   apiFetch('/admin/alerts/rules', {
@@ -177,7 +178,7 @@ export const updateAlertSettings = (input: { enabled: boolean; channel_ids: numb
     responseType: 'empty',
   });
 
-export interface FetchAlertEventsParams {
+interface FetchAlertEventsParams {
   serverId?: number;
   status?: AlertEventStatusFilter;
   metric?: string;
@@ -281,16 +282,16 @@ export const deleteAlertChannel = (id: number) =>
     responseType: 'empty',
   });
 
-export interface AlertMtprotoCodeResult {
+interface AlertMtprotoCodeResult {
   login_id: string;
   timeout: number;
 }
 
-export interface AlertMtprotoVerifyResult {
+interface AlertMtprotoVerifyResult {
   password_required: boolean;
 }
 
-export interface AlertMtprotoPingResult {
+interface AlertMtprotoPingResult {
   valid: boolean;
   reason?: 'not_logged_in' | 'invalid_session';
 }
@@ -334,22 +335,37 @@ export const updateSystemSettings = (input: Partial<SystemSettings>) =>
     responseType: 'empty',
   });
 
-export interface DashReleaseNotesDocument {
+interface DashReleaseNotesDocument {
   source_url: string;
   html: string;
 }
 
-export type { DashUpdateChannel, DashUpdateMode } from '@app-types/admin';
-
 export type DashUpdateAction = 'update' | 'reinstall';
 export type DashUpdateStatusValue = 'idle' | 'running' | 'completed' | 'failed';
 export type DashUpdateVersionStatus = 'available' | 'current' | 'ahead' | 'unknown';
+
+const dashUpdateStartTimeoutMs = 35_000;
 
 export interface DashUpdateStatus {
   id?: string;
   status: DashUpdateStatusValue;
   action?: DashUpdateAction;
   channel?: DashUpdateChannel;
+  target_version?: string;
+  phase?:
+    | 'queued'
+    | 'locked'
+    | 'download'
+    | 'validate'
+    | 'prepared'
+    | 'stopping'
+    | 'switching'
+    | 'migrating'
+    | 'starting'
+    | 'cleanup'
+    | 'done';
+  failure_code?: string;
+  recovery_path?: string;
   started_at?: string;
   finished_at?: string;
   exit_code?: number;
@@ -363,6 +379,7 @@ export interface DashUpdateCheck {
   current_channel?: DashUpdateChannel;
   target_channel: DashUpdateChannel;
   latest_version: string;
+  install_revision: string;
   version_status: DashUpdateVersionStatus;
   bundled_node_version: string;
 }
@@ -372,6 +389,7 @@ export const fetchDashReleaseNotes = (params: { lang: 'zh' | 'en'; signal?: Abor
   return apiFetch<DashReleaseNotesDocument>(`/admin/system/dash-update/release-notes${query}`, {
     method: 'GET',
     signal: params.signal,
+    timeoutMs: apiControlTimeoutMs,
   });
 };
 
@@ -379,6 +397,7 @@ export const fetchDashUpdateStatus = (params: { signal?: AbortSignal } = {}) =>
   apiFetch<DashUpdateStatus>('/admin/system/dash-update/status', {
     method: 'GET',
     signal: params.signal,
+    timeoutMs: apiControlTimeoutMs,
   });
 
 export const fetchDashUpdateCheck = (params: {
@@ -390,17 +409,26 @@ export const fetchDashUpdateCheck = (params: {
     {
       method: 'GET',
       signal: params.signal,
+      timeoutMs: apiControlTimeoutMs,
     },
   );
 
-export const runDashUpdate = (input: {
-  action: DashUpdateAction;
-  channel: DashUpdateChannel;
-  lang: 'zh' | 'en';
-}) =>
+export const runDashUpdate = (
+  input: {
+    action: DashUpdateAction;
+    channel: DashUpdateChannel;
+    lang: 'zh' | 'en';
+    target_version: string;
+    expected_current_version: string;
+    expected_install_revision: string;
+  },
+  params: { signal?: AbortSignal } = {},
+) =>
   apiFetch<DashUpdateStatus>('/admin/system/dash-update/run', {
     method: 'POST',
     json: input,
+    signal: params.signal,
+    timeoutMs: dashUpdateStartTimeoutMs,
   });
 
 export const fetchThemePackages = (params: { signal?: AbortSignal } = {}) =>

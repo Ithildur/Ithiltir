@@ -7,13 +7,13 @@ interface Base {
   name: string;
 }
 
-export interface TelegramBotChannelForm extends Base {
+interface TelegramBotChannelForm extends Base {
   kind: 'telegram_bot';
   botToken: string;
   chatId: string;
 }
 
-export interface TelegramMtprotoChannelForm extends Base {
+interface TelegramMtprotoChannelForm extends Base {
   kind: 'telegram_mtproto';
   apiId: string;
   apiHash: string;
@@ -21,7 +21,7 @@ export interface TelegramMtprotoChannelForm extends Base {
   chatId: string;
 }
 
-export interface EmailChannelForm extends Base {
+interface EmailChannelForm extends Base {
   kind: 'email';
   emailHost: string;
   emailPort: string;
@@ -32,23 +32,19 @@ export interface EmailChannelForm extends Base {
   emailUseTls: boolean;
 }
 
-export interface WebhookChannelForm extends Base {
+interface WebhookChannelForm extends Base {
   kind: 'webhook';
   webhookUrl: string;
   webhookSecret: string;
 }
 
 export type AlertChannelForm =
-  | TelegramBotChannelForm
-  | TelegramMtprotoChannelForm
-  | EmailChannelForm
-  | WebhookChannelForm;
+  TelegramBotChannelForm | TelegramMtprotoChannelForm | EmailChannelForm | WebhookChannelForm;
 
 export type AlertChannelFormIssue = 'name' | 'telegram_api_id' | 'email_port';
 
-export type AlertChannelFormResult =
-  | { ok: true; input: AlertChannelInput }
-  | { ok: false; issue: AlertChannelFormIssue };
+type AlertChannelFormResult =
+  { ok: true; input: AlertChannelInput } | { ok: false; issue: AlertChannelFormIssue };
 
 export interface ChannelDrafts {
   telegram_bot: Omit<TelegramBotChannelForm, 'name'>;
@@ -73,7 +69,7 @@ const splitRecipients = (value: string): string[] =>
     .map((item) => item.trim())
     .filter(Boolean);
 
-export const emptyDrafts = (): ChannelDrafts => ({
+const emptyDrafts = (): ChannelDrafts => ({
   telegram_bot: {
     kind: 'telegram_bot',
     botToken: '',
@@ -169,7 +165,7 @@ export const channelInputFromForm = (
         config: {
           mode: 'mtproto',
           api_id: apiId,
-          api_hash: form.apiHash.trim(),
+          api_hash: form.apiHash,
           phone: form.phoneNumber.trim(),
           chat_id: form.chatId.trim(),
         },
@@ -186,7 +182,7 @@ export const channelInputFromForm = (
         enabled,
         config: {
           mode: 'bot',
-          bot_token: form.botToken.trim(),
+          bot_token: form.botToken,
           chat_id: form.chatId.trim(),
         },
       },
@@ -216,7 +212,7 @@ export const channelInputFromForm = (
     };
   }
 
-  const secret = form.webhookSecret.trim();
+  const secret = form.webhookSecret;
   return {
     ok: true,
     input: {

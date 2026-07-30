@@ -6,7 +6,7 @@ import { formatLocalDateTime } from '@utils/time';
 import type { Lang } from '@i18n';
 import type { MetricConfig, MetricSection, MetricTransform } from './config';
 
-export type MetricStats = {
+type MetricStats = {
   min: number | null;
   max: number | null;
   avg: number | null;
@@ -14,7 +14,7 @@ export type MetricStats = {
   unitScale: ReturnType<typeof resolveUnitScale>;
 };
 
-export type StatsLookup = Map<string, MetricStats>;
+type StatsLookup = Map<string, MetricStats>;
 export type SeriesLookup = Record<string, MetricPoint[]>;
 
 export const metricSeriesKey = (metric: MetricConfig): string => metric.seriesKey ?? metric.metric;
@@ -100,14 +100,14 @@ export const resolveMetricDevice = (
 const hasTemperature = (value: number | undefined): boolean =>
   typeof value === 'number' && Number.isFinite(value) && value > 0;
 
-export const hasCpuTemperature = (node: NodeView | null): boolean =>
+const hasCpuTemperature = (node: NodeView | null): boolean =>
   Boolean(
     node?.thermal?.sensors?.some(
       (sensor) => sensor.kind.trim().toLowerCase() === 'cpu' && hasTemperature(sensor.temp_c),
     ),
   );
 
-export const diskTemperatureMetrics = (node: NodeView | null): MetricConfig[] => {
+const diskTemperatureMetrics = (node: NodeView | null): MetricConfig[] => {
   const devices = node?.disk?.temperature_devices ?? [];
   const seen = new Set<string>();
   const metrics: MetricConfig[] = [];

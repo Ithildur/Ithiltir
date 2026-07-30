@@ -17,7 +17,7 @@ import { useI18n } from '@i18n';
 import { alertSummaryMetricName } from '@components/admin/alertManager/alertLabels';
 import { nodeAlertEventsPath } from './nodeManagerModel';
 
-export interface Props {
+interface Props {
   nodes: NodeRow[];
   alertSummaryByServer: ReadonlyMap<number, AlertEventSummary>;
   updatableNodeIds: Set<number>;
@@ -38,6 +38,7 @@ export interface Props {
   onDragOver: (targetId: number) => (event: React.DragEvent) => void;
   onDrop: (targetId: number) => (event: React.DragEvent) => Promise<void>;
   onDragEnd: () => void;
+  onMove: (id: number, offset: -1 | 1) => void;
 }
 
 const NodeTable: React.FC<Props> = ({
@@ -61,6 +62,7 @@ const NodeTable: React.FC<Props> = ({
   onDragOver,
   onDrop,
   onDragEnd,
+  onMove,
 }) => {
   const { lang, t } = useI18n();
   const [editingId, setEditingId] = React.useState<number | null>(null);
@@ -92,7 +94,8 @@ const NodeTable: React.FC<Props> = ({
   const renderAlertSummary = (node: NodeRow) => {
     const summary = alertSummaryByServer.get(node.id);
     if (!summary) return null;
-    const rawMetrics = summary.metrics && summary.metrics.length > 0 ? summary.metrics : [summary.metric];
+    const rawMetrics =
+      summary.metrics && summary.metrics.length > 0 ? summary.metrics : [summary.metric];
     const metrics = rawMetrics.filter(Boolean);
     const label =
       metrics.length > 0
@@ -147,7 +150,12 @@ const NodeTable: React.FC<Props> = ({
                 draggable
                 onDragStart={onDragStart(node.id)}
                 onDragEnd={onDragEnd}
-                aria-label={t('admin_nodes_drag_reorder')}
+                onKeyDown={(event) => {
+                  if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown') return;
+                  event.preventDefault();
+                  onMove(node.id, event.key === 'ArrowUp' ? -1 : 1);
+                }}
+                aria-label={t('admin_nodes_reorder', { name: node.name })}
               >
                 <GripVertical size={18} />
               </button>
@@ -217,6 +225,7 @@ const NodeTable: React.FC<Props> = ({
                 size="sm"
                 checked={node.guestVisible}
                 disabled={savingGuestVisibleNodeIds.has(node.id)}
+                ariaLabel={t('admin_nodes_guest_visibility_toggle', { name: node.name })}
                 onChange={() => onToggleGuestVisible(node)}
               />
             </td>

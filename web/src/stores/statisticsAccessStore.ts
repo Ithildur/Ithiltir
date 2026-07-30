@@ -3,7 +3,7 @@ import type { StatisticsAccess } from '@app-types/traffic';
 import { fetchStatisticsAccess } from '@lib/statisticsApi';
 import { isCanceledRequestError } from '@utils/errors';
 
-export type StatisticsAccessLoad =
+type StatisticsAccessLoad =
   | { status: 'idle'; access: null; error: null; requestId: null; fetchedAt: null }
   | {
       status: 'loading';
@@ -21,7 +21,7 @@ export type StatisticsAccessLoad =
       fetchedAt: number | null;
     };
 
-export interface StatisticsAccessState {
+interface StatisticsAccessState {
   load: StatisticsAccessLoad;
 }
 
@@ -66,8 +66,7 @@ export const useStatisticsAccessStore = create<StatisticsAccessState>()(() => ({
   load: initialStatisticsAccessLoad,
 }));
 
-export const getStatisticsAccessState = (): StatisticsAccessState =>
-  useStatisticsAccessStore.getState();
+const getStatisticsAccessState = (): StatisticsAccessState => useStatisticsAccessStore.getState();
 
 const startStatisticsAccessLoad = (requestId: number): void => {
   const current = getStatisticsAccessState().load;

@@ -68,6 +68,7 @@ export const en = {
   common_save: 'Save',
   common_save_changes: 'Save changes',
   common_saving: 'Saving...',
+  common_skip_to_main: 'Skip to main content',
   common_unknown: 'Unknown',
   common_toggle_setting: 'Toggle setting',
   common_action_busy: 'An operation is already running. Try again shortly.',
@@ -106,8 +107,6 @@ export const en = {
   stats_auth_required: '403: Sign in to view statistics.',
   error_sync_failed_retry: 'Sync failed. Refresh and try again.',
   error_state_unavailable_retry: 'State unavailable. Try again later.',
-  warning_alert_reconcile_delayed:
-    'The action completed, but alert reconciliation is delayed. Changes will apply later and retry automatically.',
   warning_redis_cache_error:
     'The action completed, but cache sync failed. The page may be briefly stale.',
   warning_api_notice: 'System warning: {{code}}',
@@ -150,7 +149,7 @@ export const en = {
   admin_system_brand_logo_preview: 'Site logo preview',
   admin_system_brand_logo_upload: 'Upload Logo',
   admin_system_brand_logo_reset: 'Reset',
-  admin_system_brand_logo_hint: 'SVG, PNG, JPG, WebP, or ICO. Up to 512 KiB.',
+  admin_system_brand_logo_hint: 'SVG, PNG, JPG, GIF, WebP, or ICO. Up to 512 KiB.',
   admin_system_brand_logo_too_large: 'Logo file must be 512 KiB or smaller.',
   admin_system_brand_logo_type_invalid: 'Choose an image file.',
   admin_system_brand_logo_read_failed: 'Failed to read logo file.',
@@ -164,7 +163,7 @@ export const en = {
     'Enables 5-minute samples, 95th bandwidth, and coverage statistics.',
   admin_system_traffic_usage_confirm_billing_title: 'Enable advanced traffic statistics?',
   admin_system_traffic_usage_confirm_billing_message:
-    'Advanced traffic statistics backfills and maintains extra 5-minute traffic samples, gap scans, and monthly snapshots. It adds database and CPU load; enable it only on servers with at least 2C4G recommended.',
+    'After enabling, advanced traffic statistics rebuilds the latest 30 minutes in the background first, then maintains 5-minute traffic samples, gap scans, and monthly snapshots. Older per-node history can be rebuilt on demand. This adds database and CPU load; a server with at least 2C4G is recommended.',
   admin_system_traffic_usage_confirm_billing_action: 'Enable',
   admin_system_traffic_usage_confirm_lite_title: 'Disable advanced traffic statistics?',
   admin_system_traffic_usage_confirm_lite_message:
@@ -233,6 +232,10 @@ export const en = {
   admin_dash_update_job_title: 'Update Task',
   admin_dash_update_action_title: 'Update Action',
   admin_dash_update_action_requires_check: 'Run a manual update check first.',
+  admin_dash_update_action_current:
+    'Dash is already current. Use Reinstall only when you need to apply the same release again.',
+  admin_dash_update_action_ahead:
+    'The selected channel is older than the installed version. The built-in updater cannot downgrade; switch channels or wait for a newer release.',
   admin_dash_update_job_status_idle: 'Idle',
   admin_dash_update_job_status_running: 'Running',
   admin_dash_update_job_status_completed: 'Completed',
@@ -357,6 +360,15 @@ export const en = {
   admin_alerts_channels_col_summary: 'Summary',
   admin_alerts_channels_col_status: 'Status',
   admin_alerts_channels_col_updated: 'Last updated',
+  admin_alerts_channels_delivery_healthy: 'Healthy',
+  admin_alerts_channels_delivery_degraded: 'Degraded',
+  admin_alerts_channels_delivery_disabled: 'Disabled',
+  admin_alerts_channels_delivery_unknown: 'No delivery yet',
+  admin_alerts_channels_delivery_failures: '{{count}} consecutive failures',
+  admin_alerts_channels_delivery_pending: '{{count}} queued',
+  admin_alerts_channels_delivery_next_retry: 'Will retry after {{time}}',
+  admin_alerts_channels_delivery_next_probe: 'Next probe: {{time}}',
+  admin_alerts_channels_delivery_last_success: 'Last success: {{time}}',
   admin_alerts_channels_empty_title: 'No channels configured',
   admin_alerts_channels_empty_description:
     'Create a notification channel to route alerts to chat, email, or webhooks.',
@@ -367,9 +379,12 @@ export const en = {
   admin_alerts_channels_create_failed: 'Failed to create channel.',
   admin_alerts_channels_update_success: 'Channel updated.',
   admin_alerts_channels_update_failed: 'Failed to update channel.',
+  admin_alerts_channels_saved_refresh_failed:
+    'The channel was saved, but the list could not refresh. It will retry automatically.',
   admin_alerts_channels_delete_success: 'Channel deleted.',
   admin_alerts_channels_delete_failed: 'Failed to delete channel.',
   admin_alerts_channels_toggle_failed: 'Failed to update channel status.',
+  admin_alerts_channels_enabled_toggle: 'Toggle channel "{{name}}"',
   admin_alerts_settings_title: 'Global Notification Targets',
   admin_alerts_settings_desc:
     'Alert notifications and Dash update reminders are sent to the enabled channels selected here.',
@@ -488,6 +503,7 @@ export const en = {
   admin_alerts_core_plus_hint: 'Threshold = CPU cores + offset.',
   admin_alerts_confirm_enable_rule: 'Enable rule "{{name}}"?',
   admin_alerts_confirm_disable_rule: 'Disable rule "{{name}}"?',
+  admin_alerts_rule_enabled_toggle: 'Toggle rule "{{name}}"',
   admin_alerts_confirm_rename_rule: 'Save name change "{{name}}" → "{{next}}"?',
   admin_alerts_toast_enabled: 'Enabled "{{name}}"',
   admin_alerts_toast_disabled: 'Disabled "{{name}}"',
@@ -538,6 +554,7 @@ export const en = {
   admin_alerts_mounts_select_node: 'Select node {{name}}',
   admin_alerts_mounts_select_all_rules: 'Select all rules',
   admin_alerts_mounts_select_rule: 'Select rule {{name}}',
+  admin_alerts_mounts_toggle: 'Toggle rule "{{rule}}" for node "{{node}}"',
   admin_alerts_mounts_fetch_failed: 'Failed to fetch alert mounts',
   admin_alerts_mounts_update_failed: 'Failed to update alert mounts',
   admin_alerts_mounts_apply_success: 'Mounted',
@@ -583,6 +600,8 @@ export const en = {
   admin_nodes_filter_updatable: 'Update available',
   admin_nodes_filter_no_groups: 'No groups',
   admin_nodes_drag_reorder: 'Drag to reorder',
+  admin_nodes_reorder: 'Reorder {{name}} with the Up and Down arrow keys',
+  admin_nodes_guest_visibility_toggle: 'Toggle guest access for {{name}}',
   admin_nodes_unconfigured: 'Not set',
   admin_nodes_copy_secret: 'Copy secret',
   admin_nodes_tags_none: 'None',
@@ -615,13 +634,14 @@ export const en = {
   admin_node_traffic_settings_button: 'Set traffic statistics basis for {{name}}',
   admin_node_traffic_settings_saved: 'Node traffic settings saved.',
   admin_node_traffic_settings_save_failed: 'Failed to save node traffic settings.',
-  admin_node_cycle_mode_default: 'Use global default',
-  admin_node_cycle_mode_inherited: 'Inherits global',
   admin_node_direction_mode_default: 'Use global default',
-  admin_node_traffic_settings_inherited_hint:
-    'This node uses the global default traffic settings from System Settings.',
-  admin_node_traffic_settings_override_hint: 'This node uses its own traffic statistics basis.',
+  admin_node_traffic_settings_direction_inherited_hint:
+    'This node stores its own billing cycle and inherits the global traffic direction.',
+  admin_node_traffic_settings_explicit_hint:
+    'This node stores both its billing cycle and traffic direction explicitly.',
   admin_node_traffic_rebuild: 'Rebuild',
+  admin_node_traffic_rebuild_requires_billing:
+    'Rebuilding 5-minute traffic facts is available only in Billing mode.',
   admin_node_traffic_rebuild_button: 'Rebuild traffic statistics for {{name}}',
   admin_confirm_rebuild_node_traffic:
     'Rebuild 5-minute traffic samples for {{name}}? Rebuild only uses retained raw NIC metrics that were already reported. Data cannot be repaired when the node stayed offline for a long time, the network kept preventing reports, or the data is outside retention.',
@@ -754,8 +774,6 @@ export const en = {
   // Traffic statistics
   traffic_title: 'Traffic Statistics',
   traffic_iface: 'Interface',
-  traffic_cycle_mode: 'Global Default Billing Cycle',
-  traffic_cycle_mode_desc: 'Select the monthly statistics mode.',
   traffic_cycle: 'Cycle',
   traffic_cycle_calendar_month: 'Calendar Month',
   traffic_cycle_whmcs_compatible: 'WHMCS Compatible',

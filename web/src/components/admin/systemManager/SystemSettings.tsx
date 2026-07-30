@@ -6,6 +6,7 @@ import Save from 'lucide-react/dist/esm/icons/save';
 import Settings2 from 'lucide-react/dist/esm/icons/settings-2';
 import Upload from 'lucide-react/dist/esm/icons/upload';
 import { AdminSectionTabs } from '@components/admin/AdminSectionTabs';
+import { BrandImage } from '@components/BrandLogo';
 import Button from '@components/ui/Button';
 import ConfirmDialog from '@components/ui/ConfirmDialog';
 import Input from '@components/ui/Input';
@@ -25,17 +26,36 @@ import type {
 } from '@app-types/admin';
 import type { SiteBrand } from '@app-types/site';
 import { pushTopBanner } from '@runtime/topBannerRuntime';
-import { setBrand } from '@stores/siteBrandStore';
+import { patchBrand, refreshBrand } from '@stores/siteBrandStore';
 import { cacheHistoryGuestAccess } from '@stores/statisticsAccessStore';
 import { useI18n } from '@i18n';
 import * as adminApi from '@lib/adminApi';
-import { defaultSiteBrand, normalizeSiteBrand } from '@lib/siteBrandModel';
+import { defaultSiteBrand, displayLogoURL, normalizeSiteBrand } from '@lib/siteBrandModel';
 import { useApiErrorHandler } from '@hooks/useApiErrorHandler';
 import { useConfirmDialog } from '@hooks/useConfirmDialog';
 import { isCanceledRequestError } from '@utils/errors';
 import { createSeqGate, runLatestLoad } from '@utils/seqGate';
 
 const logoMaxBytes = 512 * 1024;
+const logoMediaTypes = new Map([
+  ['image/svg+xml', 'image/svg+xml'],
+  ['image/png', 'image/png'],
+  ['image/jpeg', 'image/jpeg'],
+  ['image/gif', 'image/gif'],
+  ['image/webp', 'image/webp'],
+  ['image/ico', 'image/x-icon'],
+  ['image/x-icon', 'image/x-icon'],
+  ['image/vnd.microsoft.icon', 'image/x-icon'],
+]);
+const logoExtensionTypes = new Map([
+  ['svg', 'image/svg+xml'],
+  ['png', 'image/png'],
+  ['jpg', 'image/jpeg'],
+  ['jpeg', 'image/jpeg'],
+  ['gif', 'image/gif'],
+  ['webp', 'image/webp'],
+  ['ico', 'image/x-icon'],
+]);
 
 const tabs = [
   { key: 'settings', labelKey: 'admin_tab_system', icon: Settings2 },
@@ -45,13 +65,16 @@ const tabs = [
 
 type SystemManagerTab = (typeof tabs)[number]['key'];
 
-const readFileAsDataURL = (file: File): Promise<string> =>
+const readFileAsDataURL = (file: File, mediaType: string): Promise<string> =>
   new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = () => {
       if (typeof reader.result === 'string') {
-        resolve(reader.result);
-        return;
+        const comma = reader.result.indexOf(',');
+        if (comma >= 0) {
+          resolve(`data:${mediaType};base64,${reader.result.slice(comma + 1)}`);
+          return;
+        }
       }
       reject(new Error('invalid file result'));
     };
@@ -59,9 +82,11 @@ const readFileAsDataURL = (file: File): Promise<string> =>
     reader.readAsDataURL(file);
   });
 
-const isSupportedLogoFile = (file: File): boolean => {
-  if (file.type.startsWith('image/')) return true;
-  return /\.(svg|png|jpe?g|webp|ico)$/i.test(file.name);
+const logoMediaType = (file: File): string | null => {
+  const byType = logoMediaTypes.get(file.type.toLowerCase());
+  if (byType) return byType;
+  const extension = file.name.toLowerCase().match(/\.([^.]+)$/)?.[1];
+  return extension ? (logoExtensionTypes.get(extension) ?? null) : null;
 };
 
 const SystemSettings: React.FC = () => {
@@ -77,7 +102,7 @@ const SystemSettings: React.FC = () => {
   const [activeTab, setActiveTab] = React.useState<SystemManagerTab>('settings');
   const [brandDraft, setBrandDraft] = React.useState<SiteBrand | null>(null);
   const brandDirty = React.useRef(false);
-  const loadGate = React.useMemo(createSeqGate, []);
+  const loadGate = React.useMemo(() => createSeqGate(), []);
   const logoInputRef = React.useRef<HTMLInputElement | null>(null);
 
   const loadSettings = React.useCallback(
@@ -149,11 +174,31 @@ const SystemSettings: React.FC = () => {
   const saveBrandSettings = React.useCallback(async () => {
     if (!settings || !brandDraft || savingBrand) return;
     const nextBrand = normalizeSiteBrand(brandDraft);
+    const previousBrand = normalizeSiteBrand(settings);
+    const updates: Partial<SiteBrand> = {};
+    if (nextBrand.logo_url !== previousBrand.logo_url) updates.logo_url = nextBrand.logo_url;
+    if (nextBrand.page_title !== previousBrand.page_title) {
+      updates.page_title = nextBrand.page_title;
+    }
+    if (nextBrand.topbar_text !== previousBrand.topbar_text) {
+      updates.topbar_text = nextBrand.topbar_text;
+    }
+    if (Object.keys(updates).length === 0) {
+      brandDirty.current = false;
+      setBrandDraft(previousBrand);
+      return;
+    }
     setSavingBrand(true);
     try {
-      await adminApi.updateSystemSettings(nextBrand);
-      setSettings((current) => (current ? { ...current, ...nextBrand } : current));
-      const savedBrand = setBrand(nextBrand);
+      await adminApi.updateSystemSettings(updates);
+      let savedBrand: SiteBrand;
+      try {
+        savedBrand = await refreshBrand();
+      } catch (error) {
+        savedBrand = patchBrand(updates);
+        apiError(error, { key: 'brand_runtime_load_failed' });
+      }
+      setSettings((current) => (current ? { ...current, ...savedBrand } : current));
       brandDirty.current = false;
       setBrandDraft(savedBrand);
       pushTopBanner(t('admin_system_settings_saved'), { tone: 'info' });
@@ -209,12 +254,13 @@ const SystemSettings: React.FC = () => {
         pushTopBanner(t('admin_system_brand_logo_too_large'), { tone: 'error' });
         return;
       }
-      if (!isSupportedLogoFile(file)) {
+      const mediaType = logoMediaType(file);
+      if (!mediaType) {
         pushTopBanner(t('admin_system_brand_logo_type_invalid'), { tone: 'error' });
         return;
       }
       try {
-        updateBrandDraft('logo_url', await readFileAsDataURL(file));
+        updateBrandDraft('logo_url', await readFileAsDataURL(file, mediaType));
       } catch {
         pushTopBanner(t('admin_system_brand_logo_read_failed'), { tone: 'error' });
       }
@@ -224,7 +270,7 @@ const SystemSettings: React.FC = () => {
 
   const historyByNode = settings?.history_guest_access_mode === 'by_node';
   const savedBrand = settings ? normalizeSiteBrand(settings) : null;
-  const draftLogoURL = brandDraft?.logo_url.trim() || defaultSiteBrand.logo_url;
+  const draftLogoURL = displayLogoURL(brandDraft?.logo_url.trim() || defaultSiteBrand.logo_url);
   const brandChanged =
     Boolean(savedBrand && brandDraft) &&
     (brandDraft?.logo_url !== savedBrand?.logo_url ||
@@ -254,7 +300,7 @@ const SystemSettings: React.FC = () => {
             >
               <div className="flex w-full flex-col gap-3 sm:flex-row sm:items-center">
                 <div className="flex size-24 shrink-0 items-center justify-center rounded-lg border border-(--theme-border-subtle) bg-(--theme-bg-muted) p-4 dark:border-(--theme-border-default)">
-                  <img
+                  <BrandImage
                     src={draftLogoURL}
                     alt={t('admin_system_brand_logo_preview')}
                     className="size-full object-contain"
@@ -263,7 +309,7 @@ const SystemSettings: React.FC = () => {
                 <input
                   ref={logoInputRef}
                   type="file"
-                  accept="image/svg+xml,image/png,image/jpeg,image/webp,image/x-icon"
+                  accept=".svg,.png,.jpg,.jpeg,.gif,.webp,.ico,image/svg+xml,image/png,image/jpeg,image/gif,image/webp,image/x-icon,image/vnd.microsoft.icon"
                   className="hidden"
                   onChange={(event) => void selectLogoFile(event)}
                 />

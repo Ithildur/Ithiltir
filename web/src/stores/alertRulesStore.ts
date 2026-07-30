@@ -4,7 +4,7 @@ import * as adminApi from '@lib/adminApi';
 import { pendingIds } from '@utils/pendingIds';
 import { createSeqGate, reloadLatestLoad, runLatestLoad } from '@utils/seqGate';
 
-export interface AlertRulesState {
+interface AlertRulesState {
   rules: AlertRule[];
   loading: boolean;
   saving: boolean;
@@ -45,7 +45,7 @@ const setAlertRulesLoading = (loading: boolean): void => {
 };
 
 const reloadAlertRules = async (): Promise<void> => {
-  return reloadLatestLoad(loadGate, fetchAlertRules, replaceAlertRules, setAlertRulesLoading);
+  await reloadLatestLoad(loadGate, fetchAlertRules, replaceAlertRules, setAlertRulesLoading);
 };
 
 export const loadAlertRules = async (

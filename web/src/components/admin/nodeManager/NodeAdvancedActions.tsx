@@ -22,6 +22,7 @@ interface TrafficSettingsButtonProps extends NodeActionProps {
 }
 
 interface TrafficRebuildButtonProps extends NodeActionProps {
+  billingEnabled: boolean;
   disabled: boolean;
   rebuilding: boolean;
   onRebuild: (node: NodeRow) => void;
@@ -67,6 +68,7 @@ export const TrafficSettingsButton: React.FC<TrafficSettingsButtonProps> = ({
 
 export const TrafficRebuildButton: React.FC<TrafficRebuildButtonProps> = ({
   node,
+  billingEnabled,
   disabled,
   rebuilding,
   onRebuild,
@@ -76,11 +78,15 @@ export const TrafficRebuildButton: React.FC<TrafficRebuildButtonProps> = ({
   return (
     <button
       type="button"
-      disabled={disabled}
+      disabled={disabled || !billingEnabled}
       onClick={() => onRebuild(node)}
       className="ui-focus-ring inline-flex size-8 items-center justify-center rounded-md text-(--theme-fg-action-muted) transition-[background-color,border-color,color,transform] duration-150 hover:bg-(--theme-bg-interactive-hover) hover:text-(--theme-fg-interactive) active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50 dark:hover:bg-(--theme-bg-interactive-hover) dark:hover:text-(--theme-fg-interactive-hover)"
       aria-label={t('admin_node_traffic_rebuild_button', { name: node.name })}
-      title={t('admin_node_traffic_rebuild')}
+      title={t(
+        billingEnabled
+          ? 'admin_node_traffic_rebuild'
+          : 'admin_node_traffic_rebuild_requires_billing',
+      )}
     >
       {rebuilding ? (
         <LoaderCircle size={18} className="animate-spin" aria-hidden="true" />

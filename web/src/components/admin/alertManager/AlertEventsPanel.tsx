@@ -33,10 +33,7 @@ interface Props {
 const eventPageLimit = 200;
 type AlertEventBounds = ReturnType<typeof alertEventRequestBounds>;
 
-export const AlertEventsPanel: React.FC<Props> = ({
-  searchParams,
-  setSearchParams,
-}) => {
+export const AlertEventsPanel: React.FC<Props> = ({ searchParams, setSearchParams }) => {
   const { lang, t } = useI18n();
   const apiError = useApiErrorHandler();
   const [draft, setDraft] = React.useState<AlertEventFilter>(() =>
@@ -144,13 +141,7 @@ export const AlertEventsPanel: React.FC<Props> = ({
   }, [searchParams, setSearchParams]);
 
   const loadMore = React.useCallback(() => {
-    if (
-      loading ||
-      loadingMore ||
-      !hasMore ||
-      !nextCursor ||
-      !alertEventFilterReady(applied)
-    ) {
+    if (loading || loadingMore || !hasMore || !nextCursor || !alertEventFilterReady(applied)) {
       return;
     }
 
@@ -201,9 +192,7 @@ export const AlertEventsPanel: React.FC<Props> = ({
   const customRangeLabel = alertEventCustomRangeLabel(applied, lang);
   const canSearch = alertEventFilterReady(draft);
   const serverOptions = React.useMemo<ComboboxOption[]>(() => {
-    const options: ComboboxOption[] = [
-      { value: '0', label: t('admin_alerts_events_all_servers') },
-    ];
+    const options: ComboboxOption[] = [{ value: '0', label: t('admin_alerts_events_all_servers') }];
     if (draft.serverId > 0 && !servers.some((server) => server.id === draft.serverId)) {
       options.push({ value: String(draft.serverId), label: `#${draft.serverId}` });
     }
@@ -358,11 +347,7 @@ export const AlertEventsPanel: React.FC<Props> = ({
         </div>
       </Card>
 
-      <AlertEventsTable
-        items={items}
-        loading={loading}
-        customRangeLabel={customRangeLabel}
-      />
+      <AlertEventsTable items={items} loading={loading} customRangeLabel={customRangeLabel} />
 
       {hasMore && (
         <div className="flex justify-center">

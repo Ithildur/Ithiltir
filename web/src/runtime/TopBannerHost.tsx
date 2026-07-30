@@ -7,7 +7,6 @@ import { useTopBannerStore } from '@stores/topBannerStore';
 import { clearTopBanners, closeTopBanner, pushTopBanner } from '@runtime/topBannerRuntime';
 
 const warningKeyByCode: Partial<Record<string, TranslationKey>> = {
-  alert_reconcile_delayed: 'warning_alert_reconcile_delayed',
   redis_cache_error: 'warning_redis_cache_error',
   theme_active_broken: 'warning_theme_active_broken',
   theme_active_missing: 'warning_theme_active_missing',

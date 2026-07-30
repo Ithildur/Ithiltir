@@ -94,9 +94,6 @@ export const compareVersions = (a: string, b: string): number | null => {
   return 0;
 };
 
-export const isVersionOlder = (current: string, target: string): boolean =>
-  compareVersions(current, target) === -1;
-
 export const isVersionUpdateTarget = (current: string, target: string): boolean => {
   const currentValue = current.trim();
   const targetValue = target.trim();

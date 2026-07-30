@@ -127,10 +127,7 @@ export const alertEventFilterReady = (filter: AlertEventFilter): boolean => {
   return timeRangeReady(isoFromLocal(filter.fromLocal), isoFromLocal(filter.toLocal));
 };
 
-export const alertEventCustomRangeLabel = (
-  filter: AlertEventFilter,
-  lang: 'zh' | 'en',
-): string => {
+export const alertEventCustomRangeLabel = (filter: AlertEventFilter, lang: 'zh' | 'en'): string => {
   if (filter.range !== 'custom') return '';
   const from = isoFromLocal(filter.fromLocal);
   const to = isoFromLocal(filter.toLocal);

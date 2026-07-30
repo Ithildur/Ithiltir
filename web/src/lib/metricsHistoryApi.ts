@@ -5,7 +5,7 @@ import type {
   MetricHistory,
 } from '@app-types/metricsHistory';
 
-export interface MetricHistoryParams {
+interface MetricHistoryParams {
   serverId: number;
   metric: string;
   range: MetricHistoryRange;

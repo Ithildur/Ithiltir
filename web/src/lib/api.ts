@@ -6,8 +6,9 @@ const API_BASE = '/api';
 const API_WARNING_HEADER = 'X-Dash-Warning';
 
 export const API_WARNING_EVENT = 'dash:warning';
+export const apiControlTimeoutMs = 15_000;
 
-export interface ApiWarningDetail {
+interface ApiWarningDetail {
   code: string;
 }
 
@@ -25,7 +26,7 @@ export class ApiError extends Error {
   }
 }
 
-export class ApiAuthStaleError extends Error {
+class ApiAuthStaleError extends Error {
   constructor() {
     super('Auth session changed');
     this.name = 'ApiAuthStaleError';
@@ -35,7 +36,7 @@ export class ApiAuthStaleError extends Error {
 export const isApiAuthStaleError = (error: unknown): error is ApiAuthStaleError =>
   error instanceof ApiAuthStaleError;
 
-export class ApiRuntimeError extends Error {
+class ApiRuntimeError extends Error {
   code: string;
 
   constructor(message: string, code: string) {
@@ -45,26 +46,60 @@ export class ApiRuntimeError extends Error {
   }
 }
 
-export interface ApiRequestOptions extends RequestInit {
+interface RequestTimeout {
+  signal: AbortSignal | undefined;
+  clear: () => void;
+}
+
+const withRequestTimeout = (
+  signal: AbortSignal | null | undefined,
+  timeoutMs: number | undefined,
+): RequestTimeout => {
+  if (timeoutMs === undefined) {
+    return { signal: signal ?? undefined, clear: () => undefined };
+  }
+  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
+    throw new ApiRuntimeError('API request timeout must be positive', 'api_invalid_timeout');
+  }
+
+  const controller = new AbortController();
+  const abortFromCaller = () => controller.abort(signal?.reason);
+  if (signal?.aborted) {
+    abortFromCaller();
+  } else {
+    signal?.addEventListener('abort', abortFromCaller, { once: true });
+  }
+  const timeout = window.setTimeout(() => {
+    controller.abort(new DOMException('Request timed out', 'TimeoutError'));
+  }, timeoutMs);
+
+  return {
+    signal: controller.signal,
+    clear: () => {
+      window.clearTimeout(timeout);
+      signal?.removeEventListener('abort', abortFromCaller);
+    },
+  };
+};
+
+type ApiRequestOptions = Omit<RequestInit, 'credentials'> & {
+  credentials?: never;
   json?: unknown;
   auth?: 'auto' | 'none';
   csrf?: 'auto' | 'none';
   retryOn401?: boolean;
   responseType?: 'json' | 'text' | 'empty' | 'jsonOrEmpty';
-}
+  timeoutMs?: number;
+};
 
 const buildUrl = (path: string): string => {
-  if (path.startsWith('http://') || path.startsWith('https://')) return path;
   const normalized = path.startsWith('/') ? path : `/${path}`;
   return `${API_BASE}${normalized}`;
 };
 
 const normalizePath = (path: string): string => (path.startsWith('/') ? path : `/${path}`);
-const isAbsoluteUrl = (path: string): boolean =>
-  path.startsWith('http://') || path.startsWith('https://');
 
 const shouldInjectCsrfHeader = (path: string): boolean => {
-  if (isAbsoluteUrl(path)) return false;
   const normalized = normalizePath(path);
   return normalized === '/auth' || normalized.startsWith('/auth/');
 };
@@ -94,7 +129,7 @@ type RefreshResponse = {
   csrf_token: string;
 };
 
-export interface ApiAuthSession {
+interface ApiAuthSession {
   getState: () => AuthState;
   patch: (patch: Partial<AuthState>) => void;
   expire: () => void;
@@ -119,7 +154,6 @@ const isSafeMethod = (method: string): boolean =>
   method === 'GET' || method === 'HEAD' || method === 'OPTIONS';
 
 const needsBoundAuthSession = (path: string, method: string): boolean => {
-  if (isAbsoluteUrl(path)) return false;
   const normalized = normalizePath(path);
   if (normalized.startsWith('/admin')) return true;
   if (normalized === '/auth/login') return false;
@@ -163,14 +197,22 @@ export const refreshSession = async (
       const headers = new Headers({ Accept: 'application/json' });
       if (csrfToken) headers.set('X-CSRF-Token', csrfToken);
 
-      const response = await fetch(buildUrl('/auth/refresh'), {
-        method: 'POST',
-        credentials: 'include',
-        headers,
-      });
+      const timeout = withRequestTimeout(undefined, apiControlTimeoutMs);
+      let response: Response;
+      let rawText: string;
+      try {
+        response = await fetch(buildUrl('/auth/refresh'), {
+          method: 'POST',
+          credentials: 'include',
+          headers,
+          signal: timeout.signal,
+        });
+        rawText = await response.text();
+      } finally {
+        timeout.clear();
+      }
 
       const contentType = response.headers.get('content-type') ?? '';
-      const rawText = await response.text();
       const parsed = shouldTreatAsJson(contentType)
         ? (parseJsonTextSafe(rawText) as unknown)
         : undefined;
@@ -215,7 +257,6 @@ export const refreshSession = async (
 };
 
 const shouldAttemptRefresh = (path: string, session: ApiAuthSession): boolean => {
-  if (isAbsoluteUrl(path)) return false;
   const normalized = normalizePath(path);
   if (
     normalized === '/auth/login' ||
@@ -227,16 +268,10 @@ const shouldAttemptRefresh = (path: string, session: ApiAuthSession): boolean =>
 };
 
 const shouldAttachAuthHeader = (path: string): boolean => {
-  if (isAbsoluteUrl(path)) return false;
   const normalized = normalizePath(path);
   return (
     normalized !== '/auth/login' && normalized !== '/auth/refresh' && normalized !== '/auth/logout'
   );
-};
-
-const buildCredentials = (path: string, credentials: RequestCredentials | undefined) => {
-  if (credentials) return credentials;
-  return isAbsoluteUrl(path) ? 'same-origin' : 'include';
 };
 
 type ApiResponseType = NonNullable<ApiRequestOptions['responseType']>;
@@ -252,7 +287,6 @@ interface ApiRequestContext {
   json: unknown;
   csrf: ApiRequestOptions['csrf'];
   headersInit: HeadersInit | undefined;
-  credentials: RequestCredentials | undefined;
   body: BodyInit | null | undefined;
   requestInit: RequestInit;
   session: ApiAuthSession | null;
@@ -263,7 +297,7 @@ const resolveAuthContext = (
   method: string,
   authMode: NonNullable<ApiRequestOptions['auth']>,
 ): ApiAuthContext => {
-  const shouldUseAuth = authMode === 'auto' && !isAbsoluteUrl(path);
+  const shouldUseAuth = authMode === 'auto';
   const session =
     shouldUseAuth && needsBoundAuthSession(path, method)
       ? requireAuthSession()
@@ -289,7 +323,6 @@ const sendApiRequest = ({
   json,
   csrf,
   headersInit,
-  credentials,
   body,
   requestInit,
   session,
@@ -315,7 +348,7 @@ const sendApiRequest = ({
   return fetch(buildUrl(path), {
     ...requestInit,
     headers,
-    credentials: buildCredentials(path, credentials),
+    credentials: 'include',
     body: json !== undefined ? JSON.stringify(json) : body,
   });
 };
@@ -403,43 +436,50 @@ export async function apiFetch<T = unknown>(
     retryOn401,
     responseType = 'json',
     headers: headersInit,
-    credentials,
     body,
+    timeoutMs,
+    signal,
     ...requestInit
   } = options;
 
   const method = String(requestInit.method ?? 'GET').toUpperCase();
   const authMode = auth ?? 'auto';
   const authContext = resolveAuthContext(path, method, authMode);
+  const timeout = withRequestTimeout(signal, timeoutMs);
   const requestContext: ApiRequestContext = {
     path,
     json,
     csrf,
     headersInit,
-    credentials,
     body,
-    requestInit,
+    requestInit: { ...requestInit, signal: timeout.signal },
     session: authContext.session,
   };
 
-  let response = await sendApiRequest(requestContext);
-  assertAuthContextCurrent(authContext);
+  try {
+    let response = await sendApiRequest(requestContext);
+    assertAuthContextCurrent(authContext);
 
-  const shouldRetryOn401 = retryOn401 ?? true;
-  if (
-    authContext.shouldUseAuth &&
-    shouldRetryOn401 &&
-    response.status === 401 &&
-    authContext.session &&
-    authContext.generation !== undefined &&
-    authContext.session.isGenerationCurrent(authContext.generation) &&
-    shouldAttemptRefresh(path, authContext.session)
-  ) {
-    await refreshSession('retry401');
-    assertAuthContextCurrent(authContext);
-    response = await sendApiRequest(requestContext);
-    assertAuthContextCurrent(authContext);
+    const shouldRetryOn401 = retryOn401 ?? true;
+    if (
+      authContext.shouldUseAuth &&
+      shouldRetryOn401 &&
+      response.status === 401 &&
+      authContext.session &&
+      authContext.generation !== undefined &&
+      authContext.session.isGenerationCurrent(authContext.generation) &&
+      shouldAttemptRefresh(path, authContext.session)
+    ) {
+      await refreshSession('retry401');
+      assertAuthContextCurrent(authContext);
+      response = await sendApiRequest(requestContext);
+      assertAuthContextCurrent(authContext);
+    }
+
+    return await readApiResponse<T>(response, responseType, () =>
+      assertAuthContextCurrent(authContext),
+    );
+  } finally {
+    timeout.clear();
   }
-
-  return readApiResponse<T>(response, responseType, () => assertAuthContextCurrent(authContext));
 }

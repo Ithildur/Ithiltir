@@ -31,6 +31,13 @@ export const formatLocalDateTime = (
   options: Intl.DateTimeFormatOptions = {},
 ): string => formatDateTime(value, getDateTimeLocale(lang), options);
 
+export const formatLocalTimestamp = (value: DateLike): string => {
+  const parsed = toDate(value);
+  if (!parsed) return '';
+  const pad = (part: number): string => String(part).padStart(2, '0');
+  return `${parsed.getFullYear()}${pad(parsed.getMonth() + 1)}${pad(parsed.getDate())} ${pad(parsed.getHours())}:${pad(parsed.getMinutes())}:${pad(parsed.getSeconds())}`;
+};
+
 export const formatTimeInTimeZone = (
   value: DateLike,
   lang: Lang,

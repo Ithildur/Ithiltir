@@ -140,7 +140,11 @@ const Page = () => {
   if (!isValidServerId) {
     return (
       <div className="min-h-screen bg-(--theme-page-bg) text-(--theme-fg-default) dark:bg-(--theme-bg-default)">
-        <main className="mx-auto max-w-410 px-4 py-12 sm:px-6 lg:px-8">
+        <main
+          id="main-content"
+          tabIndex={-1}
+          className="mx-auto max-w-410 px-4 py-12 sm:px-6 lg:px-8"
+        >
           <div className="rounded-lg border border-(--theme-border-subtle) bg-(--theme-bg-default) p-6 text-sm text-(--theme-fg-muted) dark:border-(--theme-border-default)">
             {t('stats_no_server')}
           </div>
@@ -170,7 +174,11 @@ const Page = () => {
         </div>
       </header>
 
-      <main className="mx-auto max-w-410 space-y-5 px-4 py-8 sm:px-6 lg:px-8">
+      <main
+        id="main-content"
+        tabIndex={-1}
+        className="mx-auto max-w-410 space-y-5 px-4 py-8 sm:px-6 lg:px-8"
+      >
         <section className="border-b border-(--theme-border-subtle) pb-6 dark:border-(--theme-border-default)">
           <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-end">
             <div className="min-w-0">
@@ -294,7 +302,7 @@ const Page = () => {
                             <AlertTriangle className="size-3.5" aria-hidden="true" />
                             {t('traffic_coverage_low')}
                           </span>
-                          {token && (
+                          {token && summary?.usage_mode === 'billing' && (
                             <Button
                               type="button"
                               variant="plain"

@@ -25,7 +25,7 @@ export interface ManagedNode {
   ip?: string | null;
   is_guest_visible: boolean;
   traffic_p95_enabled: boolean;
-  traffic_cycle_mode: 'default' | TrafficCycleMode;
+  traffic_cycle_mode: TrafficCycleMode;
   traffic_billing_start_day: number;
   traffic_billing_anchor_date: string;
   traffic_billing_timezone: string;
@@ -41,7 +41,7 @@ export interface UpdateNodeInput {
   name?: string;
   is_guest_visible?: boolean;
   traffic_p95_enabled?: boolean;
-  traffic_cycle_mode?: 'default' | TrafficCycleMode;
+  traffic_cycle_mode?: TrafficCycleMode;
   traffic_billing_start_day?: number;
   traffic_billing_anchor_date?: string;
   traffic_billing_timezone?: string;
@@ -74,7 +74,7 @@ export interface AppVersion {
 
 export type NodeDeployPlatform = 'linux' | 'macos' | 'windows';
 
-export interface DeployScript {
+interface DeployScript {
   url: string;
   command_prefix: string;
 }

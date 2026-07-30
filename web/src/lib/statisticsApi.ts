@@ -36,13 +36,13 @@ export const fetchTrafficIfaces = (params: { serverId: number; signal?: AbortSig
   });
 };
 
-export interface TrafficSummaryParams {
+interface TrafficSummaryParams {
   serverId: number;
   iface: string;
   signal?: AbortSignal;
 }
 
-export interface TrafficPeriodParams extends TrafficSummaryParams {
+interface TrafficPeriodParams extends TrafficSummaryParams {
   period?: TrafficPeriod;
 }
 

@@ -8,6 +8,7 @@ import * as adminApi from '@lib/adminApi';
 import {
   deleteAlertChannel,
   loadAlertChannels,
+  refreshAlertChannels,
   saveAlertChannel,
   testAlertChannel,
   updateAlertChannelEnabled,
@@ -91,9 +92,17 @@ export const useAlertChannels = ({
   React.useEffect(() => {
     if (!enabled) return;
     const controller = new AbortController();
-    void fetchChannels({ signal: controller.signal });
+    let refreshTimer: number | undefined;
+    const scheduleRefresh = () => {
+      if (controller.signal.aborted) return;
+      refreshTimer = window.setTimeout(() => {
+        void refreshAlertChannels({ signal: controller.signal }).finally(scheduleRefresh);
+      }, 15_000);
+    };
+    void fetchChannels({ signal: controller.signal }).finally(scheduleRefresh);
     void fetchSettings({ signal: controller.signal });
     return () => {
+      if (refreshTimer !== undefined) window.clearTimeout(refreshTimer);
       controller.abort();
     };
   }, [enabled, fetchChannels, fetchSettings]);
@@ -149,7 +158,6 @@ export const useAlertChannels = ({
     [saveSettings, settings],
   );
 
-
   const openAdd = React.useCallback(() => {
     setModal({ editingChannelId: null });
   }, []);
@@ -200,13 +208,15 @@ export const useAlertChannels = ({
       }
 
       try {
-        const didSave = await saveAlertChannel(editingChannelId, result.input);
-        if (!didSave) return;
+        const saveStatus = await saveAlertChannel(editingChannelId, result.input);
+        if (saveStatus === 'busy') return;
         pushTopBanner(
-          editingChannelId !== null
-            ? t('admin_alerts_channels_update_success')
-            : t('admin_alerts_channels_create_success'),
-          { tone: 'info' },
+          saveStatus === 'stale'
+            ? t('admin_alerts_channels_saved_refresh_failed')
+            : editingChannelId !== null
+              ? t('admin_alerts_channels_update_success')
+              : t('admin_alerts_channels_create_success'),
+          { tone: saveStatus === 'stale' ? 'warning' : 'info' },
         );
         setModal(null);
       } catch (error) {

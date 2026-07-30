@@ -50,7 +50,11 @@ const Page = () => {
   if (!isValidServerId) {
     return (
       <div className="min-h-screen bg-(--theme-page-bg) dark:bg-(--theme-bg-default) text-(--theme-fg-default) dark:text-(--theme-fg-strong)">
-        <main className="max-w-410 mx-auto px-4 sm:px-6 lg:px-8 py-12">
+        <main
+          id="main-content"
+          tabIndex={-1}
+          className="max-w-410 mx-auto px-4 sm:px-6 lg:px-8 py-12"
+        >
           <Card variant="panel" className="p-6">
             <p className="text-sm text-(--theme-fg-muted) dark:text-(--theme-fg-neutral)">
               {t('stats_no_server')}
@@ -65,7 +69,11 @@ const Page = () => {
     <div className="min-h-screen bg-(--theme-page-bg) dark:bg-(--theme-bg-default) text-(--theme-fg-default) dark:text-(--theme-fg-strong)">
       <StatisticsHeader serverLabel={serverLabel} />
 
-      <main className="max-w-410 mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-6">
+      <main
+        id="main-content"
+        tabIndex={-1}
+        className="max-w-410 mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-6"
+      >
         <StatisticsOverviewPanel serverLabel={serverLabel} overview={overview} />
 
         <Card as="section" variant="panel" className="overflow-hidden">

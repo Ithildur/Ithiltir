@@ -1,4 +1,4 @@
-export interface DashReleaseNoteSection {
+interface DashReleaseNoteSection {
   title: string;
   items: string[];
 }

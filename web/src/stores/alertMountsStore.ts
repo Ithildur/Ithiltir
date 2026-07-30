@@ -5,7 +5,7 @@ import { createSeqGate, reloadLatestLoad, runLatestLoad } from '@utils/seqGate';
 
 const emptyMounts: AlertMounts = { rules: [], nodes: [] };
 
-export interface AlertMountsState {
+interface AlertMountsState {
   data: AlertMounts;
   loading: boolean;
   saving: boolean;
@@ -40,7 +40,7 @@ const setAlertMountsLoading = (loading: boolean): void => {
 };
 
 const reloadAlertMounts = async (): Promise<void> => {
-  return reloadLatestLoad(loadGate, fetchAlertMounts, replaceAlertMounts, setAlertMountsLoading);
+  await reloadLatestLoad(loadGate, fetchAlertMounts, replaceAlertMounts, setAlertMountsLoading);
 };
 
 export const loadAlertMounts = async (

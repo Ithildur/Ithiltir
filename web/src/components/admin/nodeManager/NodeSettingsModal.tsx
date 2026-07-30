@@ -410,6 +410,7 @@ const NodeSettingsModal: React.FC<Props> = ({
             <IOSSwitch
               checked={guestVisible}
               disabled={saving}
+              ariaLabel={t('admin_node_settings_guest_visible')}
               onChange={() => setGuestVisible((prev) => !prev)}
             />
           </div>

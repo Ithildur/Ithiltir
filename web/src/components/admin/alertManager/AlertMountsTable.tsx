@@ -129,6 +129,10 @@ export const AlertMountsTable = ({
                           size="sm"
                           checked={isMounted}
                           disabled={saving}
+                          ariaLabel={t('admin_alerts_mounts_toggle', {
+                            node: node.name,
+                            rule: ruleName(rule),
+                          })}
                           onChange={() => {
                             void onSetMounts([rule.id], [node.id], !isMounted);
                           }}

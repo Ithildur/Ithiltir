@@ -226,6 +226,10 @@ export const AlertMountsCustomModal = ({
                           size="sm"
                           checked={isMounted}
                           disabled={saving || !node}
+                          ariaLabel={t('admin_alerts_mounts_toggle', {
+                            node: node?.name ?? '',
+                            rule: ruleName(rule),
+                          })}
                           onChange={() => {
                             if (!node) return;
                             void onSetMounts([rule.id], [node.id], !isMounted);

@@ -6,7 +6,7 @@ export interface GroupView {
   node_ids: number[];
 }
 
-export type DiskSmart = {
+type DiskSmart = {
   status: string;
   updated_at?: string;
   ttl_seconds?: number;
@@ -36,7 +36,7 @@ export type DiskSmart = {
   }>;
 };
 
-export type Thermal = {
+type Thermal = {
   status: string;
   updated_at?: string;
   sensors: Array<{
@@ -51,19 +51,19 @@ export type Thermal = {
   }>;
 };
 
-export type PressureStats = {
+type PressureStats = {
   avg10: number;
   avg60: number;
   avg300: number;
   total: number;
 };
 
-export type PressureResource = {
+type PressureResource = {
   some?: PressureStats;
   full?: PressureStats;
 };
 
-export type Pressure = {
+type Pressure = {
   cpu?: PressureResource;
   memory?: PressureResource;
   io?: PressureResource;

@@ -3,6 +3,7 @@ import type { SiteBrand } from '@app-types/site';
 import { useI18n } from '@i18n';
 import { pushTopBanner } from '@runtime/topBannerRuntime';
 import { refreshBrand, useSiteBrandStore } from '@stores/siteBrandStore';
+import { defaultSiteBrand, displayLogoURL } from '@lib/siteBrandModel';
 import { isAbortError } from '@utils/errors';
 
 const faviconType = (logoURL: string): string => {
@@ -13,6 +14,7 @@ const faviconType = (logoURL: string): string => {
   }
   if (value.endsWith('.svg')) return 'image/svg+xml';
   if (value.endsWith('.ico')) return 'image/x-icon';
+  if (value.endsWith('.gif')) return 'image/gif';
   if (value.endsWith('.webp')) return 'image/webp';
   if (value.endsWith('.jpg') || value.endsWith('.jpeg')) return 'image/jpeg';
   return 'image/png';
@@ -22,15 +24,24 @@ const applyDocumentBrand = (brand: SiteBrand): void => {
   if (typeof document === 'undefined') return;
 
   document.title = brand.page_title;
+  const logoURL = displayLogoURL(brand.logo_url);
 
-  let icon = document.querySelector<HTMLLinkElement>('link[rel="icon"]');
-  if (!icon) {
-    icon = document.createElement('link');
-    icon.rel = 'icon';
+  const previous = document.querySelector<HTMLLinkElement>('link[rel="icon"]');
+  const icon = document.createElement('link');
+  icon.rel = 'icon';
+  icon.type = faviconType(logoURL);
+  icon.onerror = () => {
+    if (!icon.isConnected || icon.getAttribute('href') === defaultSiteBrand.logo_url) return;
+    icon.type = faviconType(defaultSiteBrand.logo_url);
+    icon.href = defaultSiteBrand.logo_url;
+  };
+  icon.href = logoURL;
+  if (previous) {
+    previous.onerror = null;
+    previous.replaceWith(icon);
+  } else {
     document.head.appendChild(icon);
   }
-  icon.type = faviconType(brand.logo_url);
-  icon.href = brand.logo_url;
 };
 
 export const SiteBrandRuntime: React.FC = () => {

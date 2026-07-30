@@ -141,6 +141,7 @@ const AlertRuleTable: React.FC<Props> = ({
                     size="sm"
                     checked={rule.enabled}
                     disabled={togglingIds.includes(rule.id)}
+                    ariaLabel={t('admin_alerts_rule_enabled_toggle', { name: rule.name })}
                     onChange={() => onToggleEnabled(rule)}
                   />
                 </td>

@@ -19,6 +19,11 @@ const resolveDevApiTarget = (env: Record<string, string>): string => {
   ).trim();
 };
 
+const resolveBuildVersion = (command: string): string => {
+  if (command === 'serve') return '';
+  return process.env.DASH_BUILD_VERSION?.trim() || '0.0.0-dev';
+};
+
 export default defineConfig(({ command }) => {
   const root = fromHere('.');
   const testOnlyEnv = command === 'serve' ? loadEnv('test', root, '') : {};
@@ -26,6 +31,9 @@ export default defineConfig(({ command }) => {
 
   return {
     plugins: [react(), tailwindcss()],
+    define: {
+      __DASH_BUILD_VERSION__: JSON.stringify(resolveBuildVersion(command)),
+    },
     resolve: {
       alias: {
         '@components': fromHere('./src/components'),

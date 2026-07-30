@@ -71,7 +71,8 @@ export const useTrafficPage = () => {
     summary && summary.stats.coverage_ratio < trafficCoverageWarningThreshold,
   );
   const rebuildNodeTraffic = React.useCallback(async () => {
-    if (!token || !isValidServerId || trafficRebuildBusy) return;
+    if (!token || summary?.usage_mode !== 'billing' || !isValidServerId || trafficRebuildBusy)
+      return;
 
     const ok = await requestConfirm({
       title: t('common_confirm'),
@@ -91,6 +92,7 @@ export const useTrafficPage = () => {
     serverLabel,
     showTrafficRebuildOutcome,
     startTrafficRebuild,
+    summary?.usage_mode,
     t,
     token,
     trafficRebuildBusy,

@@ -1,16 +1,12 @@
-export type TrafficGuestAccessMode = 'disabled' | 'by_node';
+type TrafficGuestAccessMode = 'disabled' | 'by_node';
 export type TrafficUsageMode = 'lite' | 'billing';
 export type TrafficCycleMode = 'calendar_month' | 'whmcs_compatible' | 'clamp_to_month_end';
 export type TrafficDirectionMode = 'out' | 'both' | 'max';
 export type NodeTrafficDirectionMode = 'default' | TrafficDirectionMode;
 export type TrafficPeriod = 'current' | 'previous';
-export type TrafficSelectedDirection = '' | 'in' | 'out' | 'total';
-export type TrafficP95Status =
-  | 'available'
-  | 'disabled'
-  | 'lite_mode'
-  | 'insufficient_samples'
-  | 'snapshot_without_p95';
+type TrafficSelectedDirection = '' | 'in' | 'out' | 'total';
+type TrafficP95Status =
+  'available' | 'disabled' | 'lite_mode' | 'insufficient_samples' | 'snapshot_without_p95';
 
 export interface StatisticsAccess {
   history_guest_access_mode: 'disabled' | 'by_node';
@@ -31,7 +27,7 @@ export interface TrafficIface {
   name: string;
 }
 
-export interface TrafficCycle {
+interface TrafficCycle {
   mode: TrafficCycleMode;
   billing_start_day: number;
   billing_anchor_date?: string;
@@ -67,8 +63,6 @@ export interface TrafficStats {
   cycle_complete: boolean;
   data_complete: boolean;
   status: 'provisional' | 'grace' | 'sealed' | 'stale';
-  /** @deprecated Use coverage_ratio for display decisions. */
-  partial: boolean;
 }
 
 export interface TrafficSummary {

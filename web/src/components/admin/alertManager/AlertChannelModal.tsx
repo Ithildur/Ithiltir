@@ -19,8 +19,6 @@ import WebhookChannelForm from './channelForms/WebhookChannelForm';
 import { useAlertChannelForm } from './hooks/useAlertChannelForm';
 import { useTelegramMtprotoLogin } from './hooks/useTelegramMtprotoLogin';
 
-export type { AlertChannelForm } from './alertChannelForm';
-
 interface Props {
   isOpen: boolean;
   mode: 'add' | 'edit';

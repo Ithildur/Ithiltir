@@ -5,7 +5,7 @@ import { nodeTrafficCycleLabelKey, nodeTrafficDirectionLabelKey } from '@lib/tra
 
 type Translate = (key: TranslationKey, vars?: Record<string, string | number>) => string;
 
-export const nodeHasBundledUpdate = (node: NodeRow, bundledNodeVersion: string): boolean => {
+const nodeHasBundledUpdate = (node: NodeRow, bundledNodeVersion: string): boolean => {
   if (!bundledNodeVersion) return false;
   return isVersionUpdateTarget(node.version.version, bundledNodeVersion);
 };
@@ -79,11 +79,9 @@ export const filterNodeManagerNodes = ({
 };
 
 export const nodeTrafficSettingsLabel = (node: NodeRow, t: Translate): string => {
-  const cycle =
-    node.trafficCycleMode === 'default'
-      ? t('admin_node_cycle_mode_inherited')
-      : t(nodeTrafficCycleLabelKey[node.trafficCycleMode]);
+  const cycle = t(nodeTrafficCycleLabelKey[node.trafficCycleMode]);
 
-  if (node.trafficDirectionMode === 'default') return cycle;
-  return `${cycle} / ${t(nodeTrafficDirectionLabelKey[node.trafficDirectionMode])}`;
+  return node.trafficDirectionMode === 'default'
+    ? cycle
+    : `${cycle} / ${t(nodeTrafficDirectionLabelKey[node.trafficDirectionMode])}`;
 };

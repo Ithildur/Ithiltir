@@ -4,7 +4,7 @@ import { defaultSiteBrand, normalizeSiteBrand } from '@lib/siteBrandModel';
 import { create } from 'zustand';
 import { createSeqGate } from '@utils/seqGate';
 
-export interface SiteBrandState {
+interface SiteBrandState {
   brand: SiteBrand;
 }
 
@@ -22,9 +22,9 @@ const applyBrand = (brand: Partial<SiteBrand>): SiteBrand => {
   return next;
 };
 
-export const setBrand = (brand: Partial<SiteBrand>): SiteBrand => {
+export const patchBrand = (updates: Partial<SiteBrand>): SiteBrand => {
   brandGate.invalidate();
-  return applyBrand(brand);
+  return applyBrand({ ...getSiteBrandState().brand, ...updates });
 };
 
 export const refreshBrand = async (params?: { signal?: AbortSignal }): Promise<SiteBrand> => {

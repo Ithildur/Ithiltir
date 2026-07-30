@@ -16,6 +16,8 @@ type BrowserThemePackageRuntime = {
 };
 
 declare global {
+  const __DASH_BUILD_VERSION__: string;
+
   interface Window {
     __theme?: BrowserThemeRuntime;
     __themePackage?: BrowserThemePackageRuntime;

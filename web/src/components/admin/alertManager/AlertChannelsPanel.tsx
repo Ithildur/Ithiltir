@@ -11,9 +11,14 @@ import Badge from '@components/ui/Badge';
 import Card from '@components/ui/Card';
 import IOSSwitch from '@components/ui/IOSSwitch';
 import SearchInput from '@components/ui/SearchInput';
-import type { AlertChannel, AlertChannelType, AlertSettings } from '@app-types/admin';
+import type {
+  AlertChannel,
+  AlertChannelDeliveryStatus,
+  AlertChannelType,
+  AlertSettings,
+} from '@app-types/admin';
 import { useI18n } from '@i18n';
-import { formatTimeAgo } from '@utils/time';
+import { formatLocalDateTime, formatLocalTimestamp, formatTimeAgo } from '@utils/time';
 
 interface Props {
   channels: AlertChannel[];
@@ -59,6 +64,27 @@ const AlertChannelsPanel: React.FC<Props> = ({
     telegram: { label: t('admin_alerts_channels_tab_telegram'), color: 'indigo', icon: Send },
     email: { label: t('admin_alerts_channels_tab_email'), color: 'amber', icon: Mail },
     webhook: { label: t('admin_alerts_channels_tab_webhook'), color: 'slate', icon: Webhook },
+  };
+  const deliveryMeta: Record<
+    AlertChannelDeliveryStatus,
+    { label: string; color: 'emerald' | 'amber' | 'slate' | 'indigo' }
+  > = {
+    healthy: {
+      label: t('admin_alerts_channels_delivery_healthy'),
+      color: 'emerald',
+    },
+    degraded: {
+      label: t('admin_alerts_channels_delivery_degraded'),
+      color: 'amber',
+    },
+    disabled: {
+      label: t('admin_alerts_channels_delivery_disabled'),
+      color: 'slate',
+    },
+    unknown: {
+      label: t('admin_alerts_channels_delivery_unknown'),
+      color: 'indigo',
+    },
   };
 
   const normalizeSearch = (value: string) => value.trim().toLowerCase();
@@ -186,6 +212,9 @@ const AlertChannelsPanel: React.FC<Props> = ({
                       {!channel.enabled && (
                         <Badge color="amber">{t('admin_alerts_settings_channel_paused')}</Badge>
                       )}
+                      {channel.delivery_status === 'degraded' && (
+                        <Badge color="amber">{t('admin_alerts_channels_delivery_degraded')}</Badge>
+                      )}
                     </span>
                   </span>
                 </label>
@@ -268,6 +297,7 @@ const AlertChannelsPanel: React.FC<Props> = ({
               ) : (
                 filteredChannels.map((channel) => {
                   const meta = channelTypeMeta[channel.type];
+                  const delivery = deliveryMeta[channel.delivery_status];
                   const summary = formatSummary(channel);
                   return (
                     <tr
@@ -297,12 +327,68 @@ const AlertChannelsPanel: React.FC<Props> = ({
                         {summary}
                       </td>
                       <td className="px-4 py-3">
-                        <IOSSwitch
-                          size="sm"
-                          checked={channel.enabled}
-                          disabled={togglingIds.includes(channel.id)}
-                          onChange={() => onToggleEnabled(channel)}
-                        />
+                        <div className="flex min-w-48 items-start justify-between gap-3">
+                          <div className="min-w-0 space-y-1.5">
+                            <Badge color={delivery.color}>{delivery.label}</Badge>
+                            {channel.consecutive_failures > 0 ? (
+                              <p className="text-[11px] text-(--theme-fg-danger-muted)">
+                                {t('admin_alerts_channels_delivery_failures', {
+                                  count: String(channel.consecutive_failures),
+                                })}
+                              </p>
+                            ) : null}
+                            {channel.last_error ? (
+                              <p
+                                className="max-w-64 truncate text-[11px] text-(--theme-fg-danger-muted)"
+                                title={channel.last_error}
+                              >
+                                {channel.last_error}
+                              </p>
+                            ) : channel.pending_count > 0 ? (
+                              <p className="text-[11px] text-(--theme-fg-muted)">
+                                {t('admin_alerts_channels_delivery_pending', {
+                                  count: String(channel.pending_count),
+                                })}
+                              </p>
+                            ) : null}
+                            {channel.next_retry_at ? (
+                              <p className="text-[11px] text-(--theme-fg-muted)">
+                                {t('admin_alerts_channels_delivery_next_retry', {
+                                  time: formatLocalTimestamp(channel.next_retry_at),
+                                })}
+                              </p>
+                            ) : null}
+                            {channel.next_probe_at ? (
+                              <p className="text-[11px] text-(--theme-fg-muted)">
+                                {t('admin_alerts_channels_delivery_next_probe', {
+                                  time: formatLocalDateTime(channel.next_probe_at, lang, {
+                                    dateStyle: 'short',
+                                    timeStyle: 'short',
+                                  }),
+                                })}
+                              </p>
+                            ) : null}
+                            {channel.last_success_at ? (
+                              <p className="text-[11px] text-(--theme-fg-muted)">
+                                {t('admin_alerts_channels_delivery_last_success', {
+                                  time: formatLocalDateTime(channel.last_success_at, lang, {
+                                    dateStyle: 'short',
+                                    timeStyle: 'short',
+                                  }),
+                                })}
+                              </p>
+                            ) : null}
+                          </div>
+                          <IOSSwitch
+                            size="sm"
+                            checked={channel.enabled}
+                            disabled={togglingIds.includes(channel.id)}
+                            ariaLabel={t('admin_alerts_channels_enabled_toggle', {
+                              name: channel.name,
+                            })}
+                            onChange={() => onToggleEnabled(channel)}
+                          />
+                        </div>
                       </td>
                       <td className="px-4 py-3 text-xs text-(--theme-fg-muted) dark:text-(--theme-fg-muted) font-mono">
                         {formatTimeAgo(channel.updated_at, lang)}

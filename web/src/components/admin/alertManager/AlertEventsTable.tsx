@@ -87,30 +87,14 @@ export const AlertEventsTable: React.FC<Props> = ({ items, loading, customRangeL
           <table className="w-full bg-(--theme-bg-default) text-left text-sm dark:bg-(--theme-bg-default)">
             <thead className="whitespace-nowrap border-b border-(--theme-border-subtle) bg-(--theme-bg-muted) text-xs font-semibold text-(--theme-fg-default) dark:border-(--theme-border-default) dark:bg-(--theme-canvas-subtle)">
               <tr>
-                <th className="min-w-56 px-3 py-2.5">
-                  {t('admin_alerts_events_col_server')}
-                </th>
-                <th className="w-32 px-3 py-2.5">
-                  {t('admin_alerts_events_col_metric')}
-                </th>
-                <th className="w-24 px-3 py-2.5">
-                  {t('admin_alerts_events_col_status')}
-                </th>
-                <th className="w-32 px-3 py-2.5">
-                  {t('admin_alerts_events_col_first')}
-                </th>
-                <th className="w-32 px-3 py-2.5">
-                  {t('admin_alerts_events_col_last')}
-                </th>
-                <th className="w-28 px-3 py-2.5">
-                  {t('admin_alerts_events_col_duration')}
-                </th>
-                <th className="w-32 px-3 py-2.5">
-                  {t('admin_alerts_events_col_value')}
-                </th>
-                <th className="min-w-72 px-3 py-2.5">
-                  {t('admin_alerts_events_col_summary')}
-                </th>
+                <th className="min-w-56 px-3 py-2.5">{t('admin_alerts_events_col_server')}</th>
+                <th className="w-32 px-3 py-2.5">{t('admin_alerts_events_col_metric')}</th>
+                <th className="w-24 px-3 py-2.5">{t('admin_alerts_events_col_status')}</th>
+                <th className="w-32 px-3 py-2.5">{t('admin_alerts_events_col_first')}</th>
+                <th className="w-32 px-3 py-2.5">{t('admin_alerts_events_col_last')}</th>
+                <th className="w-28 px-3 py-2.5">{t('admin_alerts_events_col_duration')}</th>
+                <th className="w-32 px-3 py-2.5">{t('admin_alerts_events_col_value')}</th>
+                <th className="min-w-72 px-3 py-2.5">{t('admin_alerts_events_col_summary')}</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-(--theme-border-muted) dark:divide-(--theme-canvas-muted)">

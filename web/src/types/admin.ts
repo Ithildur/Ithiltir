@@ -11,12 +11,12 @@ export type ThemeFrame = 'layered' | 'flat';
 export type ThemeSummary = 'cards' | 'strip';
 export type ThemeDensity = 'comfortable' | 'compact';
 
-export interface ThemeAdminSpec {
+interface ThemeAdminSpec {
   shell: ThemeShell;
   frame: ThemeFrame;
 }
 
-export interface ThemeDashboardSpec {
+interface ThemeDashboardSpec {
   summary: ThemeSummary;
   density: ThemeDensity;
 }
@@ -76,7 +76,7 @@ export interface NodeRow {
   version: NodeVersion;
   guestVisible: boolean;
   trafficP95Enabled: boolean;
-  trafficCycleMode: 'default' | TrafficCycleMode;
+  trafficCycleMode: TrafficCycleMode;
   trafficBillingStartDay: number;
   trafficBillingAnchorDate: string;
   trafficBillingTimezone: string;
@@ -84,9 +84,9 @@ export interface NodeRow {
   displayOrder: number;
 }
 
-export type AlertRuleOperator = '>' | '>=' | '<' | '<=' | '==' | '!=';
+type AlertRuleOperator = '>' | '>=' | '<' | '<=' | '==' | '!=';
 export type AlertRuleThresholdMode = 'static' | 'core_plus';
-export type AlertEventStatus = 'open' | 'closed';
+type AlertEventStatus = 'open' | 'closed';
 export type AlertEventStatusFilter = AlertEventStatus | 'all';
 
 export interface AlertRuleInput {
@@ -109,6 +109,7 @@ export interface AlertRule extends AlertRuleInput {
 
 export type AlertChannelType = 'telegram' | 'email' | 'webhook';
 export type AlertTelegramMode = 'bot' | 'mtproto';
+export type AlertChannelDeliveryStatus = 'unknown' | 'healthy' | 'degraded' | 'disabled';
 
 export interface AlertMountRule {
   id: number;
@@ -119,7 +120,7 @@ export interface AlertMountRule {
   default_mounted: boolean;
 }
 
-export interface AlertMountState {
+interface AlertMountState {
   rule_id: number;
   mounted: boolean;
 }
@@ -176,12 +177,12 @@ export interface WebhookConfig {
   secret?: string;
 }
 
-export interface TelegramBotViewConfig {
+interface TelegramBotViewConfig {
   mode?: 'bot';
   chat_id: string;
 }
 
-export interface TelegramMtprotoViewConfig {
+interface TelegramMtprotoViewConfig {
   mode: 'mtproto';
   api_id: number;
   phone: string;
@@ -189,7 +190,7 @@ export interface TelegramMtprotoViewConfig {
   username?: string;
 }
 
-export interface EmailViewConfig {
+interface EmailViewConfig {
   smtp_host: string;
   smtp_port: number;
   username: string;
@@ -198,7 +199,7 @@ export interface EmailViewConfig {
   use_tls: boolean;
 }
 
-export interface WebhookViewConfig {
+interface WebhookViewConfig {
   url: string;
 }
 
@@ -206,21 +207,31 @@ interface AlertChannelBase {
   id: number;
   name: string;
   enabled: boolean;
+  delivery_status: AlertChannelDeliveryStatus;
+  last_success_at: ISODateString | null;
+  last_failure_at: ISODateString | null;
+  consecutive_failures: number;
+  last_error_code: string | null;
+  last_error: string | null;
+  next_retry_at: ISODateString | null;
+  next_probe_at: ISODateString | null;
+  pending_count: number;
+  blocked_count: number;
   created_at: ISODateString;
   updated_at: ISODateString;
 }
 
-export interface TelegramAlertChannel extends AlertChannelBase {
+interface TelegramAlertChannel extends AlertChannelBase {
   type: 'telegram';
   config: TelegramBotViewConfig | TelegramMtprotoViewConfig;
 }
 
-export interface EmailAlertChannel extends AlertChannelBase {
+interface EmailAlertChannel extends AlertChannelBase {
   type: 'email';
   config: EmailViewConfig;
 }
 
-export interface WebhookAlertChannel extends AlertChannelBase {
+interface WebhookAlertChannel extends AlertChannelBase {
   type: 'webhook';
   config: WebhookViewConfig;
 }

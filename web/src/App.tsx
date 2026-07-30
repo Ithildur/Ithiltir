@@ -6,6 +6,7 @@ import FullScreenLoader from '@components/ui/FullScreenLoader';
 import { useI18n, type TranslationKey } from '@i18n';
 import { useAuthStore } from '@stores/authStore';
 import { refreshStatisticsAccess, useStatisticsAccessStore } from '@stores/statisticsAccessStore';
+import { DashVersionRuntime } from '@runtime/DashVersionRuntime';
 import { TrafficRebuildRuntime } from '@runtime/TrafficRebuildRuntime';
 import { isCanceledRequestError } from '@utils/errors';
 
@@ -115,6 +116,7 @@ const RequireStatisticsAccess: React.FC<{
 
 const App: React.FC = () => (
   <BrowserRouter>
+    <DashVersionRuntime />
     <TrafficRebuildRuntime />
     <Routes>
       <Route path="/login" element={<LoginPage />} />

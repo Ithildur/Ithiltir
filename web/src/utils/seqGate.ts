@@ -1,4 +1,4 @@
-export class StaleLoadError extends Error {
+class StaleLoadError extends Error {
   constructor() {
     super('stale load');
     this.name = 'StaleLoadError';
@@ -23,7 +23,7 @@ export const createSeqGate = () => {
   };
 };
 
-export type SeqGate = ReturnType<typeof createSeqGate>;
+type SeqGate = ReturnType<typeof createSeqGate>;
 
 type LoadingSetter = (loading: boolean) => void;
 
@@ -59,14 +59,15 @@ export const reloadLatestLoad = async <T>(
   load: () => Promise<T>,
   apply: (value: T) => void,
   setLoading?: LoadingSetter,
-): Promise<void> => {
+): Promise<boolean> => {
   const seq = invalidateLatestLoad(gate, setLoading);
   try {
     const value = await load();
-    if (!gate.isCurrent(seq)) return;
+    if (!gate.isCurrent(seq)) return false;
     apply(value);
+    return true;
   } catch (error) {
-    if (!gate.isCurrent(seq)) return;
+    if (!gate.isCurrent(seq)) return false;
     throw error;
   }
 };

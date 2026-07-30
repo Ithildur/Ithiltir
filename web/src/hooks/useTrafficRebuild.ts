@@ -2,10 +2,8 @@ import React from 'react';
 import type { NodeTrafficRebuildStatus } from '@lib/adminApi';
 import {
   runningRebuildNodeId,
-  startingRebuildNodeId,
   startTrafficRebuild,
   useTrafficRebuildStore,
-  watchedRebuildNodeId,
   type TrafficRebuildStartOutcome,
 } from '@stores/trafficRebuildStore';
 
@@ -26,8 +24,7 @@ const watchedFinishedKey = (status: NodeTrafficRebuildStatus): string =>
 export const useTrafficRebuild = (options: UseTrafficRebuildOptions = {}) => {
   const nodeId = normalizedNodeId(options.nodeId);
   const status = useTrafficRebuildStore((state) => state.status);
-  const startingNodeId = useTrafficRebuildStore((state) => startingRebuildNodeId(state.local));
-  const watchedNodeId = useTrafficRebuildStore((state) => watchedRebuildNodeId(state.local));
+  const startingNodeId = useTrafficRebuildStore((state) => state.startingNodeId);
   const [finishedKey, setFinishedKey] = React.useState<string | null>(null);
   const observedNodeRef = React.useRef<number | null>(null);
 
@@ -38,8 +35,9 @@ export const useTrafficRebuild = (options: UseTrafficRebuildOptions = {}) => {
       return;
     }
 
-    const nodeRunning = status.running && status.server_id === nodeId;
-    if (nodeRunning) {
+    const nodePending =
+      startingNodeId === nodeId || (status.running && status.server_id === nodeId);
+    if (nodePending) {
       observedNodeRef.current = nodeId;
       setFinishedKey((current) => (current === null ? current : null));
       return;
@@ -52,24 +50,18 @@ export const useTrafficRebuild = (options: UseTrafficRebuildOptions = {}) => {
     observedNodeRef.current = null;
     const nextKey = watchedFinishedKey(status);
     setFinishedKey((current) => (current === nextKey ? current : nextKey));
-  }, [status, nodeId]);
+  }, [nodeId, startingNodeId, status]);
 
-  const rebuildingNodeId = runningRebuildNodeId(status) ?? startingNodeId ?? watchedNodeId;
-  const rebuildRunning = status.running;
-  const busy = rebuildRunning || startingNodeId !== null || watchedNodeId !== null;
+  const rebuildingNodeId = runningRebuildNodeId(status) ?? startingNodeId;
+  const busy = status.running || startingNodeId !== null;
   const nodeRebuildActive = nodeId !== null && status.running && status.server_id === nodeId;
-  const nodeRebuildBusy =
-    nodeId !== null && (nodeRebuildActive || startingNodeId === nodeId || watchedNodeId === nodeId);
+  const nodeRebuildBusy = nodeId !== null && (nodeRebuildActive || startingNodeId === nodeId);
   const startBusy = nodeId === null ? busy : nodeRebuildBusy;
 
   return {
     rebuildingNodeId,
-    startingNodeId,
-    startedNodeId: watchedNodeId,
-    rebuildRunning,
     busy,
     nodeRebuildActive,
-    nodeRebuildBusy,
     startBusy,
     finishedKey,
     start: startTrafficRebuild,

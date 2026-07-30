@@ -1,5 +1,5 @@
 import type { AppVersion } from '@app-types/api';
-import { apiFetch } from './api';
+import { apiControlTimeoutMs, apiFetch } from './api';
 
 export const fetchAppVersion = (params: { signal?: AbortSignal } = {}) =>
   apiFetch<AppVersion>('/version', {
@@ -7,4 +7,5 @@ export const fetchAppVersion = (params: { signal?: AbortSignal } = {}) =>
     auth: 'none',
     retryOn401: false,
     signal: params.signal,
+    timeoutMs: apiControlTimeoutMs,
   });

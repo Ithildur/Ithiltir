@@ -182,8 +182,8 @@ export const useTelegramMtprotoLogin = ({
   }, [apiError, beginPending, finishPending, isCurrentScope, loginCode, loginId, t]);
 
   const submitPassword = React.useCallback(async () => {
-    const password = twoFactorPassword.trim();
-    if (!loginId || !password) return;
+    const password = twoFactorPassword;
+    if (!loginId || password.length === 0) return;
     const scope = beginPending('submit_password');
     if (!scope) return;
     try {

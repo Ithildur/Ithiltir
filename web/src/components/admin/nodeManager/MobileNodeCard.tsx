@@ -15,7 +15,7 @@ import { useI18n } from '@i18n';
 import { alertSummaryMetricName } from '@components/admin/alertManager/alertLabels';
 import { nodeAlertEventsPath } from './nodeManagerModel';
 
-export interface Props {
+interface Props {
   node: NodeRow;
   alertSummary: AlertEventSummary | null;
   alertSummaryLoaded: boolean;
@@ -54,7 +54,7 @@ const MobileNodeCard: React.FC<Props> = ({
   const version = node.version.version || t('common_unknown');
 
   return (
-    <Card className="p-4 space-y-3 transition-all">
+    <Card className="p-4 space-y-3 transition-all motion-reduce:transition-none">
       <div className="flex justify-between items-start">
         <div className="flex items-center gap-3">
           <div>
@@ -115,6 +115,7 @@ const MobileNodeCard: React.FC<Props> = ({
             <IOSSwitch
               checked={node.guestVisible}
               disabled={savingGuestVisible}
+              ariaLabel={t('admin_nodes_guest_visibility_toggle', { name: node.name })}
               onChange={() => onToggleGuestVisible(node)}
             />
           </div>

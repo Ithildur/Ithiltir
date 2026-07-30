@@ -17,9 +17,9 @@ import { pendingIds } from '@utils/pendingIds';
 import { createSeqGate, runLatestLoad } from '@utils/seqGate';
 import { getAdminGroups, loadAdminGroups } from './adminGroupsStore';
 
-export type NodeRowsUpdate = NodeRow[] | ((current: NodeRow[]) => NodeRow[]);
+type NodeRowsUpdate = NodeRow[] | ((current: NodeRow[]) => NodeRow[]);
 
-export interface AdminNodesState {
+interface AdminNodesState {
   nodes: NodeRow[];
   deploy: NodeDeploy | null;
   bundledNodeVersion: string;
@@ -165,10 +165,6 @@ export const loadBundledNodeVersion = async (
       useAdminNodesStore.setState({ bundledNodeVersion });
     },
   );
-};
-
-export const setBundledNodeVersion = (bundledNodeVersion: string): void => {
-  useAdminNodesStore.setState({ bundledNodeVersion: bundledNodeVersion.trim() });
 };
 
 export const clearBundledNodeVersion = (): void => {

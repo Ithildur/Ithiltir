@@ -10,7 +10,6 @@ import {
   clampBillingDay,
   cycleNeedsAnchorDate,
   cycleNeedsBillingStartDay,
-  cycleNeedsTimezone,
   nodeTrafficDraftValid,
   nodeTrafficCycleModes,
   nodeTrafficDirectionModes,
@@ -19,60 +18,45 @@ import {
   nodeTrafficDraftFromPolicy,
   nodeTrafficDraftWithCycleMode,
   nodeTrafficDirectionLabelKey,
-  nodeTrafficPatchFromDraft,
+  nodeTrafficPatch,
   parseNodeTrafficCycleMode,
   parseNodeTrafficDirectionMode,
   type NodeTrafficDraft,
   type NodeTrafficPatch,
 } from '@lib/trafficSettingsModel';
 import type { NodeRow } from '@app-types/admin';
-import type { TrafficSettings } from '@app-types/traffic';
 import { useI18n } from '@i18n';
 
 interface Props {
   isOpen: boolean;
   node: NodeRow;
-  globalSettings: TrafficSettings;
   saving: boolean;
   onClose: () => void;
   onSave: (patch: NodeTrafficPatch) => Promise<boolean>;
 }
 
-const NodeTrafficSettingsModal: React.FC<Props> = ({
-  isOpen,
-  node,
-  globalSettings,
-  saving,
-  onClose,
-  onSave,
-}) => {
+const NodeTrafficSettingsModal: React.FC<Props> = ({ isOpen, node, saving, onClose, onSave }) => {
   const { t } = useI18n();
   const titleId = React.useId();
-  const savedDraft = React.useMemo(
-    () => nodeTrafficDraftFromPolicy(node, globalSettings),
-    [globalSettings, node],
-  );
+  const savedDraft = React.useMemo(() => nodeTrafficDraftFromPolicy(node), [node]);
   const [draft, setDraft] = React.useState<NodeTrafficDraft>(savedDraft);
 
   React.useEffect(() => {
     setDraft(savedDraft);
   }, [savedDraft]);
 
-  const cycleInherited = draft.cycleMode === 'default';
-  const inherited = cycleInherited && draft.directionMode === 'default';
   const changed = nodeTrafficDraftChanged(draft, savedDraft);
   const valid = nodeTrafficDraftValid(draft);
   const showBillingStartDay = cycleNeedsBillingStartDay(draft.cycleMode);
   const showAnchorDate = cycleNeedsAnchorDate(draft.cycleMode);
-  const showTimezone = cycleNeedsTimezone(draft.cycleMode);
 
   const setCycleMode = (mode: NodeTrafficDraft['cycleMode']) => {
-    setDraft((current) => nodeTrafficDraftWithCycleMode(current, mode, globalSettings));
+    setDraft((current) => nodeTrafficDraftWithCycleMode(current, mode));
   };
 
   const save = async () => {
     if (saving || !changed || !valid) return;
-    const ok = await onSave(nodeTrafficPatchFromDraft(draft));
+    const ok = await onSave(nodeTrafficPatch(draft, savedDraft));
     if (ok) onClose();
   };
 
@@ -195,27 +179,25 @@ const NodeTrafficSettingsModal: React.FC<Props> = ({
           </div>
         )}
 
-        {showTimezone && (
-          <label className="grid gap-1.5">
-            <span className="text-xs font-semibold uppercase tracking-wide text-(--theme-fg-muted)">
-              {t('traffic_billing_timezone')}
-            </span>
-            <TimezoneSelect
-              value={draft.billingTimezone}
-              disabled={saving}
-              ariaLabel={t('traffic_billing_timezone')}
-              placeholder={t('traffic_billing_timezone_placeholder')}
-              systemLabel={t('traffic_billing_timezone_system')}
-              emptyLabel={t('traffic_billing_timezone_empty')}
-              onChange={(value) => setDraft((current) => ({ ...current, billingTimezone: value }))}
-            />
-          </label>
-        )}
+        <label className="grid gap-1.5">
+          <span className="text-xs font-semibold uppercase tracking-wide text-(--theme-fg-muted)">
+            {t('traffic_billing_timezone')}
+          </span>
+          <TimezoneSelect
+            value={draft.billingTimezone}
+            disabled={saving}
+            ariaLabel={t('traffic_billing_timezone')}
+            placeholder={t('traffic_billing_timezone_placeholder')}
+            systemLabel={t('traffic_billing_timezone_system')}
+            emptyLabel={t('traffic_billing_timezone_empty')}
+            onChange={(value) => setDraft((current) => ({ ...current, billingTimezone: value }))}
+          />
+        </label>
 
         <div className="rounded-lg border border-(--theme-border-subtle) bg-(--theme-bg-muted) px-3 py-2 text-xs/5 text-(--theme-fg-muted) dark:border-(--theme-border-default) dark:bg-(--theme-bg-inset)">
-          {inherited
-            ? t('admin_node_traffic_settings_inherited_hint')
-            : t('admin_node_traffic_settings_override_hint')}
+          {draft.directionMode === 'default'
+            ? t('admin_node_traffic_settings_direction_inherited_hint')
+            : t('admin_node_traffic_settings_explicit_hint')}
         </div>
       </ModalBody>
       <ModalFooter>

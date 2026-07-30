@@ -113,6 +113,7 @@ const EmailChannelForm: React.FC<Props> = ({ draft, showPassword, onTogglePasswo
         <IOSSwitch
           size="sm"
           checked={draft.emailUseTls}
+          ariaLabel={t('admin_alerts_channels_label_email_tls')}
           onChange={() => onPatch({ emailUseTls: !draft.emailUseTls })}
         />
       </div>

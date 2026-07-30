@@ -261,6 +261,8 @@ const DashboardPage: React.FC = () => {
         <Header searchTerm={searchTerm} setSearchTerm={setSearchTerm} />
 
         <main
+          id="main-content"
+          tabIndex={-1}
           className={`mx-auto max-w-410 px-4 sm:px-6 lg:px-8 ${compact ? 'py-5 lg:py-6' : 'py-8'}`}
         >
           {summaryStrip ? (
@@ -412,10 +414,7 @@ const DashboardPage: React.FC = () => {
 
         {groups.length > 0 && (
           <div className="md:hidden">
-            <DraggableFloatingButton
-              storageKey="dashboard_filter_fab_pos"
-              ariaLabel={t('admin_nodes_filter')}
-            >
+            <DraggableFloatingButton storageKey="dashboard_filter_fab_pos">
               <GroupFilter
                 groups={groups}
                 selectedIds={selectedGroupIds}

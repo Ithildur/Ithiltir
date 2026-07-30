@@ -31,20 +31,20 @@ export type ChartPoint = {
   outBytes: number;
 };
 
-export type CurrentStatItem = {
+type CurrentStatItem = {
   key: string;
   label: string;
   value: string;
 };
 
-export type CurrentStatGroup = {
+type CurrentStatGroup = {
   key: string;
   label: string;
   tone: CurrentStatTone;
   items: CurrentStatItem[];
 };
 
-export type TrafficHeroStatItem = {
+type TrafficHeroStatItem = {
   key: string;
   label: string;
   value: string;
@@ -53,7 +53,7 @@ export type TrafficHeroStatItem = {
   labelEmphasis: boolean;
 };
 
-export type CoverageStats = {
+type CoverageStats = {
   sampleCount: number;
   expectedSampleCount: number;
   coverageRatio: number;
@@ -113,7 +113,7 @@ export const coverageStatsFrom = (stats: TrafficStats[]): CoverageStats | null =
   };
 };
 
-export const currentStatToneFor = (
+const currentStatToneFor = (
   directionMode: TrafficSummary['direction_mode'],
   selectedDirection: TrafficStats['selected_bytes_direction'],
   group: 'in' | 'out',

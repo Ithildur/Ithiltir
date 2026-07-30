@@ -4,7 +4,7 @@ import * as adminApi from '@lib/adminApi';
 import { pendingIds } from '@utils/pendingIds';
 import { createSeqGate, reloadLatestLoad, runLatestLoad } from '@utils/seqGate';
 
-export interface AlertChannelsState {
+interface AlertChannelsState {
   channels: AlertChannel[];
   loading: boolean;
   testingIds: number[];
@@ -45,13 +45,42 @@ const setAlertChannelsLoading = (loading: boolean): void => {
   useAlertChannelsStore.setState({ loading });
 };
 
-const reloadAlertChannels = async (): Promise<void> => {
+const enabledDeliveryStatus = (channel: AlertChannel): AlertChannel['delivery_status'] => {
+  if (channel.consecutive_failures > 0 || channel.blocked_count > 0) return 'degraded';
+  return channel.last_success_at ? 'healthy' : 'unknown';
+};
+
+const patchAlertChannelEnabled = (id: number, enabled: boolean): void => {
+  useAlertChannelsStore.setState((state) => ({
+    channels: state.channels.map((channel) =>
+      channel.id === id
+        ? {
+            ...channel,
+            enabled,
+            delivery_status: enabled ? enabledDeliveryStatus(channel) : 'disabled',
+          }
+        : channel,
+    ),
+  }));
+};
+
+const reloadAlertChannels = async (params: { signal?: AbortSignal } = {}): Promise<boolean> => {
   return reloadLatestLoad(
     loadGate,
-    fetchAlertChannels,
+    () => fetchAlertChannels(params),
     replaceAlertChannels,
     setAlertChannelsLoading,
   );
+};
+
+export const refreshAlertChannels = async (
+  params: { signal?: AbortSignal } = {},
+): Promise<boolean> => {
+  try {
+    return await reloadAlertChannels(params);
+  } catch {
+    return false;
+  }
 };
 
 export const loadAlertChannels = async (
@@ -63,14 +92,6 @@ export const loadAlertChannels = async (
     replaceAlertChannels,
     setAlertChannelsLoading,
   );
-};
-
-const patchAlertChannelEnabled = (id: number, enabled: boolean): void => {
-  useAlertChannelsStore.setState((state) => ({
-    channels: state.channels.map((channel) =>
-      channel.id === id ? { ...channel, enabled } : channel,
-    ),
-  }));
 };
 
 const setAlertChannelTesting = (id: number, testing: boolean): void => {
@@ -90,8 +111,8 @@ export const updateAlertChannelEnabled = async (id: number, enabled: boolean): P
   setAlertChannelToggling(id, true);
   try {
     await adminApi.updateAlertChannelEnabled(id, { enabled });
-    loadGate.invalidate();
     patchAlertChannelEnabled(id, enabled);
+    await refreshAlertChannels();
     return true;
   } finally {
     setAlertChannelToggling(id, false);
@@ -102,7 +123,13 @@ export const testAlertChannel = async (id: number): Promise<boolean> => {
   if (getAlertChannelsState().testingIds.includes(id)) return false;
   setAlertChannelTesting(id, true);
   try {
-    await adminApi.testAlertChannel(id);
+    try {
+      await adminApi.testAlertChannel(id);
+    } catch (error) {
+      void reloadAlertChannels().catch(() => undefined);
+      throw error;
+    }
+    await refreshAlertChannels();
     return true;
   } finally {
     setAlertChannelTesting(id, false);
@@ -112,8 +139,8 @@ export const testAlertChannel = async (id: number): Promise<boolean> => {
 export const saveAlertChannel = async (
   id: number | null,
   input: adminApi.AlertChannelInput,
-): Promise<boolean> => {
-  if (getAlertChannelsState().saving) return false;
+): Promise<'busy' | 'synced' | 'stale'> => {
+  if (getAlertChannelsState().saving) return 'busy';
   useAlertChannelsStore.setState({ saving: true });
   try {
     if (id === null) {
@@ -121,8 +148,7 @@ export const saveAlertChannel = async (
     } else {
       await adminApi.updateAlertChannel(id, input);
     }
-    await reloadAlertChannels();
-    return true;
+    return (await refreshAlertChannels()) ? 'synced' : 'stale';
   } finally {
     useAlertChannelsStore.setState({ saving: false });
   }
@@ -130,6 +156,9 @@ export const saveAlertChannel = async (
 
 export const deleteAlertChannel = async (id: number): Promise<boolean> => {
   await adminApi.deleteAlertChannel(id);
-  await reloadAlertChannels();
+  useAlertChannelsStore.setState((state) => ({
+    channels: state.channels.filter((channel) => channel.id !== id),
+  }));
+  await refreshAlertChannels();
   return true;
 };

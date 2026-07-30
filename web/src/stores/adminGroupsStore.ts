@@ -3,9 +3,9 @@ import type { Group } from '@app-types/api';
 import { createGroup, deleteGroup, fetchGroupList, updateGroup } from '@lib/adminApi';
 import { createSeqGate, reloadLatestLoad, runLatestLoad } from '@utils/seqGate';
 
-export type AdminGroupInput = { name: string; remark?: string };
+type AdminGroupInput = { name: string; remark?: string };
 
-export interface AdminGroupsState {
+interface AdminGroupsState {
   groups: Group[];
   loading: boolean;
   saving: boolean;
@@ -44,7 +44,7 @@ const setAdminGroupsLoading = (loading: boolean): void => {
 };
 
 const reloadAdminGroups = async (): Promise<void> => {
-  return reloadLatestLoad(loadGate, fetchAdminGroups, replaceAdminGroups, setAdminGroupsLoading);
+  await reloadLatestLoad(loadGate, fetchAdminGroups, replaceAdminGroups, setAdminGroupsLoading);
 };
 
 export const loadAdminGroups = async (params: { signal?: AbortSignal } = {}): Promise<Group[]> => {

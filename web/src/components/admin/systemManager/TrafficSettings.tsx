@@ -1,36 +1,15 @@
 import React from 'react';
-import Save from 'lucide-react/dist/esm/icons/save';
-import Button from '@components/ui/Button';
 import ConfirmDialog from '@components/ui/ConfirmDialog';
-import Input from '@components/ui/Input';
 import IOSSwitch from '@components/ui/IOSSwitch';
 import Select from '@components/ui/Select';
-import TimezoneSelect from '@components/ui/TimezoneSelect';
-import SettingRow, {
-  SettingPanel,
-  SettingPanelFooter,
-} from '@components/admin/systemManager/SettingRow';
+import SettingRow, { SettingPanel } from '@components/admin/systemManager/SettingRow';
 import { pushTopBanner } from '@runtime/topBannerRuntime';
 import {
-  billingDayFromAnchor,
-  clampBillingDay,
-  cycleNeedsAnchorDate,
-  cycleNeedsBillingStartDay,
-  cycleNeedsTimezone,
-  defaultTrafficSettings,
-  normalizeTrafficCycleFields,
-  trafficCycleModes,
-  trafficCycleChanged,
-  trafficCycleLabelKey,
-  trafficCyclePatchFromFields,
-  trafficCycleValid,
   trafficDirectionModes,
   trafficDirectionLabelKey,
-  trafficSettingsWithCycleMode,
-  parseTrafficCycleMode,
   parseTrafficDirectionMode,
 } from '@lib/trafficSettingsModel';
-import type { TrafficSettings as TrafficSettingsView, TrafficUsageMode } from '@app-types/traffic';
+import type { TrafficDirectionMode, TrafficUsageMode } from '@app-types/traffic';
 import { useI18n } from '@i18n';
 import { useApiErrorHandler } from '@hooks/useApiErrorHandler';
 import { useConfirmDialog } from '@hooks/useConfirmDialog';
@@ -41,47 +20,15 @@ import {
 } from '@stores/trafficSettingsStore';
 import { isCanceledRequestError } from '@utils/errors';
 
-type TrafficDraftState = {
-  value: TrafficSettingsView;
-  dirty: boolean;
-};
-
-const initialTrafficDraft: TrafficDraftState = {
-  value: defaultTrafficSettings,
-  dirty: false,
-};
-
-const mergeTrafficDraft = (
-  current: TrafficDraftState,
-  settings: TrafficSettingsView,
-): TrafficDraftState => {
-  const value = current.dirty
-    ? {
-        ...current.value,
-        usage_mode: settings.usage_mode,
-        guest_access_mode: settings.guest_access_mode,
-        direction_mode: settings.direction_mode,
-      }
-    : settings;
-
-  return {
-    value,
-    dirty: trafficCycleChanged(value, settings),
-  };
-};
-
 const TrafficSettings: React.FC = () => {
   const { t } = useI18n();
   const apiError = useApiErrorHandler();
   const { dialogProps: confirmDialogProps, request: requestConfirm } = useConfirmDialog();
   const trafficSettings = useTrafficSettingsStore((state) => state.settings);
   const loading = useTrafficSettingsStore((state) => state.loading);
-  const savingSettings = useTrafficSettingsStore((state) => state.savingCycle);
   const savingMode = useTrafficSettingsStore((state) => state.savingUsageMode);
   const savingGuestAccess = useTrafficSettingsStore((state) => state.savingGuestAccess);
   const savingDirection = useTrafficSettingsStore((state) => state.savingDirection);
-  const [draftState, setDraftState] = React.useState<TrafficDraftState>(initialTrafficDraft);
-  const draft = draftState.value;
 
   const load = React.useCallback(
     async (signal: AbortSignal) => {
@@ -104,10 +51,6 @@ const TrafficSettings: React.FC = () => {
       controller.abort();
     };
   }, [load]);
-
-  React.useEffect(() => {
-    setDraftState((current) => mergeTrafficDraft(current, trafficSettings));
-  }, [trafficSettings]);
 
   const saveUsageMode = React.useCallback(
     async (mode: TrafficUsageMode) => {
@@ -145,29 +88,9 @@ const TrafficSettings: React.FC = () => {
     [apiError, requestConfirm, savingMode, t, trafficSettings.usage_mode],
   );
 
-  const saveTrafficSettings = React.useCallback(async () => {
-    if (savingSettings || !trafficCycleChanged(draft, trafficSettings) || !trafficCycleValid(draft))
-      return;
-    try {
-      const next = normalizeTrafficCycleFields(draft);
-      const didSave = await patchTrafficSettings(
-        trafficCyclePatchFromFields(draft, trafficSettings),
-        {
-          kind: 'cycle',
-          commit: next,
-        },
-      );
-      if (!didSave) return;
-      setDraftState({ value: { ...draft, ...next }, dirty: false });
-      pushTopBanner(t('admin_traffic_settings_saved'), { tone: 'info' });
-    } catch (error) {
-      apiError(error, { key: 'traffic_settings_save_failed' });
-    }
-  }, [apiError, draft, savingSettings, t, trafficSettings]);
-
   const saveGuestAccess = React.useCallback(async () => {
     if (loading || savingGuestAccess) return;
-    const nextMode = draft.guest_access_mode === 'by_node' ? 'disabled' : 'by_node';
+    const nextMode = trafficSettings.guest_access_mode === 'by_node' ? 'disabled' : 'by_node';
     try {
       const didSave = await patchTrafficSettings(
         { guest_access_mode: nextMode },
@@ -178,10 +101,10 @@ const TrafficSettings: React.FC = () => {
     } catch (error) {
       apiError(error, { key: 'traffic_settings_save_failed' });
     }
-  }, [apiError, draft.guest_access_mode, loading, savingGuestAccess, t]);
+  }, [apiError, loading, savingGuestAccess, t, trafficSettings.guest_access_mode]);
 
   const saveDirectionMode = React.useCallback(
-    async (mode: TrafficSettingsView['direction_mode']) => {
+    async (mode: TrafficDirectionMode) => {
       if (loading || savingDirection || mode === trafficSettings.direction_mode) return;
       try {
         const didSave = await patchTrafficSettings({ direction_mode: mode }, { kind: 'direction' });
@@ -194,29 +117,6 @@ const TrafficSettings: React.FC = () => {
     [apiError, loading, savingDirection, t, trafficSettings.direction_mode],
   );
 
-  const updateCycleDraft = React.useCallback(
-    (update: (current: TrafficSettingsView) => TrafficSettingsView) => {
-      setDraftState((current) => ({
-        value: update(current.value),
-        dirty: true,
-      }));
-    },
-    [],
-  );
-
-  const setCycleMode = React.useCallback(
-    (mode: TrafficSettingsView['cycle_mode']) => {
-      updateCycleDraft((current) => trafficSettingsWithCycleMode(current, mode));
-    },
-    [updateCycleDraft],
-  );
-
-  const changed = trafficCycleChanged(draft, trafficSettings);
-  const cycleValid = trafficCycleValid(draft);
-  const showBillingStartDay = cycleNeedsBillingStartDay(draft.cycle_mode);
-  const showAnchorDate = cycleNeedsAnchorDate(draft.cycle_mode);
-  const showTimezone = cycleNeedsTimezone(draft.cycle_mode);
-
   return (
     <section>
       <ConfirmDialog {...confirmDialogProps} />
@@ -227,16 +127,18 @@ const TrafficSettings: React.FC = () => {
           description={t('admin_system_traffic_usage_mode_desc')}
         >
           <IOSSwitch
-            checked={draft.usage_mode === 'billing'}
+            checked={trafficSettings.usage_mode === 'billing'}
             disabled={loading || savingMode}
             ariaLabel={t('admin_system_traffic_usage_mode')}
-            onChange={() => void saveUsageMode(draft.usage_mode === 'billing' ? 'lite' : 'billing')}
+            onChange={() =>
+              void saveUsageMode(trafficSettings.usage_mode === 'billing' ? 'lite' : 'billing')
+            }
           />
         </SettingRow>
 
         <SettingRow title={t('traffic_guest_access')} description={t('traffic_guest_access_desc')}>
           <IOSSwitch
-            checked={draft.guest_access_mode === 'by_node'}
+            checked={trafficSettings.guest_access_mode === 'by_node'}
             disabled={loading || savingGuestAccess}
             ariaLabel={t('traffic_guest_access')}
             onChange={() => void saveGuestAccess()}
@@ -248,7 +150,7 @@ const TrafficSettings: React.FC = () => {
           description={t('traffic_direction_mode_desc')}
         >
           <Select
-            value={draft.direction_mode}
+            value={trafficSettings.direction_mode}
             disabled={loading || savingDirection}
             aria-label={t('traffic_direction_mode')}
             width="auto"
@@ -265,118 +167,6 @@ const TrafficSettings: React.FC = () => {
             ))}
           </Select>
         </SettingRow>
-
-        <SettingRow
-          title={t('traffic_cycle_mode')}
-          description={t('traffic_cycle_mode_desc')}
-          controlClassName="md:justify-start"
-        >
-          <div className="grid w-full gap-4 md:grid-cols-2 xl:grid-cols-3">
-            <label className="grid gap-1.5">
-              <span className="text-xs font-semibold uppercase tracking-wide text-(--theme-fg-muted)">
-                {t('traffic_cycle_mode')}
-              </span>
-              <Select
-                value={draft.cycle_mode}
-                disabled={loading || savingSettings}
-                aria-label={t('traffic_cycle_mode')}
-                onChange={(event) => {
-                  const mode = parseTrafficCycleMode(event.target.value);
-                  if (mode) setCycleMode(mode);
-                }}
-              >
-                {trafficCycleModes.map((mode) => (
-                  <option key={mode} value={mode}>
-                    {t(trafficCycleLabelKey[mode])}
-                  </option>
-                ))}
-              </Select>
-            </label>
-
-            {showBillingStartDay && (
-              <label className="grid gap-1.5">
-                <span className="text-xs font-semibold uppercase tracking-wide text-(--theme-fg-muted)">
-                  {t('traffic_billing_start_day')}
-                </span>
-                <Input
-                  type="number"
-                  min={1}
-                  max={31}
-                  disabled={loading || savingSettings}
-                  aria-label={t('traffic_billing_start_day')}
-                  value={draft.billing_start_day}
-                  onChange={(event) => {
-                    const next = Number(event.target.value);
-                    updateCycleDraft((current) => ({
-                      ...current,
-                      billing_start_day: Number.isFinite(next)
-                        ? clampBillingDay(next)
-                        : current.billing_start_day,
-                    }));
-                  }}
-                />
-              </label>
-            )}
-
-            {showAnchorDate && (
-              <label className="grid gap-1.5">
-                <span className="text-xs font-semibold uppercase tracking-wide text-(--theme-fg-muted)">
-                  {t('traffic_anchor_date')}
-                </span>
-                <Input
-                  type="date"
-                  required
-                  disabled={loading || savingSettings}
-                  aria-label={t('traffic_anchor_date')}
-                  value={draft.billing_anchor_date}
-                  onChange={(event) => {
-                    updateCycleDraft((current) => ({
-                      ...current,
-                      billing_anchor_date: event.target.value,
-                      billing_start_day: billingDayFromAnchor(
-                        event.target.value,
-                        current.billing_start_day,
-                      ),
-                    }));
-                  }}
-                />
-              </label>
-            )}
-
-            {showTimezone && (
-              <label className="grid gap-1.5">
-                <span className="text-xs font-semibold uppercase tracking-wide text-(--theme-fg-muted)">
-                  {t('traffic_billing_timezone')}
-                </span>
-                <TimezoneSelect
-                  value={draft.billing_timezone}
-                  disabled={loading || savingSettings}
-                  ariaLabel={t('traffic_billing_timezone')}
-                  placeholder={t('traffic_billing_timezone_placeholder')}
-                  systemLabel={t('traffic_billing_timezone_system')}
-                  emptyLabel={t('traffic_billing_timezone_empty')}
-                  onChange={(value) => {
-                    updateCycleDraft((current) => ({
-                      ...current,
-                      billing_timezone: value,
-                    }));
-                  }}
-                />
-              </label>
-            )}
-          </div>
-        </SettingRow>
-
-        <SettingPanelFooter>
-          <Button
-            type="button"
-            icon={Save}
-            disabled={loading || savingSettings || !changed || !cycleValid}
-            onClick={() => void saveTrafficSettings()}
-          >
-            {savingSettings ? t('admin_system_settings_saving') : t('common_save_changes')}
-          </Button>
-        </SettingPanelFooter>
       </SettingPanel>
     </section>
   );

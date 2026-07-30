@@ -8,28 +8,11 @@ import {
 import { isAbortError } from '@utils/errors';
 import { createSeqGate } from '@utils/seqGate';
 
-export const idleRebuildStatus: NodeTrafficRebuildStatus = {
+const idleStatus: NodeTrafficRebuildStatus = {
   server_id: 0,
   status: 'idle',
   running: false,
 };
-
-type TrafficRebuildEventPayload =
-  | { kind: 'completed' }
-  | { kind: 'failed' }
-  | { kind: 'status_sync_failed' };
-
-export type TrafficRebuildEvent = TrafficRebuildEventPayload & { id: number };
-
-export type TrafficRebuildLocal =
-  | { phase: 'idle'; syncErrorShown: boolean }
-  | {
-      phase: 'starting';
-      nodeId: number;
-      seq: number;
-      syncErrorShown: boolean;
-    }
-  | { phase: 'watching'; nodeId: number; syncErrorShown: boolean };
 
 export type TrafficRebuildStartOutcome =
   | { status: 'started'; state: NodeTrafficRebuildStatus }
@@ -38,94 +21,34 @@ export type TrafficRebuildStartOutcome =
   | { status: 'failed'; error: unknown }
   | { status: 'busy' | 'stale' | 'noop' };
 
-const trafficRebuildBusy = { status: 'busy' } satisfies TrafficRebuildStartOutcome;
-const trafficRebuildStale = { status: 'stale' } satisfies TrafficRebuildStartOutcome;
-const trafficRebuildNoop = { status: 'noop' } satisfies TrafficRebuildStartOutcome;
-
-type StartClaim =
-  | { status: 'claimed'; seq: number; lastStatus: NodeTrafficRebuildStatus }
-  | TrafficRebuildStartOutcome;
-
-export interface TrafficRebuildState {
+interface TrafficRebuildState {
   status: NodeTrafficRebuildStatus;
-  local: TrafficRebuildLocal;
-  event: TrafficRebuildEvent | null;
+  startingNodeId: number | null;
 }
 
 const startTimeoutMs = 15000;
-
-export const runningRebuildNodeId = (status: NodeTrafficRebuildStatus): number | null =>
-  status.running && status.server_id > 0 ? status.server_id : null;
-
-export const startingRebuildNodeId = (local: TrafficRebuildLocal): number | null =>
-  local.phase === 'starting' ? local.nodeId : null;
-
-export const watchedRebuildNodeId = (local: TrafficRebuildLocal): number | null =>
-  local.phase === 'watching' ? local.nodeId : null;
-
-export const localRebuildNodeId = (local: TrafficRebuildLocal): number | null =>
-  local.phase === 'idle' ? null : local.nodeId;
-
-const idleLocal = (syncErrorShown = false): TrafficRebuildLocal => ({
-  phase: 'idle',
-  syncErrorShown,
-});
-
-let eventSeq = 0;
-let startSeq = 0;
-
-const eventPatch = (payload: TrafficRebuildEventPayload): Pick<TrafficRebuildState, 'event'> => {
-  const id = eventSeq + 1;
-  eventSeq = id;
-  return {
-    event: { ...payload, id },
-  };
-};
-
-const isFinishedStatus = (id: number, status: NodeTrafficRebuildStatus): boolean =>
-  status.server_id === id && (status.status === 'completed' || status.status === 'failed');
-
-const statusPatch = (
-  state: TrafficRebuildState,
-  next: NodeTrafficRebuildStatus,
-): Partial<TrafficRebuildState> => {
-  const local: TrafficRebuildLocal = { ...state.local, syncErrorShown: false };
-  if (state.local.phase !== 'watching') return { status: next, local };
-
-  const nodeId = state.local.nodeId;
-  if (next.running) {
-    return {
-      status: next,
-      local: next.server_id === nodeId ? local : idleLocal(),
-    };
-  }
-
-  return {
-    status: next,
-    local: idleLocal(),
-    ...(next.server_id === nodeId && next.status === 'completed'
-      ? eventPatch({ kind: 'completed' })
-      : {}),
-    ...(next.server_id === nodeId && next.status === 'failed'
-      ? eventPatch({ kind: 'failed' })
-      : {}),
-  };
-};
+const busyOutcome = { status: 'busy' } satisfies TrafficRebuildStartOutcome;
+const staleOutcome = { status: 'stale' } satisfies TrafficRebuildStartOutcome;
+const noopOutcome = { status: 'noop' } satisfies TrafficRebuildStartOutcome;
 
 const initialState = (): TrafficRebuildState => ({
-  status: idleRebuildStatus,
-  local: idleLocal(),
-  event: null,
+  status: idleStatus,
+  startingNodeId: null,
 });
 
 export const useTrafficRebuildStore = create<TrafficRebuildState>()(initialState);
 
+const statusGate = createSeqGate();
+let startSeq = 0;
+
 const getState = (): TrafficRebuildState => useTrafficRebuildStore.getState();
-const syncGate = createSeqGate();
+
+export const runningRebuildNodeId = (status: NodeTrafficRebuildStatus): number | null =>
+  status.running && status.server_id > 0 ? status.server_id : null;
 
 export const isTrafficRebuildBusy = (): boolean => {
   const state = getState();
-  return state.status.running || localRebuildNodeId(state.local) !== null;
+  return state.status.running || state.startingNodeId !== null;
 };
 
 const isRebuildRunningError = (error: unknown): boolean =>
@@ -141,153 +64,92 @@ const rebuildNodeTrafficWithTimeout = async (id: number): Promise<NodeTrafficReb
   }
 };
 
-const startOutcomeFromStatus = (
+const outcomeFromStatus = (
   id: number,
   state: NodeTrafficRebuildStatus,
 ): TrafficRebuildStartOutcome => {
-  if (!state.running) return trafficRebuildNoop;
+  if (!state.running) return noopOutcome;
   if (state.server_id === id) return { status: 'started', state };
   return { status: 'running_other', state };
 };
 
-const resetState = (): void => {
-  startSeq += 1;
-  useTrafficRebuildStore.setState(initialState());
-};
-
-const applyStatus = (next: NodeTrafficRebuildStatus): void => {
-  useTrafficRebuildStore.setState((state) => statusPatch(state, next));
-};
-
-const markSyncError = (): void => {
+const finishStart = (id: number, seq: number, status: NodeTrafficRebuildStatus): boolean => {
   const state = getState();
-  if (state.local.syncErrorShown) return;
-  useTrafficRebuildStore.setState((current) => ({
-    ...eventPatch({ kind: 'status_sync_failed' }),
-    local: { ...current.local, syncErrorShown: true },
-  }));
-};
+  if (startSeq !== seq || state.startingNodeId !== id) return false;
 
-const claimStart = (id: number): StartClaim => {
-  const current = getState();
-  const currentStatus = current.status;
-  if (currentStatus.running) {
-    if (currentStatus.server_id === id) {
-      useTrafficRebuildStore.setState({
-        local: { phase: 'watching', nodeId: id, syncErrorShown: false },
-      });
-      return { status: 'started', state: currentStatus };
-    }
-    return { status: 'running_other', state: currentStatus };
-  }
-  if (current.local.phase !== 'idle') return trafficRebuildBusy;
-
-  const lastStatus = currentStatus;
-  const seq = startSeq + 1;
-  startSeq = seq;
-  const local: TrafficRebuildLocal = {
-    phase: 'starting',
-    nodeId: id,
-    seq,
-    syncErrorShown: false,
-  };
-  useTrafficRebuildStore.setState({
-    status: { server_id: id, status: 'running', running: true },
-    local,
-  });
-  return { status: 'claimed', seq, lastStatus };
-};
-
-const finishStart = (seq: number, next: NodeTrafficRebuildStatus): boolean => {
-  const state = getState();
-  if (state.local.phase !== 'starting' || state.local.seq !== seq) return false;
-  useTrafficRebuildStore.setState(
-    statusPatch(
-      {
-        ...state,
-        local: { phase: 'watching', nodeId: state.local.nodeId, syncErrorShown: false },
-      },
-      next,
-    ),
-  );
+  // A POST response is newer than every status GET started before it.
+  statusGate.invalidate();
+  useTrafficRebuildStore.setState({ status, startingNodeId: null });
   return true;
 };
 
-const rollbackStart = (
-  seq: number,
-  status: NodeTrafficRebuildStatus,
-  syncErrorShown: boolean,
-): boolean => {
-  const current = getState();
-  if (current.local.phase !== 'starting' || current.local.seq !== seq) return false;
-  useTrafficRebuildStore.setState({
-    status,
-    local: idleLocal(syncErrorShown),
-  });
+const rollbackStart = (id: number, seq: number): boolean => {
+  const state = getState();
+  if (startSeq !== seq || state.startingNodeId !== id) return false;
+  useTrafficRebuildStore.setState({ startingNodeId: null });
   return true;
 };
 
 const syncStartStatus = async (
   id: number,
   seq: number,
-  lastStatus: NodeTrafficRebuildStatus,
-  error: unknown,
+  startError: unknown,
 ): Promise<TrafficRebuildStartOutcome> => {
   try {
-    const next = await fetchTrafficRebuild();
-    if (!finishStart(seq, next)) return trafficRebuildStale;
-    const result = startOutcomeFromStatus(id, next);
-    if (result.status !== 'noop') return result;
-    if (isRebuildRunningError(error) || isFinishedStatus(id, next)) return trafficRebuildNoop;
-    return { status: 'failed', error };
-  } catch (syncError) {
-    if (!rollbackStart(seq, lastStatus, true)) return trafficRebuildStale;
-    return { status: 'sync_failed', error: syncError };
+    const status = await fetchTrafficRebuild();
+    if (!finishStart(id, seq, status)) return staleOutcome;
+    const outcome = outcomeFromStatus(id, status);
+    if (outcome.status !== 'noop') return outcome;
+    if (
+      isRebuildRunningError(startError) ||
+      (status.server_id === id && (status.status === 'completed' || status.status === 'failed'))
+    ) {
+      return noopOutcome;
+    }
+    return { status: 'failed', error: startError };
+  } catch (error) {
+    if (!rollbackStart(id, seq)) return staleOutcome;
+    return { status: 'sync_failed', error };
   }
 };
 
 export const resetTrafficRebuild = (): void => {
-  syncGate.invalidate();
-  resetState();
+  startSeq += 1;
+  statusGate.invalidate();
+  useTrafficRebuildStore.setState(initialState());
 };
 
 export const syncTrafficRebuildStatus = async (
   signal?: AbortSignal,
 ): Promise<NodeTrafficRebuildStatus> => {
-  const seq = syncGate.next();
-  const next = await fetchTrafficRebuild(signal);
-  if (syncGate.isCurrent(seq)) applyStatus(next);
-  return next;
-};
-
-export const reportTrafficRebuildSyncError = (): void => {
-  markSyncError();
-};
-
-export const takeTrafficRebuildEvent = (id: number): TrafficRebuildEvent | null => {
-  const event = getState().event;
-  if (!event || event.id !== id) return null;
-  useTrafficRebuildStore.setState({ event: null });
-  return event;
+  const seq = statusGate.next();
+  const status = await fetchTrafficRebuild(signal);
+  if (statusGate.isCurrent(seq)) useTrafficRebuildStore.setState({ status });
+  return status;
 };
 
 export const startTrafficRebuild = async (id: number): Promise<TrafficRebuildStartOutcome> => {
-  const claim = claimStart(id);
-  if (claim.status !== 'claimed') return claim;
+  const current = getState();
+  if (current.status.running) return outcomeFromStatus(id, current.status);
+  if (current.startingNodeId !== null) return busyOutcome;
+
+  const seq = startSeq + 1;
+  startSeq = seq;
+  useTrafficRebuildStore.setState({ startingNodeId: id });
 
   try {
-    const started = await rebuildNodeTrafficWithTimeout(id);
-    if (!finishStart(claim.seq, started)) return trafficRebuildStale;
-    return startOutcomeFromStatus(id, started);
+    const status = await rebuildNodeTrafficWithTimeout(id);
+    if (!finishStart(id, seq, status)) return staleOutcome;
+    return outcomeFromStatus(id, status);
   } catch (error) {
     if (isApiAuthStaleError(error)) {
-      if (!rollbackStart(claim.seq, claim.lastStatus, false)) return trafficRebuildStale;
-      return trafficRebuildStale;
+      rollbackStart(id, seq);
+      return staleOutcome;
     }
     if (isRebuildRunningError(error) || isAbortError(error)) {
-      return syncStartStatus(id, claim.seq, claim.lastStatus, error);
+      return syncStartStatus(id, seq, error);
     }
-    if (!rollbackStart(claim.seq, claim.lastStatus, false)) return trafficRebuildStale;
+    if (!rollbackStart(id, seq)) return staleOutcome;
     return { status: 'failed', error };
   }
 };
