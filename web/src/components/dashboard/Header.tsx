@@ -29,6 +29,45 @@ const Header: React.FC<Props> = ({ searchTerm, setSearchTerm }) => {
   const [isMobileSearchOpen, setIsMobileSearchOpen] = React.useState(false);
   const [isPreferencesOpen, setIsPreferencesOpen] = React.useState(false);
   const preferencesRef = React.useRef<HTMLDivElement>(null);
+  const desktopSearchInputRef = React.useRef<HTMLInputElement>(null);
+  const mobileSearchDialogRef = React.useRef<HTMLDivElement>(null);
+  const mobileSearchInputRef = React.useRef<HTMLInputElement>(null);
+  const mobileSearchReturnFocusRef = React.useRef<HTMLElement | null>(null);
+
+  const openMobileSearch = React.useCallback(() => {
+    mobileSearchReturnFocusRef.current =
+      document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    setIsMobileSearchOpen(true);
+  }, []);
+
+  const closeMobileSearch = React.useCallback(() => {
+    setIsMobileSearchOpen(false);
+    const returnFocus = mobileSearchReturnFocusRef.current;
+    mobileSearchReturnFocusRef.current = null;
+    window.requestAnimationFrame(() => {
+      if (returnFocus?.isConnected) returnFocus.focus();
+    });
+  }, []);
+
+  React.useEffect(() => {
+    if (!isMobileSearchOpen) return;
+    const frame = window.requestAnimationFrame(() => mobileSearchInputRef.current?.focus());
+    return () => window.cancelAnimationFrame(frame);
+  }, [isMobileSearchOpen]);
+
+  React.useEffect(() => {
+    if (!isMobileSearchOpen) return;
+    const desktop = window.matchMedia('(min-width: 768px)');
+    const closeAtDesktop = () => {
+      if (!desktop.matches) return;
+      setIsMobileSearchOpen(false);
+      mobileSearchReturnFocusRef.current = null;
+      window.requestAnimationFrame(() => desktopSearchInputRef.current?.focus());
+    };
+    desktop.addEventListener('change', closeAtDesktop);
+    closeAtDesktop();
+    return () => desktop.removeEventListener('change', closeAtDesktop);
+  }, [isMobileSearchOpen]);
 
   React.useEffect(() => {
     if (!isPreferencesOpen) return;
@@ -56,6 +95,7 @@ const Header: React.FC<Props> = ({ searchTerm, setSearchTerm }) => {
         <div className="flex items-center gap-3">
           <div className="hidden md:flex">
             <SearchInput
+              ref={desktopSearchInputRef}
               type="text"
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
@@ -68,7 +108,7 @@ const Header: React.FC<Props> = ({ searchTerm, setSearchTerm }) => {
           </div>
           <Button
             type="button"
-            onClick={() => setIsMobileSearchOpen(true)}
+            onClick={openMobileSearch}
             variant="icon"
             className="md:hidden"
             aria-label={t('search_placeholder')}
@@ -146,7 +186,7 @@ const Header: React.FC<Props> = ({ searchTerm, setSearchTerm }) => {
                 >
                   <UserCog size={18} />
                 </Link>
-                <div className="hidden md:block absolute left-1/2 -translate-x-1/2 top-full mt-0 opacity-0 invisible group-hover:opacity-100 group-hover:visible group-focus-within:opacity-100 group-focus-within:visible transition-all duration-200 transform origin-top z-50 pt-1.5">
+                <div className="hidden md:block absolute left-1/2 -translate-x-1/2 top-full mt-0 opacity-0 invisible group-hover:opacity-100 group-hover:visible group-focus-within:opacity-100 group-focus-within:visible transition-all duration-200 motion-reduce:transition-none transform origin-top z-50 pt-1.5">
                   <div className="bg-(--theme-bg-default) dark:bg-(--theme-canvas-subtle) rounded-full shadow-xl border border-(--theme-border-subtle) dark:border-(--theme-border-default) p-1 overflow-hidden">
                     <button
                       type="button"
@@ -188,13 +228,53 @@ const Header: React.FC<Props> = ({ searchTerm, setSearchTerm }) => {
       {isMobileSearchOpen &&
         typeof document !== 'undefined' &&
         createPortal(
-          <div className="fixed inset-0 z-60 md:hidden flex items-center justify-center px-6">
+          <div
+            className="fixed inset-0 z-60 flex items-center justify-center px-6 md:hidden"
+            onKeyDown={(event) => {
+              if (event.key === 'Escape') {
+                event.preventDefault();
+                closeMobileSearch();
+                return;
+              }
+              if (event.key !== 'Tab') return;
+
+              const dialog = mobileSearchDialogRef.current;
+              if (!dialog) return;
+              const focusable = Array.from(
+                dialog.querySelectorAll<HTMLElement>(
+                  'button:not([disabled]), input:not([disabled]), [href], [tabindex]:not([tabindex="-1"])',
+                ),
+              );
+              if (focusable.length === 0) {
+                event.preventDefault();
+                return;
+              }
+
+              const first = focusable[0];
+              const last = focusable[focusable.length - 1];
+              if (event.shiftKey && document.activeElement === first) {
+                event.preventDefault();
+                last.focus();
+              } else if (!event.shiftKey && document.activeElement === last) {
+                event.preventDefault();
+                first.focus();
+              }
+            }}
+          >
             <div
               className="absolute inset-0 bg-(--theme-overlay-scrim) backdrop-blur-sm"
-              onClick={() => setIsMobileSearchOpen(false)}
+              aria-hidden="true"
+              onClick={closeMobileSearch}
             />
-            <div className="relative w-full max-w-xs bg-(--theme-bg-default) dark:bg-(--theme-canvas-subtle) border border-(--theme-border-default) dark:border-(--theme-border-default) rounded-full shadow-xl">
+            <div
+              ref={mobileSearchDialogRef}
+              role="dialog"
+              aria-modal="true"
+              aria-label={t('search_placeholder')}
+              className="relative w-full max-w-xs rounded-full border border-(--theme-border-default) bg-(--theme-bg-default) shadow-xl dark:border-(--theme-border-default) dark:bg-(--theme-canvas-subtle)"
+            >
               <SearchInput
+                ref={mobileSearchInputRef}
                 type="text"
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
@@ -203,6 +283,17 @@ const Header: React.FC<Props> = ({ searchTerm, setSearchTerm }) => {
                 icon={Search}
                 className="py-1.5 rounded-full bg-(--theme-bg-muted) dark:bg-(--theme-bg-default)"
                 wrapperClassName="w-full"
+                rightElement={
+                  <button
+                    type="button"
+                    className="grid size-7 place-items-center rounded-full text-(--theme-fg-muted) transition-colors hover:bg-(--theme-bg-muted) hover:text-(--theme-fg-default) focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-(--theme-focus-ring)"
+                    aria-label={t('common_close')}
+                    title={t('common_close')}
+                    onClick={closeMobileSearch}
+                  >
+                    <X size={16} aria-hidden="true" />
+                  </button>
+                }
               />
             </div>
           </div>,

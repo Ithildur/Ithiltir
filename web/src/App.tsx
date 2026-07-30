@@ -26,6 +26,19 @@ const LazyPage: React.FC<{ children: React.ReactElement }> = ({ children }) => (
   <React.Suspense fallback={<FullScreenLoader />}>{children}</React.Suspense>
 );
 
+const SkipToMain: React.FC = () => {
+  const { t } = useI18n();
+
+  return (
+    <a
+      href="#main-content"
+      className="ui-focus-ring fixed left-4 top-4 z-100 -translate-y-[calc(100%+2rem)] rounded-lg border border-(--theme-border-default) bg-(--theme-bg-default) px-4 py-2 text-sm font-semibold text-(--theme-fg-default) shadow-lg focus:translate-y-0"
+    >
+      {t('common_skip_to_main')}
+    </a>
+  );
+};
+
 const RequireAuth: React.FC<{
   children: React.ReactElement;
   redirectState?: Omit<LoginRedirectState, 'from'>;
@@ -85,7 +98,11 @@ const RequireStatisticsAccess: React.FC<{
     const messageKey: TranslationKey = kind === 'history' ? 'stats_error' : 'traffic_error';
     return (
       <div className="min-h-screen bg-(--theme-page-bg) text-(--theme-fg-default) dark:bg-(--theme-bg-default)">
-        <main className="mx-auto max-w-410 px-4 py-12 sm:px-6 lg:px-8">
+        <main
+          id="main-content"
+          tabIndex={-1}
+          className="mx-auto max-w-410 px-4 py-12 sm:px-6 lg:px-8"
+        >
           <div className="rounded-lg border border-(--theme-border-subtle) bg-(--theme-bg-default) p-6 text-sm text-(--theme-fg-danger) dark:border-(--theme-border-default)">
             {t(messageKey)}
           </div>
@@ -116,6 +133,7 @@ const RequireStatisticsAccess: React.FC<{
 
 const App: React.FC = () => (
   <BrowserRouter>
+    <SkipToMain />
     <DashVersionRuntime />
     <TrafficRebuildRuntime />
     <Routes>

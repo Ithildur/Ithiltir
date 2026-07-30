@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useLayoutEffect, useRef, useCallback } from 'react';
 
 interface Position {
   x: number;
@@ -60,12 +60,35 @@ export const DraggableFloatingButton: React.FC<Props> = ({
   const [isDragging, setIsDragging] = useState(false);
   const dragStartPos = useRef<Position | null>(null);
   const buttonRef = useRef<HTMLDivElement>(null);
-  const positionRef = useRef<Position | null>(null);
+  const positionRef = useRef<Position | null>(position);
   const dragDistanceRef = useRef(0);
+  const suppressClickUntilRef = useRef(0);
+
+  const clampCurrentPosition = useCallback(() => {
+    const current = positionRef.current;
+    const button = buttonRef.current;
+    if (!current || !button) return;
+
+    const rect = button.getBoundingClientRect();
+    const clamped = {
+      x: Math.max(0, Math.min(Math.max(0, window.innerWidth - rect.width), current.x)),
+      y: Math.max(0, Math.min(Math.max(0, window.innerHeight - rect.height), current.y)),
+    };
+    positionRef.current = clamped;
+    if (clamped.x !== current.x || clamped.y !== current.y) {
+      setPosition(clamped);
+    }
+    writeStoredPosition(storageKey, clamped);
+  }, [storageKey]);
+
+  useLayoutEffect(() => {
+    clampCurrentPosition();
+  }, [clampCurrentPosition]);
 
   useEffect(() => {
-    positionRef.current = position;
-  }, [position]);
+    window.addEventListener('resize', clampCurrentPosition);
+    return () => window.removeEventListener('resize', clampCurrentPosition);
+  }, [clampCurrentPosition]);
 
   const startDrag = useCallback(
     (clientX: number, clientY: number) => {
@@ -91,39 +114,26 @@ export const DraggableFloatingButton: React.FC<Props> = ({
 
     setPosition((prev) => {
       if (!prev) return null;
-      return {
+      const next = {
         x: prev.x + dx,
         y: prev.y + dy,
       };
+      positionRef.current = next;
+      return next;
     });
 
     dragStartPos.current = { x: clientX, y: clientY };
   }, []);
 
   const endDrag = useCallback(() => {
+    if (dragDistanceRef.current >= 5) {
+      suppressClickUntilRef.current = Date.now() + 500;
+    }
+    dragDistanceRef.current = 0;
     setIsDragging(false);
     dragStartPos.current = null;
-
-    if (positionRef.current && buttonRef.current) {
-      const rect = buttonRef.current.getBoundingClientRect();
-      const winW = window.innerWidth;
-      const winH = window.innerHeight;
-
-      const clampedPosition = {
-        x: Math.max(0, Math.min(winW - rect.width, positionRef.current.x)),
-        y: Math.max(0, Math.min(winH - rect.height, positionRef.current.y)),
-      };
-
-      if (
-        clampedPosition.x !== positionRef.current.x ||
-        clampedPosition.y !== positionRef.current.y
-      ) {
-        setPosition(clampedPosition);
-      }
-
-      writeStoredPosition(storageKey, clampedPosition);
-    }
-  }, [storageKey]);
+    clampCurrentPosition();
+  }, [clampCurrentPosition]);
 
   const onMouseDown = (e: React.MouseEvent) => {
     e.preventDefault();
@@ -179,9 +189,15 @@ export const DraggableFloatingButton: React.FC<Props> = ({
   }, [isDragging, moveDrag, endDrag]);
 
   const click = () => {
-    if (dragDistanceRef.current < 5 && onClick) {
+    if (Date.now() > suppressClickUntilRef.current && onClick) {
       onClick();
     }
+  };
+
+  const suppressDraggedClick = (event: React.MouseEvent) => {
+    if (Date.now() > suppressClickUntilRef.current) return;
+    event.preventDefault();
+    event.stopPropagation();
   };
 
   const positionStyle: React.CSSProperties = position
@@ -198,17 +214,20 @@ export const DraggableFloatingButton: React.FC<Props> = ({
       }}
       onMouseDown={onMouseDown}
       onTouchStart={onTouchStart}
+      onClickCapture={suppressDraggedClick}
       onClick={click}
-      onKeyDown={(event) => {
-        if (event.key === 'Enter' || event.key === ' ') {
-          event.preventDefault();
-          click();
-        }
-      }}
-      role="button"
-      tabIndex={0}
-      aria-label={ariaLabel}
     >
+      {onClick ? (
+        <button
+          type="button"
+          className="pointer-events-none absolute inset-0 rounded-full bg-transparent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-(--theme-focus-ring) focus-visible:ring-offset-2 focus-visible:ring-offset-(--theme-bg-default)"
+          aria-label={ariaLabel}
+          onClick={(event) => {
+            event.stopPropagation();
+            click();
+          }}
+        />
+      ) : null}
       {children}
     </div>
   );

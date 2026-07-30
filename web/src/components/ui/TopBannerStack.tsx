@@ -8,8 +8,6 @@ import type { LucideIcon } from 'lucide-react';
 import { useI18n } from '@i18n';
 import type { BannerItem, BannerTone } from '@app-types/topBanner';
 
-export type { BannerItem, BannerTone } from '@app-types/topBanner';
-
 const toneStyles: Record<
   BannerTone,
   { bg: string; border: string; accent: string; icon: LucideIcon; iconColor: string }
@@ -49,7 +47,7 @@ const BannerCard: React.FC<BannerCardProps> = ({ banner, onClose }) => {
 
   return (
     <div
-      className={`pointer-events-auto transition-all duration-300 animate-in slide-in-from-top-2 ${
+      className={`pointer-events-auto transition-all duration-300 animate-in slide-in-from-top-2 motion-reduce:transition-none motion-reduce:animate-none ${
         banner.closing ? 'opacity-0 -translate-y-2' : 'opacity-100 translate-y-0'
       }`}
       style={{ maxWidth: '92vw' }}
@@ -84,7 +82,7 @@ interface TopBannerStackProps {
   onClose: (id: number) => void;
 }
 
-export const TopBannerStack: React.FC<TopBannerStackProps> = ({ banners, onClose }) => {
+const TopBannerStack: React.FC<TopBannerStackProps> = ({ banners, onClose }) => {
   if (banners.length === 0 || typeof document === 'undefined') {
     return null;
   }

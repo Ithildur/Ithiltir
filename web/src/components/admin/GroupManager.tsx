@@ -184,6 +184,7 @@ const GroupManager: React.FC = () => {
           <SearchInput
             icon={Search}
             placeholder={t('admin_groups_search_placeholder')}
+            aria-label={t('admin_groups_search_placeholder')}
             value={model.search}
             onChange={(event) => model.setSearch(event.target.value)}
             wrapperClassName="flex-1 max-w-md"

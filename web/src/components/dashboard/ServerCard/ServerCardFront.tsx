@@ -131,7 +131,7 @@ ${t('mem_total')}: ${toMB(view.memory.total)} MB`;
 
   return (
     <div
-      className={`absolute inset-0 backface-hidden rounded-xl border transition-all cursor-pointer overflow-hidden flex flex-col ${cardStyle}`}
+      className={`absolute inset-0 backface-hidden rounded-xl border transition-all motion-reduce:transition-none cursor-pointer overflow-hidden flex flex-col ${cardStyle}`}
     >
       <div className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-4 p-4 pb-1">
         <div className="flex min-w-0 items-center gap-3">

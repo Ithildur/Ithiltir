@@ -14,6 +14,31 @@ export const Tooltip: React.FC<Props> = ({ content, children, className }) => {
   const frameRef = useRef<number | null>(null);
   const tooltipId = React.useId();
 
+  React.useLayoutEffect(() => {
+    if (!content) return;
+    const target = triggerRef.current?.querySelector<HTMLElement>(
+      'button:not([disabled]), input:not([disabled]), a[href], select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+    );
+    if (!target) return;
+
+    const describedBy = new Set(
+      (target.getAttribute('aria-describedby') ?? '').split(/\s+/).filter(Boolean),
+    );
+    describedBy.add(tooltipId);
+    target.setAttribute('aria-describedby', [...describedBy].join(' '));
+
+    return () => {
+      const remaining = (target.getAttribute('aria-describedby') ?? '')
+        .split(/\s+/)
+        .filter((id) => id && id !== tooltipId);
+      if (remaining.length > 0) {
+        target.setAttribute('aria-describedby', remaining.join(' '));
+      } else {
+        target.removeAttribute('aria-describedby');
+      }
+    };
+  }, [children, content, tooltipId]);
+
   React.useEffect(
     () => () => {
       if (frameRef.current !== null) {
@@ -80,10 +105,14 @@ export const Tooltip: React.FC<Props> = ({ content, children, className }) => {
         onPointerLeave={hide}
         onFocus={() => show()}
         onBlur={hide}
-        aria-describedby={isVisible && content ? tooltipId : undefined}
       >
         {children}
       </div>
+      {!isVisible && content ? (
+        <span id={tooltipId} hidden>
+          {content}
+        </span>
+      ) : null}
       {isVisible &&
         content &&
         createPortal(

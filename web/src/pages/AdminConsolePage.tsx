@@ -180,7 +180,9 @@ const AdminConsolePage: React.FC = () => {
           </div>
         </header>
 
-        <div
+        <main
+          id="main-content"
+          tabIndex={-1}
           className={`flex-1 overflow-auto scroll-smooth custom-scrollbar ${
             flatFrame ? 'px-4 pb-8 pt-5 md:px-6 md:pb-10 md:pt-6' : 'p-4 md:p-8'
           }`}
@@ -211,7 +213,7 @@ const AdminConsolePage: React.FC = () => {
               <ActiveTabComponent />
             </React.Suspense>
           </div>
-        </div>
+        </main>
       </div>
     </div>
   );

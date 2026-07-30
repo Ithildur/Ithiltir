@@ -156,13 +156,13 @@ const AdminSidebar: React.FC<Props> = ({ tabs, activeTab, onTabChange, versionLa
             size="sm"
             variant="plain"
             titleOverride={t('admin_change_theme')}
-            className="h-10 w-full justify-center rounded-xl border-0 bg-transparent text-(--theme-fg-muted) transition-all hover:bg-(--theme-surface-control-hover)/80 hover:text-(--theme-fg-accent) dark:text-(--theme-fg-neutral) dark:hover:bg-(--theme-bg-default)/25 dark:hover:text-(--theme-fg-accent)"
+            className="h-10 w-full justify-center rounded-xl border-0 bg-transparent text-(--theme-fg-muted) transition-all motion-reduce:transition-none hover:bg-(--theme-surface-control-hover)/80 hover:text-(--theme-fg-accent) dark:text-(--theme-fg-neutral) dark:hover:bg-(--theme-bg-default)/25 dark:hover:text-(--theme-fg-accent)"
           />
 
           <button
             type="button"
             onClick={logout}
-            className="h-10 w-full inline-flex items-center justify-center rounded-xl text-(--theme-bg-danger-emphasis) transition-all duration-300 hover:bg-(--theme-bg-danger-muted) hover:text-(--theme-bg-danger-emphasis) dark:hover:bg-(--theme-bg-danger-muted)"
+            className="h-10 w-full inline-flex items-center justify-center rounded-xl text-(--theme-bg-danger-emphasis) transition-all duration-300 motion-reduce:transition-none hover:bg-(--theme-bg-danger-muted) hover:text-(--theme-bg-danger-emphasis) dark:hover:bg-(--theme-bg-danger-muted)"
             title={t('admin_logout')}
             aria-label={t('admin_logout')}
           >

@@ -56,6 +56,7 @@ const ComboboxSelect: React.FC<Props> = ({
   const [open, setOpen] = React.useState(false);
   const [query, setQuery] = React.useState('');
   const [queryDirty, setQueryDirty] = React.useState(false);
+  const [activeValue, setActiveValue] = React.useState<string | null>(null);
   const [menuRect, setMenuRect] = React.useState<MenuRect | null>(null);
 
   const selected = React.useMemo(
@@ -135,12 +136,26 @@ const ComboboxSelect: React.FC<Props> = ({
     return options.filter((option) => optionMatches(option, normalizedQuery)).slice(0, 80);
   }, [options, query, queryDirty, searchable]);
 
+  const activeOption =
+    filteredOptions.find((option) => option.value === activeValue) ??
+    filteredOptions.find((option) => option.value === value) ??
+    filteredOptions[0];
+  const activeIndex = activeOption ? filteredOptions.indexOf(activeOption) : -1;
+  const activeOptionId =
+    open && activeIndex >= 0 ? `${listboxId}-option-${activeIndex}` : undefined;
+
+  React.useLayoutEffect(() => {
+    if (!activeOptionId || !menuRect) return;
+    document.getElementById(activeOptionId)?.scrollIntoView({ block: 'nearest' });
+  }, [activeOptionId, menuRect]);
+
   const selectValue = React.useCallback(
     (nextValue: string) => {
       onChange(nextValue);
       setOpen(false);
       setQuery('');
       setQueryDirty(false);
+      setActiveValue(null);
     },
     [onChange],
   );
@@ -149,9 +164,25 @@ const ComboboxSelect: React.FC<Props> = ({
     if (!searchable) return;
     setQuery('');
     setQueryDirty(true);
+    setActiveValue(selected?.value ?? options[0]?.value ?? null);
     setOpen(true);
     inputRef.current?.focus();
-  }, [searchable]);
+  }, [options, searchable, selected]);
+
+  const moveActive = React.useCallback(
+    (offset: -1 | 1) => {
+      if (filteredOptions.length === 0) return;
+      const nextIndex =
+        activeIndex < 0
+          ? offset > 0
+            ? 0
+            : filteredOptions.length - 1
+          : (activeIndex + offset + filteredOptions.length) % filteredOptions.length;
+      setActiveValue(filteredOptions[nextIndex].value);
+      setOpen(true);
+    },
+    [activeIndex, filteredOptions],
+  );
 
   const menu =
     open && !disabled && menuRect && typeof document !== 'undefined'
@@ -169,16 +200,22 @@ const ComboboxSelect: React.FC<Props> = ({
             }}
           >
             {filteredOptions.length > 0 ? (
-              filteredOptions.map((option) => {
+              filteredOptions.map((option, index) => {
                 const isSelected = option.value === value;
+                const isActive = index === activeIndex;
                 return (
-                  <button
+                  <div
                     key={option.value}
-                    type="button"
+                    id={`${listboxId}-option-${index}`}
                     role="option"
                     aria-selected={isSelected}
-                    className="flex w-full items-center justify-between gap-3 px-3 py-2 text-left text-(--theme-fg-default) hover:bg-(--theme-surface-row-hover) dark:hover:bg-(--theme-canvas-subtle)"
+                    className={`flex w-full cursor-default items-center justify-between gap-3 px-3 py-2 text-left text-(--theme-fg-default) ${
+                      isActive
+                        ? 'bg-(--theme-surface-row-hover) dark:bg-(--theme-canvas-subtle)'
+                        : 'hover:bg-(--theme-surface-row-hover) dark:hover:bg-(--theme-canvas-subtle)'
+                    }`}
                     onMouseDown={(event) => event.preventDefault()}
+                    onMouseEnter={() => setActiveValue(option.value)}
                     onClick={() => selectValue(option.value)}
                   >
                     <span className="min-w-0 truncate">{option.label}</span>
@@ -188,7 +225,7 @@ const ComboboxSelect: React.FC<Props> = ({
                         aria-hidden="true"
                       />
                     ) : null}
-                  </button>
+                  </div>
                 );
               })
             ) : (
@@ -220,18 +257,25 @@ const ComboboxSelect: React.FC<Props> = ({
           aria-autocomplete="list"
           aria-controls={listboxId}
           aria-expanded={open}
+          aria-activedescendant={activeOptionId}
           role="combobox"
           className="w-full rounded-md border border-(--theme-border-subtle) bg-(--theme-bg-default) px-3 py-1.25 pr-9 text-sm/5 text-(--theme-fg-default) outline-none transition-[background-color,border-color,box-shadow] placeholder:text-(--theme-fg-subtle) focus:border-(--theme-bg-accent-emphasis) focus:ring-1 focus:ring-(--theme-bg-accent-emphasis) disabled:cursor-not-allowed disabled:opacity-60 dark:border-(--theme-border-default) dark:bg-(--theme-bg-inset)"
           onFocus={(event) => {
             setQuery(selectedLabel);
             setQueryDirty(false);
+            setActiveValue(selected?.value ?? options[0]?.value ?? null);
             setOpen(true);
             event.currentTarget.setSelectionRange(0, event.currentTarget.value.length);
           }}
           onChange={(event) => {
             if (!searchable) return;
-            setQuery(event.target.value);
+            const nextQuery = event.target.value;
+            setQuery(nextQuery);
             setQueryDirty(true);
+            const normalizedQuery = normalize(nextQuery);
+            setActiveValue(
+              options.find((option) => optionMatches(option, normalizedQuery))?.value ?? null,
+            );
             setOpen(true);
           }}
           onKeyDown={(event) => {
@@ -241,13 +285,27 @@ const ComboboxSelect: React.FC<Props> = ({
             }
             if (event.key === 'ArrowDown') {
               event.preventDefault();
-              setOpen(true);
+              moveActive(1);
+              return;
+            }
+            if (event.key === 'ArrowUp') {
+              event.preventDefault();
+              moveActive(-1);
+              return;
+            }
+            if (event.key === 'Home' && open) {
+              event.preventDefault();
+              setActiveValue(filteredOptions[0]?.value ?? null);
+              return;
+            }
+            if (event.key === 'End' && open) {
+              event.preventDefault();
+              setActiveValue(filteredOptions.at(-1)?.value ?? null);
               return;
             }
             if (event.key === 'Enter' && open) {
               event.preventDefault();
-              const nextValue = searchable && queryDirty ? filteredOptions[0]?.value : value;
-              if (nextValue !== undefined) selectValue(nextValue);
+              if (activeOption) selectValue(activeOption.value);
             }
           }}
         />
@@ -274,6 +332,7 @@ const ComboboxSelect: React.FC<Props> = ({
             onClick={() => {
               setQuery('');
               setQueryDirty(false);
+              setActiveValue(selected?.value ?? options[0]?.value ?? null);
               if (open) {
                 setOpen(false);
                 inputRef.current?.blur();

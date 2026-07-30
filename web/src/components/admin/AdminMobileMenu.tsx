@@ -20,18 +20,84 @@ interface Props {
 const AdminMobileMenu: React.FC<Props> = ({ isOpen, tabs, activeTab, onTabChange, onClose }) => {
   const { lang, setLang, t } = useI18n();
   const visibleTabs = React.useMemo(() => tabs.filter((tab) => !tab.hidden), [tabs]);
+  const titleId = React.useId();
+  const menuRef = React.useRef<HTMLDivElement>(null);
+  const lastActiveRef = React.useRef<HTMLElement | null>(null);
+
+  React.useEffect(() => {
+    if (!isOpen) return;
+    lastActiveRef.current = document.activeElement as HTMLElement | null;
+    const menu = menuRef.current;
+    if (!menu) return;
+
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    const firstFocusable = menu.querySelector<HTMLElement>(
+      'a[href], button:not([disabled]), [tabindex]:not([tabindex="-1"])',
+    );
+    (firstFocusable ?? menu).focus();
+
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      lastActiveRef.current?.focus();
+    };
+  }, [isOpen]);
 
   if (!isOpen) return null;
+
+  const handleKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (event.key === 'Escape') {
+      event.stopPropagation();
+      onClose();
+      return;
+    }
+    if (event.key !== 'Tab') return;
+
+    const menu = menuRef.current;
+    if (!menu) return;
+    const focusables = Array.from(
+      menu.querySelectorAll<HTMLElement>(
+        'a[href], button:not([disabled]), [tabindex]:not([tabindex="-1"])',
+      ),
+    ).filter((element) => element.getAttribute('aria-hidden') !== 'true');
+    if (focusables.length === 0) {
+      event.preventDefault();
+      menu.focus();
+      return;
+    }
+    const first = focusables[0];
+    const last = focusables[focusables.length - 1];
+    const active = document.activeElement;
+    if (event.shiftKey && (active === first || !menu.contains(active))) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && active === last) {
+      event.preventDefault();
+      first.focus();
+    }
+  };
 
   return (
     <div className="fixed inset-0 z-50 md:hidden flex">
       <div
         className="absolute inset-0 bg-(--theme-fg-strong)/20 dark:bg-(--theme-overlay-scrim) backdrop-blur-sm"
         onClick={onClose}
+        aria-hidden="true"
       />
-      <div className="relative w-72 bg-(--theme-bg-default) dark:bg-(--theme-bg-inset) h-full shadow-2xl theme-shadow-float flex flex-col animate-in fade-in slide-in-from-left-5 border-r border-(--theme-border-subtle) dark:border-(--theme-border-default)">
+      <div
+        ref={menuRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        tabIndex={-1}
+        onKeyDown={handleKeyDown}
+        className="relative w-72 bg-(--theme-bg-default) dark:bg-(--theme-bg-inset) h-full shadow-2xl theme-shadow-float flex flex-col animate-in fade-in slide-in-from-left-5 motion-reduce:animate-none border-r border-(--theme-border-subtle) dark:border-(--theme-border-default) overscroll-contain"
+      >
         <div className="h-22 flex items-center justify-between px-6 border-b border-(--theme-border-subtle) dark:border-(--theme-border-default) bg-(--theme-surface-overlay) dark:bg-(--theme-bg-inset)">
-          <span className="font-bold text-2xl text-(--theme-fg-strong) dark:text-(--theme-fg-strong)">
+          <span
+            id={titleId}
+            className="font-bold text-2xl text-(--theme-fg-strong) dark:text-(--theme-fg-strong)"
+          >
             {t('admin_menu')}
           </span>
           <button
