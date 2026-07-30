@@ -6,7 +6,7 @@
 
 - API 基础路径：`/api`
 - Dash 只支持根路径部署，不支持在 `app.public_url` 中配置路径前缀
-- `app.public_url` 接受 HTTP 和 HTTPS且必须包含非空主机名；裸 IP 默认使用 HTTP，裸域名默认使用 HTTPS
+- `app.public_url` 接受 HTTP 和 HTTPS；主机必须是 IP 字面量或 ASCII DNS 名称，可选端口范围为 1～65535；国际化域名必须使用 IDNA/punycode 形式；裸 IP 默认使用 HTTP，裸域名默认使用 HTTPS
 - JSON 错误包装：
 
 ```json

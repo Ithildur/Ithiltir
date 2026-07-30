@@ -4,7 +4,7 @@ app:
   dash_ip: "__APP_DASH_IP__"
   listen: "__APP_LISTEN__"
   grpc_port: ":9090"
-  public_url: "__APP_PUBLIC_URL__" # Root URL only. Path prefixes such as /dash are not supported.
+  public_url: "__APP_PUBLIC_URL__" # Root URL; use an IP or ASCII DNS name (IDNA/punycode for internationalized domains).
   timezone: "Asia/Shanghai" # Must be a valid IANA timezone name. Invalid values stop startup.
   language: "__APP_LANGUAGE__"
   log_level: "info" # Log level: debug/info/warn/error. HTTP access logs are emitted only in debug mode or with --debug.

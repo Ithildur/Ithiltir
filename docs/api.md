@@ -6,7 +6,7 @@ This document defines the current HTTP contract.
 
 - API base path: `/api`
 - Dash is served from root paths only. Path prefixes in `app.public_url` are not supported.
-- `app.public_url` accepts HTTP and HTTPS and requires a non-empty hostname. Bare IP addresses default to HTTP; bare domain names default to HTTPS.
+- `app.public_url` accepts HTTP and HTTPS and requires an IP literal or ASCII DNS hostname with an optional port from 1 through 65535. Internationalized domains must use IDNA/punycode form. Bare IP addresses default to HTTP; bare domain names default to HTTPS.
 - JSON error format:
 
 ```json

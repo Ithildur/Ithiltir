@@ -43,7 +43,7 @@ go run ./cmd/dash migrate -config config.local.yaml
 go run ./cmd/dash -debug
 ```
 
-启动后，访问 `app.public_url` 打开看板，访问 `app.public_url + "/login"` 进入管理台。`app.public_url` 必须是根路径 URL，不支持 `/dash` 这类路径前缀。IP 部署允许使用 HTTP；网络边界支持时仍建议使用 HTTPS。
+启动后，访问 `app.public_url` 打开看板，访问 `app.public_url + "/login"` 进入管理台。`app.public_url` 必须是根路径 URL，主机部分只接受 IP 字面量或 ASCII DNS 名称；国际化域名需配置为 IDNA/punycode 形式。不支持 `/dash` 这类路径前缀。IP 部署允许使用 HTTP；网络边界支持时仍建议使用 HTTPS。
 
 ## 配置
 

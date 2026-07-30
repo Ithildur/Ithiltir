@@ -43,7 +43,7 @@ go run ./cmd/dash migrate -config config.local.yaml
 go run ./cmd/dash -debug
 ```
 
-When it starts, open `app.public_url` for the dashboard and `app.public_url + "/login"` for the admin console. `app.public_url` must be a root URL. Path prefixes such as `/dash` are not supported. IP deployments may use HTTP; use HTTPS whenever the network boundary supports it.
+When it starts, open `app.public_url` for the dashboard and `app.public_url + "/login"` for the admin console. `app.public_url` must be a root URL whose host is an IP literal or ASCII DNS name. Configure internationalized domains in IDNA/punycode form. Path prefixes such as `/dash` are not supported. IP deployments may use HTTP; use HTTPS whenever the network boundary supports it.
 
 ## Configuration
 

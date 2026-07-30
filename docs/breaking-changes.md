@@ -4,6 +4,7 @@
 
 ### Runtime configuration
 
+- `app.public_url` now accepts only IP literals or ASCII DNS names with ports from 1 through 65535. Internationalized domains must be configured in IDNA/punycode form.
 - Unknown YAML fields and explicitly invalid duration values are rejected during startup instead of being ignored or replaced with defaults. Omitted duration fields still use their documented defaults.
 
 ### Notification channel configuration

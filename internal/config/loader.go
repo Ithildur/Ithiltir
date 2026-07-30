@@ -217,6 +217,9 @@ func compilePublicURL(cfg *Config) error {
 	if u.Hostname() == "" {
 		return fmt.Errorf("config: app.public_url host is required")
 	}
+	if err := validatePublicURLHost(u); err != nil {
+		return err
+	}
 	if u.User != nil {
 		return fmt.Errorf("config: app.public_url must not include user information")
 	}
@@ -237,6 +240,43 @@ func compilePublicURL(cfg *Config) error {
 	cfg.App.PublicURLBasePath = ""
 
 	return nil
+}
+
+func validatePublicURLHost(u *url.URL) error {
+	host := u.Hostname()
+	if net.ParseIP(host) == nil && !validDNSHost(host) {
+		return fmt.Errorf("config: app.public_url host must be an IP literal or an ASCII DNS name")
+	}
+	if port := u.Port(); port != "" {
+		n, err := strconv.Atoi(port)
+		if err != nil || n < 1 || n > 65535 {
+			return fmt.Errorf("config: app.public_url port must be between 1 and 65535")
+		}
+	}
+	return nil
+}
+
+func validDNSHost(host string) bool {
+	// PublicURLHost is embedded into Bash and PowerShell installers, so this
+	// boundary intentionally accepts only ASCII DNS A-labels. Internationalized
+	// domains must be configured in IDNA/punycode form; add explicit IDNA
+	// normalization here before accepting Unicode hostnames in the future.
+	host = strings.TrimSuffix(host, ".")
+	if host == "" || len(host) > 253 {
+		return false
+	}
+	for _, label := range strings.Split(host, ".") {
+		if len(label) == 0 || len(label) > 63 || label[0] == '-' || label[len(label)-1] == '-' {
+			return false
+		}
+		for i := range len(label) {
+			c := label[i]
+			if (c < 'a' || c > 'z') && (c < 'A' || c > 'Z') && (c < '0' || c > '9') && c != '-' {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 func publicURLWithDefaultScheme(raw string) string {
