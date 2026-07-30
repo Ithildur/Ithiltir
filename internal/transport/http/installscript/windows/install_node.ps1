@@ -1,6 +1,4 @@
-﻿$ErrorActionPreference = "Stop"
-
-param(
+﻿param(
   [Parameter(Mandatory = $true, Position = 0)]
   [string]$DashIP,
 
@@ -16,6 +14,8 @@ param(
   [Parameter(ValueFromRemainingArguments = $true)]
   [string[]]$ExtraArgs
 )
+
+$ErrorActionPreference = "Stop"
 
 $App = "ithiltir-node"
 $ServiceName = "ithiltir-node"
@@ -102,16 +102,82 @@ function Detect-Arch {
   }
 }
 
+function Test-DownloadRedirect([Uri]$Original, [Uri]$Current, [Uri]$Next) {
+  if (!$Next.IsAbsoluteUri) { return $false }
+  if (![string]::IsNullOrEmpty($Next.UserInfo)) { return $false }
+  if (![string]::Equals($Original.Host, $Next.Host, [StringComparison]::OrdinalIgnoreCase)) {
+    return $false
+  }
+
+  $currentScheme = $Current.Scheme.ToLowerInvariant()
+  $nextScheme = $Next.Scheme.ToLowerInvariant()
+  if ($currentScheme -eq $nextScheme) {
+    return ($nextScheme -eq "http" -or $nextScheme -eq "https") -and $Current.Port -eq $Next.Port
+  }
+  return $currentScheme -eq "http" -and $nextScheme -eq "https"
+}
+
 function Download-File([string]$Url, [string]$OutFile, [string]$Secret) {
   $tmpDir = Split-Path -Parent $OutFile
   if ($tmpDir -and !(Test-Path $tmpDir)) {
     New-Item -ItemType Directory -Force -Path $tmpDir | Out-Null
   }
 
+  $handler = $null
+  $client = $null
   try {
-    Invoke-WebRequest -Uri $Url -OutFile $OutFile -UseBasicParsing -TimeoutSec 60 -Headers @{ "X-Node-Secret" = $Secret }
+    Add-Type -AssemblyName System.Net.Http
+    $handler = [System.Net.Http.HttpClientHandler]::new()
+    $handler.AllowAutoRedirect = $false
+    $client = [System.Net.Http.HttpClient]::new($handler)
+    $client.Timeout = [TimeSpan]::FromSeconds(60)
+
+    $original = [Uri]$Url
+    $current = $original
+    for ($redirects = 0; ; $redirects++) {
+      $request = [System.Net.Http.HttpRequestMessage]::new([System.Net.Http.HttpMethod]::Get, $current)
+      $response = $null
+      try {
+        [void]$request.Headers.TryAddWithoutValidation("X-Node-Secret", $Secret)
+        $response = $client.SendAsync($request).GetAwaiter().GetResult()
+        $status = [int]$response.StatusCode
+        if ($status -ge 200 -and $status -lt 300) {
+          $input = $response.Content.ReadAsStreamAsync().GetAwaiter().GetResult()
+          $output = [IO.File]::Open($OutFile, [IO.FileMode]::Create, [IO.FileAccess]::Write, [IO.FileShare]::None)
+          try {
+            $input.CopyTo($output)
+          } finally {
+            $output.Dispose()
+            $input.Dispose()
+          }
+          return
+        }
+
+        if ($status -notin @(301, 302, 303, 307, 308) -or $null -eq $response.Headers.Location) {
+          throw "HTTP status $status"
+        }
+        if ($redirects -ge 5) {
+          throw "redirect limit exceeded"
+        }
+        $next = if ($response.Headers.Location.IsAbsoluteUri) {
+          $response.Headers.Location
+        } else {
+          [Uri]::new($current, $response.Headers.Location)
+        }
+        if (!(Test-DownloadRedirect $original $current $next)) {
+          throw "unsafe redirect to $next"
+        }
+        $current = $next
+      } finally {
+        if ($null -ne $response) { $response.Dispose() }
+        $request.Dispose()
+      }
+    }
   } catch {
     throw (Msg "DownloadFailed" @($Url, $_.Exception.Message))
+  } finally {
+    if ($null -ne $client) { $client.Dispose() }
+    if ($null -ne $handler) { $handler.Dispose() }
   }
 }
 

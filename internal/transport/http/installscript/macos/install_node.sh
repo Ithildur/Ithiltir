@@ -35,6 +35,9 @@ msg() {
       root_required) echo "此安装脚本需要 root 权限，且当前系统未安装 sudo。请使用 root 用户运行。" ;;
       unsupported_arch) echo "仅支持 arm64，当前 uname -m=$1" ;;
       missing_download_tool) echo "缺少下载工具：请安装 curl" ;;
+      invalid_node_version) echo "下载的节点返回了非法版本号：$1" ;;
+      unsafe_redirect) echo "拒绝不安全的节点下载重定向：$1" ;;
+      redirect_limit) echo "节点下载重定向超过 5 次。" ;;
       enable_time_sync) echo "[+] 正在启用网络时间同步（非致命）" ;;
       time_sync_enabled) echo "[+] 网络时间同步已启用" ;;
       time_sync_failed) echo "[Warn] 无法自动启用网络时间同步；请手动检查日期与时间设置" ;;
@@ -51,6 +54,9 @@ msg() {
     root_required) echo "This installer requires root privileges, and sudo is not installed. Please run as root." ;;
     unsupported_arch) echo "Only arm64 is supported; current uname -m=$1" ;;
     missing_download_tool) echo "Missing download tool: please install curl" ;;
+    invalid_node_version) echo "Downloaded node returned an invalid version: $1" ;;
+    unsafe_redirect) echo "Refusing unsafe node download redirect: $1" ;;
+    redirect_limit) echo "Node download exceeded 5 redirects." ;;
     enable_time_sync) echo "[+] enabling network time sync (non-fatal)" ;;
     time_sync_enabled) echo "[+] network time sync is enabled" ;;
     time_sync_failed) echo "[Warn] could not enable network time sync automatically; please check Date & Time settings manually" ;;
@@ -105,10 +111,92 @@ detect_arch() {
   esac
 }
 
+valid_node_version() {
+  local version="$1"
+  ((${#version} <= 128)) &&
+    [[ "$version" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?(\+[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$ ]]
+}
+
+http_url_parts() {
+  local url="$1" scheme rest authority host port
+  [[ "$url" != *$'\r'* && "$url" != *$'\n'* ]] || return 1
+  if [[ "$url" =~ ^([Hh][Tt][Tt][Pp][Ss]?)://(.*)$ ]]; then
+    scheme="$(printf '%s' "${BASH_REMATCH[1]}" | tr '[:upper:]' '[:lower:]')"
+    rest="${BASH_REMATCH[2]}"
+  else
+    return 1
+  fi
+  authority="${rest%%[/?#]*}"
+  [[ -n "$authority" && "$authority" != *"@"* ]] || return 1
+  if [[ "$authority" =~ ^(\[[^]]+\])(:([0-9]+))?$ ]]; then
+    host="${BASH_REMATCH[1]}"
+    port="${BASH_REMATCH[3]}"
+  elif [[ "$authority" =~ ^([^:]+)(:([0-9]+))?$ ]]; then
+    host="${BASH_REMATCH[1]}"
+    port="${BASH_REMATCH[3]}"
+  else
+    return 1
+  fi
+  host="$(printf '%s' "$host" | tr '[:upper:]' '[:lower:]')"
+  [[ -n "$host" ]] || return 1
+  if [[ -n "$port" ]]; then
+    [[ ${#port} -le 5 ]] && ((10#$port >= 1 && 10#$port <= 65535)) || return 1
+  elif [[ "$scheme" == "https" ]]; then
+    port="443"
+  else
+    port="80"
+  fi
+  printf '%s|%s|%s|%s\n' "$scheme" "$host" "$port" "$authority"
+}
+
+download_redirect_allowed() {
+  local original="$1" current="$2" next="$3" original_parts current_parts next_parts
+  local original_host current_scheme current_port next_scheme next_host next_port
+  original_parts="$(http_url_parts "$original")" || return 1
+  current_parts="$(http_url_parts "$current")" || return 1
+  next_parts="$(http_url_parts "$next")" || return 1
+  IFS='|' read -r _ original_host _ _ <<<"$original_parts"
+  IFS='|' read -r current_scheme _ current_port _ <<<"$current_parts"
+  IFS='|' read -r next_scheme next_host next_port _ <<<"$next_parts"
+  [[ "$next_host" == "$original_host" ]] || return 1
+  if [[ "$next_scheme" == "$current_scheme" ]]; then
+    [[ "$next_port" == "$current_port" ]]
+    return
+  fi
+  [[ "$current_scheme" == "http" && "$next_scheme" == "https" ]]
+}
+
+download_with_curl() {
+  local original="$1" current="$1" out="$2" secret="$3" meta status next redirects=0
+  while true; do
+    if ! meta="$(curl --proto "=http,https" --tlsv1.2 -f --retry 3 --connect-timeout 10 --max-time 300 \
+      -H "X-Node-Secret: ${secret}" -o "$out" -w $'%{http_code}\n%{redirect_url}' "$current")"; then
+      return 1
+    fi
+    status="${meta%%$'\n'*}"
+    next="${meta#*$'\n'}"
+    [[ "$status" =~ ^2[0-9][0-9]$ ]] && return 0
+    case "$status" in
+      301|302|303|307|308) ;;
+      *) return 1 ;;
+    esac
+    if ((redirects >= 5)); then
+      msg redirect_limit >&2
+      return 1
+    fi
+    if ! download_redirect_allowed "$original" "$current" "$next"; then
+      msg unsafe_redirect "$next" >&2
+      return 1
+    fi
+    current="$next"
+    redirects=$((redirects + 1))
+  done
+}
+
 download_file() {
   local url="$1" out="$2" secret="$3"
   if need_cmd curl; then
-    curl -fL --retry 3 --connect-timeout 10 --max-time 300 -H "X-Node-Secret: ${secret}" -o "$out" "$url"
+    download_with_curl "$url" "$out" "$secret"
   else
     msg missing_download_tool >&2
     exit 1
@@ -291,7 +379,9 @@ main() {
   trap 'rm -f "$tmp"' EXIT
   download_file "${url}" "${tmp}" "${secret}"
   chmod +x "${tmp}"
-  node_version="$("${tmp}" --version | head -n1 | tr -d '\r')"
+  node_version="$("${tmp}" --version)"
+  node_version="${node_version//$'\r'/}"
+  valid_node_version "$node_version" || { msg invalid_node_version "$node_version" >&2; exit 1; }
   release_dir="${RELEASES_DIR}/${node_version}"
   as_root mkdir -p "${release_dir}"
   as_root install -m 0755 "${tmp}" "${release_dir}/${APP}"

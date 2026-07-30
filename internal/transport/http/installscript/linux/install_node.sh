@@ -19,6 +19,16 @@ RUN_USER="${RUN_USER:-ithiltir}"
 RUN_GROUP="${RUN_GROUP:-ithiltir}"
 
 SERVICE_FILE="/etc/systemd/system/${APP}.service"
+OPENRC_SERVICE_FILE="/etc/init.d/${APP}"
+OPENRC_RUN_FILE="${INSTALL_DIR}/run_node_openrc.sh"
+SERVICE_MANAGER_MODE="${SERVICE_MANAGER_MODE:-auto}"
+SERVICE_MANAGER=""
+OS_ID=""
+SYSTEMD_CONNECTIONS_CACHE_ENABLED="0"
+MANUAL_RUN_COMMAND=""
+INSTALL_TMP=""
+INSTALL_STAGE=""
+INSTALL_RELEASE=""
 
 TMPFILES_FILE="/etc/tmpfiles.d/ithiltir-node.conf"
 CACHE_DIR="/run/ithiltir-node"
@@ -36,10 +46,20 @@ CONNECTIONS_TIMER_NAME="ithiltir-node-connections-cache.timer"
 CONNECTIONS_SERVICE_FILE="/etc/systemd/system/${CONNECTIONS_SERVICE_NAME}"
 CONNECTIONS_TIMER_FILE="/etc/systemd/system/${CONNECTIONS_TIMER_NAME}"
 
-COLLECTOR="${INSTALL_DIR}/collect_thinpool.sh"
-CRON_FILE="/etc/cron.d/ithiltir-node-thinpool"
+THINPOOL_HELPER_FILE="${INSTALL_DIR}/collect_thinpool.sh"
+THINPOOL_SERVICE_NAME="ithiltir-node-thinpool-cache.service"
+THINPOOL_TIMER_NAME="ithiltir-node-thinpool-cache.timer"
+THINPOOL_SERVICE_FILE="/etc/systemd/system/${THINPOOL_SERVICE_NAME}"
+THINPOOL_TIMER_FILE="/etc/systemd/system/${THINPOOL_TIMER_NAME}"
+LEGACY_THINPOOL_CRON_FILE="/etc/cron.d/ithiltir-node-thinpool"
+OPENRC_CRONTAB="/etc/crontabs/root"
+OPENRC_CRON_MARKER="# ithiltir-node-managed"
 
 need_cmd() { command -v "$1" >/dev/null 2>&1; }
+
+systemd_available() {
+  need_cmd systemctl && [[ -d /run/systemd/system ]]
+}
 
 is_zh() {
   case "$APP_LANGUAGE" in
@@ -56,31 +76,47 @@ msg() {
       root_required) echo "此安装脚本需要 root 权限，且当前系统未安装 sudo。请使用 root 用户运行。" ;;
       unsupported_arch) echo "仅支持 amd64/arm64，当前 uname -m=$1" ;;
       missing_download_tool) echo "缺少下载工具：请安装 curl 或 wget" ;;
+      unsupported_service_manager) echo "未检测到受支持的服务管理器。使用 --service-manager=none 只安装文件并手动运行。" ;;
+      invalid_service_manager) echo "无效的服务管理器：$1（支持 auto/systemd/openrc/none）" ;;
+      missing_service_manager) echo "请求的服务管理器不可用：$1" ;;
+      openrc_unverified) echo "[Warn] 检测到非 Alpine 的 OpenRC；将尽力安装，但不属于官方验证环境。" ;;
+      manual_mode) echo "[Warn] 手动模式：不会注册、启动或设置开机自启服务。" ;;
+      incompatible_binary) echo "下载的节点二进制无法在当前系统运行；Alpine 需要静态或 musl 兼容产物。" ;;
+      invalid_node_version) echo "下载的节点返回了非法版本号：$1" ;;
+      unsafe_redirect) echo "拒绝不安全的节点下载重定向：$1" ;;
+      redirect_limit) echo "节点下载重定向超过 5 次。" ;;
+      stop_service_failed) echo "停止已安装的节点服务失败：$1" ;;
       missing_user_tool) echo "缺少 useradd/adduser，无法创建用户 $1" ;;
       enable_time_sync) echo "[+] 正在启用系统时间同步（NTP，非致命）" ;;
       time_sync_enabled) echo "[+] 系统时间同步已启用" ;;
       time_sync_started) echo "[+] 系统时间同步服务已启动：$1" ;;
       time_sync_failed) echo "[Warn] 无法自动启用系统时间同步；请手动检查 NTP/chrony/systemd-timesyncd" ;;
-      no_cron_package_manager) echo "未找到支持的包管理器（apt/dnf/yum/pacman/apk），无法自动安装 cron。" ;;
       smartctl_installed) echo "[+] smartctl 已安装" ;;
       install_smartmontools) echo "[+] 正在安装 smartmontools 以启用 SMART 缓存（非致命）" ;;
       apt_update_smart_failed) echo "[Warn] apt-get update 失败，未安装 smartctl" ;;
       smartmontools_failed) echo "[Warn] smartmontools 安装失败，节点安装继续" ;;
       smart_package_manager_unsupported) echo "[Warn] 不支持的包管理器，未安装 smartctl" ;;
-      systemctl_missing_smart) echo "[Warn] 未找到 systemctl，跳过 SMART 缓存 timer" ;;
       enable_smart_failed) echo "[Warn] 无法启用 $1，节点服务安装继续" ;;
-      systemctl_missing_connections) echo "[Warn] 未找到 systemctl，跳过连接数缓存 timer" ;;
       enable_connections_failed) echo "[Warn] 无法启用 $1，节点服务安装继续" ;;
       secret_required) echo "Secret 不能为空。" ;;
-      lvm_detected) echo "[+] 检测到 LVM/LVM-thin，正在安装 cron 并启用 thinpool 缓存" ;;
-      lvm_missing) echo "[-] 未检测到 LVM，跳过 cron/collector" ;;
+      lvm_detected) echo "[+] 检测到 LVM/LVM-thin，正在启用 thinpool 缓存刷新" ;;
+      lvm_missing) echo "[-] 未检测到 LVM，跳过 thinpool 缓存刷新" ;;
+      thinpool_timer_failed) echo "[Warn] 无法启用 LVM thinpool timer；旧 cron（如存在）保持不变" ;;
+      thinpool_initial_failed) echo "[Warn] LVM thinpool timer 首次采集失败；已禁用 timer，旧 cron（如存在）保持不变" ;;
+      thinpool_cron_remove_failed) echo "[Warn] 无法删除旧 LVM cron；已禁用 timer 以避免重复调度" ;;
+      thinpool_cron_migrated) echo "[+] 已将 LVM thinpool 缓存从旧 cron 迁移到 systemd timer" ;;
       connections_helper_installed) echo "[+] 连接数缓存 helper 已安装，可完整统计主机/容器网络命名空间 TCP/UDP 连接数" ;;
       connections_helper_failed) echo "[Warn] 完整统计主机/容器网络命名空间 TCP/UDP 连接数需要本机 C 编译器来构建 root 侧 helper；helper 配置失败，节点将使用自带连接数统计，可能缺失容器连接数据" ;;
       connections_helper_solution) echo "       请通过系统包管理器安装 cc/gcc/clang 后重新运行此安装脚本，以启用连接数缓存 helper" ;;
-      done) echo "[OK] 完成：${APP}.service 已运行并设置为开机自启" ;;
-      status) echo "     状态：systemctl status ${APP}.service" ;;
-      logs) echo "     日志：journalctl -u ${APP}.service -f" ;;
+      done) echo "[OK] 完成：${APP} 已运行并设置为开机自启（${SERVICE_MANAGER}）" ;;
+      manual_done) echo "[OK] 文件安装完成。手动运行：${MANUAL_RUN_COMMAND}" ;;
+      status_systemd) echo "     状态：systemctl status ${APP}.service" ;;
+      logs_systemd) echo "     日志：journalctl -u ${APP}.service -f" ;;
+      status_openrc) echo "     状态：rc-service ${APP} status" ;;
+      logs_openrc) echo "     日志：logread -f（取决于系统日志服务）" ;;
       smart_timer) echo "     SMART 缓存 timer：${SMART_TIMER_NAME}" ;;
+      smart_cron) echo "     SMART 缓存：BusyBox cron，每 5 分钟" ;;
+      lvm_cron) echo "     LVM 缓存：BusyBox cron，每分钟" ;;
       connections_timer) echo "     连接数缓存 timer：${CONNECTIONS_TIMER_NAME}" ;;
       connections_timer_skipped) echo "     连接数缓存 timer：已跳过（正在使用节点自带统计，容器连接数据可能不完整）" ;;
       lvm_cache) echo "     LVM 缓存：${CACHE_FILE}" ;;
@@ -91,33 +127,49 @@ msg() {
 
   case "$key" in
     root_required) echo "This installer requires root privileges, and sudo is not installed. Please run as root." ;;
-    unsupported_arch) echo "Only amd64/arm64 are supported; current uname -m=$1" ;;
+      unsupported_arch) echo "Only amd64/arm64 are supported; current uname -m=$1" ;;
     missing_download_tool) echo "Missing download tool: please install curl or wget" ;;
-    missing_user_tool) echo "Missing useradd/adduser; cannot create user $1" ;;
+    unsupported_service_manager) echo "No supported service manager was detected. Use --service-manager=none to install files for manual operation." ;;
+    invalid_service_manager) echo "Invalid service manager: $1 (supported: auto/systemd/openrc/none)" ;;
+    missing_service_manager) echo "Requested service manager is unavailable: $1" ;;
+    openrc_unverified) echo "[Warn] OpenRC was detected outside Alpine; installation is best effort and is not an officially verified environment." ;;
+    manual_mode) echo "[Warn] Manual mode: no service is registered, started, or enabled on boot." ;;
+    incompatible_binary) echo "The downloaded node binary cannot run on this system; Alpine requires a static or musl-compatible artifact." ;;
+    invalid_node_version) echo "Downloaded node returned an invalid version: $1" ;;
+    unsafe_redirect) echo "Refusing unsafe node download redirect: $1" ;;
+    redirect_limit) echo "Node download exceeded 5 redirects." ;;
+    stop_service_failed) echo "Failed to stop the installed node service: $1" ;;
+      missing_user_tool) echo "Missing useradd/adduser; cannot create user $1" ;;
     enable_time_sync) echo "[+] enabling system time sync (NTP; non-fatal)" ;;
     time_sync_enabled) echo "[+] system time sync is enabled" ;;
     time_sync_started) echo "[+] system time sync service started: $1" ;;
     time_sync_failed) echo "[Warn] could not enable system time sync automatically; please check NTP/chrony/systemd-timesyncd manually" ;;
-    no_cron_package_manager) echo "No supported package manager found (apt/dnf/yum/pacman/apk); cannot auto-install cron." ;;
     smartctl_installed) echo "[+] smartctl already installed" ;;
     install_smartmontools) echo "[+] installing smartmontools for SMART cache (non-fatal)" ;;
     apt_update_smart_failed) echo "[Warn] apt-get update failed; smartctl not installed" ;;
     smartmontools_failed) echo "[Warn] smartmontools install failed; node install continues" ;;
     smart_package_manager_unsupported) echo "[Warn] unsupported package manager; smartctl not installed" ;;
-    systemctl_missing_smart) echo "[Warn] systemctl not found; skipping SMART cache timer" ;;
     enable_smart_failed) echo "[Warn] could not enable $1; node service install continues" ;;
-    systemctl_missing_connections) echo "[Warn] systemctl not found; skipping connections cache timer" ;;
     enable_connections_failed) echo "[Warn] could not enable $1; node service install continues" ;;
     secret_required) echo "Secret is required." ;;
-    lvm_detected) echo "[+] LVM/LVM-thin detected; installing cron and enabling thinpool cache" ;;
-    lvm_missing) echo "[-] No LVM detected; skipping cron/collector" ;;
+    lvm_detected) echo "[+] LVM/LVM-thin detected; enabling thinpool cache refresh" ;;
+    lvm_missing) echo "[-] No LVM detected; skipping thinpool cache refresh" ;;
+    thinpool_timer_failed) echo "[Warn] Could not enable the LVM thinpool timer; the legacy cron entry, if present, was kept" ;;
+    thinpool_initial_failed) echo "[Warn] The LVM thinpool timer's initial collection failed; the timer was disabled and the legacy cron entry, if present, was kept" ;;
+    thinpool_cron_remove_failed) echo "[Warn] Could not remove the legacy LVM cron entry; the timer was disabled to avoid duplicate scheduling" ;;
+    thinpool_cron_migrated) echo "[+] Migrated LVM thinpool cache refresh from legacy cron to a systemd timer" ;;
     connections_helper_installed) echo "[+] Connections cache helper installed for full host/container network-namespace TCP/UDP counts" ;;
     connections_helper_failed) echo "[Warn] Full host/container network-namespace TCP/UDP counting requires a local C compiler for the root-side helper; helper setup failed, so the node will use its built-in connection counting, which may miss container connections" ;;
     connections_helper_solution) echo "       Install cc/gcc/clang with your system package manager and rerun this installer to enable the connections cache helper" ;;
-    done) echo "[OK] Done: ${APP}.service is running and enabled on boot" ;;
-    status) echo "     Status: systemctl status ${APP}.service" ;;
-    logs) echo "     Logs:   journalctl -u ${APP}.service -f" ;;
+    done) echo "[OK] Done: ${APP} is running and enabled on boot (${SERVICE_MANAGER})" ;;
+    manual_done) echo "[OK] Files installed. Run manually: ${MANUAL_RUN_COMMAND}" ;;
+    status_systemd) echo "     Status: systemctl status ${APP}.service" ;;
+    logs_systemd) echo "     Logs:   journalctl -u ${APP}.service -f" ;;
+    status_openrc) echo "     Status: rc-service ${APP} status" ;;
+    logs_openrc) echo "     Logs:   logread -f (when provided by the system logger)" ;;
     smart_timer) echo "     SMART cache timer: ${SMART_TIMER_NAME}" ;;
+    smart_cron) echo "     SMART cache: BusyBox cron, every 5 minutes" ;;
+    lvm_cron) echo "     LVM cache: BusyBox cron, every minute" ;;
     connections_timer) echo "     Connections cache timer: ${CONNECTIONS_TIMER_NAME}" ;;
     connections_timer_skipped) echo "     Connections cache timer: skipped (node built-in counting active; container connections may be incomplete)" ;;
     lvm_cache) echo "     LVM cache: ${CACHE_FILE}" ;;
@@ -139,7 +191,7 @@ as_root() {
 usage() {
   if is_zh; then
     cat >&2 <<EOF
-用法：sudo bash $0 <dash_ip> [dash_port] <secret> [interval_seconds] [--net iface1,iface2]
+用法：sudo bash $0 <dash_ip> [dash_port] <secret> [interval_seconds] [--net iface1,iface2] [--service-manager=auto|systemd|openrc|none]
 
 示例：
   sudo bash $0 10.0.0.2 8080 mysecret
@@ -148,7 +200,7 @@ usage() {
 EOF
   else
     cat >&2 <<EOF
-Usage:  sudo bash $0 <dash_ip> [dash_port] <secret> [interval_seconds] [--net iface1,iface2]
+Usage:  sudo bash $0 <dash_ip> [dash_port] <secret> [interval_seconds] [--net iface1,iface2] [--service-manager=auto|systemd|openrc|none]
 
 Examples:
   sudo bash $0 10.0.0.2 8080 mysecret
@@ -169,12 +221,241 @@ detect_arch() {
   esac
 }
 
+detect_os() {
+  OS_ID=""
+  if [[ -r /etc/os-release ]]; then
+    OS_ID="$(. /etc/os-release && printf '%s' "${ID:-}")"
+  fi
+}
+
+detect_service_manager() {
+  if systemd_available; then
+    echo systemd
+    return 0
+  fi
+  if need_cmd rc-service && need_cmd rc-update && need_cmd supervise-daemon; then
+    echo openrc
+    return 0
+  fi
+  echo none
+}
+
+select_service_manager() {
+  local detected
+  detected="$(detect_service_manager)"
+  case "${SERVICE_MANAGER_MODE}" in
+    auto)
+      [[ "$detected" != "none" ]] || { msg unsupported_service_manager >&2; exit 1; }
+      SERVICE_MANAGER="$detected"
+      ;;
+    systemd|openrc)
+      [[ "$detected" == "$SERVICE_MANAGER_MODE" ]] || { msg missing_service_manager "$SERVICE_MANAGER_MODE" >&2; exit 1; }
+      SERVICE_MANAGER="$SERVICE_MANAGER_MODE"
+      ;;
+    none)
+      SERVICE_MANAGER="none"
+      ;;
+    *)
+      msg invalid_service_manager "$SERVICE_MANAGER_MODE" >&2
+      exit 1
+      ;;
+  esac
+
+  if [[ "$SERVICE_MANAGER" == "openrc" && "$OS_ID" != "alpine" ]]; then
+    msg openrc_unverified >&2
+  fi
+  if [[ "$SERVICE_MANAGER" == "none" ]]; then
+    msg manual_mode >&2
+  fi
+}
+
+ensure_process_control() {
+  need_cmd pgrep || { echo "pgrep is required to detect and stop an existing ${APP} process" >&2; exit 1; }
+}
+
+stop_manual_processes() {
+  local -a pids=()
+  mapfile -t pids < <(pgrep -f -- "$BIN_PATH" 2>/dev/null || true)
+  ((${#pids[@]} > 0)) || return 0
+
+  as_root kill -TERM "${pids[@]}" >/dev/null 2>&1 || true
+  for _ in {1..50}; do
+    mapfile -t pids < <(pgrep -f -- "$BIN_PATH" 2>/dev/null || true)
+    ((${#pids[@]} == 0)) && return 0
+    sleep 0.1
+  done
+  as_root kill -KILL "${pids[@]}" >/dev/null 2>&1 || true
+  sleep 0.1
+  if pgrep -f -- "$BIN_PATH" >/dev/null 2>&1; then
+    echo "Failed to stop the existing ${APP} process." >&2
+    return 1
+  fi
+}
+
+ensure_alpine_runtime() {
+  [[ "$OS_ID" == "alpine" ]] || return 0
+  [[ "$SERVICE_MANAGER" != "none" ]] || return 0
+  need_cmd apk || { echo "apk is required on Alpine" >&2; exit 1; }
+  as_root apk add --no-cache bash ca-certificates curl coreutils
+}
+
+valid_node_version() {
+  local version="$1"
+  ((${#version} <= 128)) &&
+    [[ "$version" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?(\+[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$ ]]
+}
+
+validate_runtime_identity() {
+  [[ "$RUN_USER" =~ ^[a-z_][a-z0-9_-]*$ ]] || { echo "Invalid RUN_USER: $RUN_USER" >&2; exit 1; }
+  [[ "$RUN_GROUP" =~ ^[a-z_][a-z0-9_-]*$ ]] || { echo "Invalid RUN_GROUP: $RUN_GROUP" >&2; exit 1; }
+}
+
+http_url_parts() {
+  local url="$1" scheme rest authority host port
+  [[ "$url" != *$'\r'* && "$url" != *$'\n'* ]] || return 1
+  if [[ "$url" =~ ^([Hh][Tt][Tt][Pp][Ss]?)://(.*)$ ]]; then
+    scheme="$(printf '%s' "${BASH_REMATCH[1]}" | tr '[:upper:]' '[:lower:]')"
+    rest="${BASH_REMATCH[2]}"
+  else
+    return 1
+  fi
+  authority="${rest%%[/?#]*}"
+  [[ -n "$authority" && "$authority" != *"@"* ]] || return 1
+  if [[ "$authority" =~ ^(\[[^]]+\])(:([0-9]+))?$ ]]; then
+    host="${BASH_REMATCH[1]}"
+    port="${BASH_REMATCH[3]}"
+  elif [[ "$authority" =~ ^([^:]+)(:([0-9]+))?$ ]]; then
+    host="${BASH_REMATCH[1]}"
+    port="${BASH_REMATCH[3]}"
+  else
+    return 1
+  fi
+  host="$(printf '%s' "$host" | tr '[:upper:]' '[:lower:]')"
+  [[ -n "$host" ]] || return 1
+  if [[ -n "$port" ]]; then
+    [[ ${#port} -le 5 ]] && ((10#$port >= 1 && 10#$port <= 65535)) || return 1
+  elif [[ "$scheme" == "https" ]]; then
+    port="443"
+  else
+    port="80"
+  fi
+  printf '%s|%s|%s|%s\n' "$scheme" "$host" "$port" "$authority"
+}
+
+resolve_redirect_url() {
+  local current="$1" location="$2" parts scheme authority base path dir
+  parts="$(http_url_parts "$current")" || return 1
+  IFS='|' read -r scheme _ _ authority <<<"$parts"
+  case "$location" in
+    [Hh][Tt][Tt][Pp]://* | [Hh][Tt][Tt][Pp][Ss]://*) printf '%s\n' "$location" ;;
+    //*) printf '%s:%s\n' "$scheme" "$location" ;;
+    /*) printf '%s://%s%s\n' "$scheme" "$authority" "$location" ;;
+    \?*)
+      base="${current%%#*}"
+      base="${base%%\?*}"
+      printf '%s%s\n' "$base" "$location"
+      ;;
+    \#*)
+      base="${current%%#*}"
+      printf '%s%s\n' "$base" "$location"
+      ;;
+    *)
+      base="${current%%#*}"
+      base="${base%%\?*}"
+      path="${base#"${scheme}://${authority}"}"
+      [[ "$path" == /* ]] || path="/$path"
+      dir="${path%/*}"
+      printf '%s://%s%s/%s\n' "$scheme" "$authority" "$dir" "$location"
+      ;;
+  esac
+}
+
+download_redirect_allowed() {
+  local original="$1" current="$2" next="$3" original_parts current_parts next_parts
+  local original_host current_scheme current_port next_scheme next_host next_port
+  original_parts="$(http_url_parts "$original")" || return 1
+  current_parts="$(http_url_parts "$current")" || return 1
+  next_parts="$(http_url_parts "$next")" || return 1
+  IFS='|' read -r _ original_host _ _ <<<"$original_parts"
+  IFS='|' read -r current_scheme _ current_port _ <<<"$current_parts"
+  IFS='|' read -r next_scheme next_host next_port _ <<<"$next_parts"
+  [[ "$next_host" == "$original_host" ]] || return 1
+  if [[ "$next_scheme" == "$current_scheme" ]]; then
+    [[ "$next_port" == "$current_port" ]]
+    return
+  fi
+  [[ "$current_scheme" == "http" && "$next_scheme" == "https" ]]
+}
+
+download_with_curl() {
+  local original="$1" current="$1" out="$2" secret="$3" meta status next redirects=0
+  while true; do
+    if ! meta="$(curl --proto "=http,https" --tlsv1.2 -f --retry 3 --connect-timeout 10 --max-time 300 \
+      -H "X-Node-Secret: ${secret}" -o "$out" -w $'%{http_code}\n%{redirect_url}' "$current")"; then
+      return 1
+    fi
+    status="${meta%%$'\n'*}"
+    next="${meta#*$'\n'}"
+    [[ "$status" =~ ^2[0-9][0-9]$ ]] && return 0
+    case "$status" in
+      301|302|303|307|308) ;;
+      *) return 1 ;;
+    esac
+    if ((redirects >= 5)); then
+      msg redirect_limit >&2
+      return 1
+    fi
+    if ! download_redirect_allowed "$original" "$current" "$next"; then
+      msg unsafe_redirect "$next" >&2
+      return 1
+    fi
+    current="$next"
+    redirects=$((redirects + 1))
+  done
+}
+
+download_with_wget() {
+  local original="$1" current="$1" out="$2" secret="$3" headers status location next redirects=0
+  headers="$(mktemp)" || return
+  while true; do
+    : >"$headers"
+    if wget --server-response --max-redirect=0 --tries=3 --timeout=300 \
+      --header="X-Node-Secret: ${secret}" -O "$out" "$current" 2>"$headers"; then
+      rm -f "$headers"
+      return 0
+    fi
+    status="$(sed -nE 's/^[[:space:]]*HTTP\/[0-9.]+[[:space:]]+([0-9]{3}).*/\1/p' "$headers" | tail -n1)"
+    case "$status" in
+      301|302|303|307|308) ;;
+      *) rm -f "$headers"; return 1 ;;
+    esac
+    location="$(awk 'match(tolower($0), /^[[:space:]]+location:[[:space:]]*/) { value=substr($0, RLENGTH+1); sub(/\r$/, "", value) } END { print value }' "$headers")"
+    next="$(resolve_redirect_url "$current" "$location")" || {
+      rm -f "$headers"
+      msg unsafe_redirect "$location" >&2
+      return 1
+    }
+    if ((redirects >= 5)); then
+      rm -f "$headers"
+      msg redirect_limit >&2
+      return 1
+    fi
+    if ! download_redirect_allowed "$original" "$current" "$next"; then
+      rm -f "$headers"
+      msg unsafe_redirect "$next" >&2
+      return 1
+    fi
+    current="$next"
+    redirects=$((redirects + 1))
+  done
+}
+
 download_file() {
   local url="$1" out="$2" secret="$3"
   if need_cmd curl; then
-    curl -fL --retry 3 --connect-timeout 10 --max-time 300 -H "X-Node-Secret: ${secret}" -o "$out" "$url"
+    download_with_curl "$url" "$out" "$secret"
   elif need_cmd wget; then
-    wget --header="X-Node-Secret: ${secret}" -O "$out" "$url"
+    download_with_wget "$url" "$out" "$secret"
   else
     msg missing_download_tool >&2
     exit 1
@@ -183,6 +464,13 @@ download_file() {
 
 ensure_user() {
   if id -u "${RUN_USER}" >/dev/null 2>&1; then
+    return 0
+  fi
+  if [[ "$OS_ID" == "alpine" ]]; then
+    if ! grep -qE "^${RUN_GROUP}:" /etc/group; then
+      as_root addgroup -S "${RUN_GROUP}"
+    fi
+    as_root adduser -S -D -H -s /sbin/nologin -G "${RUN_GROUP}" "${RUN_USER}"
     return 0
   fi
   if need_cmd useradd; then
@@ -203,11 +491,22 @@ enable_time_sync() {
     return 0
   fi
 
-  if need_cmd systemctl; then
+  if systemd_available; then
     local unit
     for unit in systemd-timesyncd.service chronyd.service ntpd.service ntp.service; do
       if as_root systemctl enable --now "$unit" >/dev/null 2>&1; then
         msg time_sync_started "${unit}"
+        return 0
+      fi
+    done
+  fi
+
+  if [[ "$SERVICE_MANAGER" == "openrc" ]]; then
+    local service
+    for service in chronyd ntpd; do
+      if as_root rc-service "$service" start >/dev/null 2>&1; then
+        as_root rc-update add "$service" default >/dev/null 2>&1 || true
+        msg time_sync_started "${service}"
         return 0
       fi
     done
@@ -227,36 +526,6 @@ has_lvm() {
     fi
   fi
   return 1
-}
-
-install_cron() {
-  local svc=""
-  if need_cmd apt-get; then
-    as_root apt-get update -y
-    as_root apt-get install -y cron
-    svc="cron"
-  elif need_cmd dnf; then
-    as_root dnf install -y cronie
-    svc="crond"
-  elif need_cmd yum; then
-    as_root yum install -y cronie
-    svc="crond"
-  elif need_cmd pacman; then
-    as_root pacman -Sy --noconfirm cronie
-    svc="cronie"
-  elif need_cmd apk; then
-    as_root apk add --no-cache dcron
-    svc="dcron"
-  else
-    msg no_cron_package_manager >&2
-    return 1
-  fi
-
-  if [[ -n "$svc" ]]; then
-    as_root systemctl enable --now "$svc" >/dev/null 2>&1 || true
-    as_root systemctl enable --now crond >/dev/null 2>&1 || true
-    as_root systemctl enable --now cron  >/dev/null 2>&1 || true
-  fi
 }
 
 install_smartmontools() {
@@ -285,14 +554,25 @@ install_smartmontools() {
 }
 
 write_tmpfiles() {
+  as_root install -d -m 0750 -o root -g "${RUN_GROUP}" "${CACHE_DIR}"
+  if [[ "$SERVICE_MANAGER" != "systemd" ]]; then
+    as_root rm -f "${TMPFILES_FILE}" >/dev/null 2>&1 || true
+    return 0
+  fi
   as_root bash -c "cat > '${TMPFILES_FILE}' <<'EOF'
 d /run/ithiltir-node 0750 root ${RUN_GROUP} -
 EOF"
-  as_root systemd-tmpfiles --create >/dev/null 2>&1 || true
+  as_root systemd-tmpfiles --create
 }
 
 systemd_quote_arg() {
   local s="$1"
+  if [[ "$s" == *$'\n'* || "$s" == *$'\r'* ]]; then
+    echo "Node service arguments must not contain line breaks" >&2
+    return 1
+  fi
+  s="${s//%/%%}"
+  s="${s//\$/\$\$}"
   s="${s//\\/\\\\}"
   s="${s//\"/\\\"}"
   printf "\"%s\"" "$s"
@@ -301,9 +581,10 @@ systemd_quote_arg() {
 build_execstart_line() {
   local -a args=("$@")
   local out=""
-  local a
+  local a quoted
   for a in "${args[@]}"; do
-    out+=$(systemd_quote_arg "$a")
+    quoted="$(systemd_quote_arg "$a")" || return 1
+    out+="$quoted"
     out+=" "
   done
   echo "${out% }"
@@ -336,7 +617,7 @@ configure_report() {
   as_root "${BIN_PATH}" report install "$url" "$secret" "$@"
 }
 
-write_service_push() {
+write_systemd_service() {
   local interval="${1:-}"
   shift 1 || true
 
@@ -350,9 +631,11 @@ write_service_push() {
   fi
 
   local exec_line
-  exec_line="$(build_execstart_line "${exec_args[@]}")"
+  exec_line="$(build_execstart_line "${exec_args[@]}")" || return 1
+	local tmp
+	tmp="$(mktemp)"
 
-  as_root bash -c "cat > '${SERVICE_FILE}' <<EOF
+  cat >"$tmp" <<EOF
 [Unit]
 Description=Ithiltir Node (system metrics agent)
 After=network-online.target
@@ -378,10 +661,160 @@ ReadWritePaths=${DATA_DIR}
 
 [Install]
 WantedBy=multi-user.target
-EOF"
+EOF
+  as_root install -m 0644 "$tmp" "$SERVICE_FILE"
+  rm -f "$tmp"
 }
 
-write_collector() {
+shell_quote_arg() {
+  local s="$1"
+  s="${s//\'/\'\\\'\'}"
+  printf "'%s'" "$s"
+}
+
+build_shell_args() {
+  local out="" arg
+  for arg in "$@"; do
+    [[ -z "$out" ]] || out+=" "
+    out+="$(shell_quote_arg "$arg")"
+  done
+  printf '%s' "$out"
+}
+
+write_openrc_service() {
+  local interval="${1:-}"
+  shift 1 || true
+
+  local -a args=("push")
+  [[ -z "$interval" ]] || args+=("$interval")
+  (($# == 0)) || args+=("$@")
+
+  local run_args tmp runner
+  run_args="$(build_shell_args "${BIN_PATH}" "${args[@]}")"
+  runner="$(mktemp)"
+  cat >"$runner" <<EOF
+#!/bin/sh
+exec ${run_args}
+EOF
+  as_root install -m 0755 "$runner" "$OPENRC_RUN_FILE"
+  rm -f "$runner"
+
+  tmp="$(mktemp)"
+  cat >"$tmp" <<EOF
+#!/sbin/openrc-run
+
+name="Ithiltir Node"
+description="Ithiltir system metrics agent"
+command="${OPENRC_RUN_FILE}"
+command_user="${RUN_USER}:${RUN_GROUP}"
+directory="${DATA_DIR}"
+supervisor="supervise-daemon"
+respawn_delay=5
+respawn_max=10
+respawn_period=60
+
+depend() {
+  need net
+}
+
+start_pre() {
+  checkpath --directory --mode 0750 --owner ${RUN_USER}:${RUN_GROUP} ${DATA_DIR}
+  checkpath --directory --mode 0750 --owner root:${RUN_GROUP} ${CACHE_DIR}
+}
+EOF
+  as_root install -m 0755 "$tmp" "$OPENRC_SERVICE_FILE"
+  rm -f "$tmp"
+}
+
+service_install() {
+  case "$SERVICE_MANAGER" in
+    systemd) write_systemd_service "$@" ;;
+    openrc) write_openrc_service "$@" ;;
+    none)
+      local interval="${1:-}"
+      shift 1 || true
+      local -a args=("${BIN_PATH}" "push")
+      [[ -z "$interval" ]] || args+=("$interval")
+      (($# == 0)) || args+=("$@")
+      MANUAL_RUN_COMMAND="cd $(shell_quote_arg "$DATA_DIR") && $(build_shell_args "${args[@]}")"
+      ;;
+  esac
+}
+
+service_enable() {
+  case "$SERVICE_MANAGER" in
+    systemd) as_root systemctl enable "${APP}.service" ;;
+    openrc) as_root rc-update add "${APP}" default ;;
+    none) return 0 ;;
+  esac
+}
+
+service_start() {
+  case "$SERVICE_MANAGER" in
+    systemd) as_root systemctl start "${APP}.service" ;;
+    openrc) as_root rc-service "${APP}" start ;;
+    none) return 0 ;;
+  esac
+}
+
+service_status() {
+  case "$SERVICE_MANAGER" in
+    systemd)
+      msg status_systemd
+      msg logs_systemd
+      ;;
+    openrc)
+      msg status_openrc
+      msg logs_openrc
+      ;;
+    none) msg manual_done ;;
+  esac
+}
+
+stop_installed_services() {
+  if systemd_available && [[ -f "$SERVICE_FILE" ]]; then
+    if ! as_root systemctl stop "${APP}.service"; then
+      msg stop_service_failed systemd >&2
+      return 1
+    fi
+  fi
+  if need_cmd rc-service && [[ -x "$OPENRC_SERVICE_FILE" ]]; then
+    if ! as_root rc-service "$APP" stop; then
+      msg stop_service_failed openrc >&2
+      return 1
+    fi
+  fi
+  stop_manual_processes
+}
+
+set_node_ownership() {
+  # The running agent owns this tree because its self-update protocol creates
+  # and switches releases without a privileged helper.
+  as_root chown -R "${RUN_USER}:${RUN_GROUP}" "$DATA_DIR"
+}
+
+switch_node_current() {
+  local target="$1" link
+  [[ ! -e "$CURRENT_DIR" || -L "$CURRENT_DIR" ]] || return 1
+  link="${DATA_DIR}/.current.$$.$RANDOM"
+  as_root rm -f "$link" || return
+  as_root ln -s "$target" "$link" || return
+  as_root mv -Tf "$link" "$CURRENT_DIR" || {
+    as_root rm -f "$link"
+    return 1
+  }
+}
+
+finish_node_install() {
+  local status=$?
+  trap - EXIT
+  set +e
+  [[ -z "$INSTALL_TMP" ]] || rm -f "$INSTALL_TMP"
+  [[ -z "$INSTALL_STAGE" ]] || as_root rm -rf "$INSTALL_STAGE"
+  exit "$status"
+}
+
+write_thinpool_cache_helper() {
   local tmp
   tmp="$(mktemp)"
   cat > "$tmp" <<'EOF'
@@ -469,17 +902,78 @@ echo ']}' >> "$TMP"
 install -m 0640 -o root -g "$RUN_GROUP" "$TMP" "$OUT_FILE" 2>/dev/null || install -m 0640 "$TMP" "$OUT_FILE"
 EOF
   sed -i "s/__RUN_GROUP__/${RUN_GROUP}/g" "$tmp"
-  as_root install -m 0755 "$tmp" "${COLLECTOR}"
+  as_root install -m 0755 "$tmp" "${THINPOOL_HELPER_FILE}"
   rm -f "$tmp"
 }
 
-write_cron() {
-  as_root bash -c "cat > '${CRON_FILE}' <<'EOF'
-SHELL=/bin/bash
-PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-* * * * * root /opt/node/collect_thinpool.sh >/dev/null 2>&1
+write_thinpool_cache_service() {
+  as_root bash -c "cat > '${THINPOOL_SERVICE_FILE}' <<EOF
+[Unit]
+Description=Ithiltir node LVM thinpool cache refresh
+
+[Service]
+Type=oneshot
+User=root
+Group=${RUN_GROUP}
+UMask=0027
+ExecStart=${THINPOOL_HELPER_FILE}
 EOF"
-  as_root chmod 0644 "${CRON_FILE}"
+}
+
+write_thinpool_cache_timer() {
+  as_root bash -c "cat > '${THINPOOL_TIMER_FILE}' <<EOF
+[Unit]
+Description=Refresh Ithiltir node LVM thinpool cache
+
+[Timer]
+OnBootSec=1min
+OnUnitActiveSec=1min
+AccuracySec=10s
+Unit=${THINPOOL_SERVICE_NAME}
+
+[Install]
+WantedBy=timers.target
+EOF"
+}
+
+enable_thinpool_cache_timer() {
+  local legacy_cron=0
+  if [[ -e "$LEGACY_THINPOOL_CRON_FILE" || -L "$LEGACY_THINPOOL_CRON_FILE" ]]; then
+    legacy_cron=1
+  fi
+
+  if ! as_root systemctl enable --now "$THINPOOL_TIMER_NAME" >/dev/null 2>&1 ||
+     ! as_root systemctl is-enabled --quiet "$THINPOOL_TIMER_NAME" ||
+     ! as_root systemctl is-active --quiet "$THINPOOL_TIMER_NAME"; then
+    as_root systemctl disable --now "$THINPOOL_TIMER_NAME" >/dev/null 2>&1 || true
+    msg thinpool_timer_failed >&2
+    return 0
+  fi
+
+  if ! as_root systemctl start "$THINPOOL_SERVICE_NAME" >/dev/null 2>&1; then
+    as_root systemctl disable --now "$THINPOOL_TIMER_NAME" >/dev/null 2>&1 || true
+    msg thinpool_initial_failed >&2
+    return 0
+  fi
+
+  if ! as_root rm -f "$LEGACY_THINPOOL_CRON_FILE"; then
+    as_root systemctl disable --now "$THINPOOL_TIMER_NAME" >/dev/null 2>&1 || true
+    msg thinpool_cron_remove_failed >&2
+    return 0
+  fi
+  if [[ "$legacy_cron" -eq 1 ]]; then
+    msg thinpool_cron_migrated
+  fi
+}
+
+disable_thinpool_cache() {
+  as_root systemctl disable --now "${THINPOOL_TIMER_NAME}" >/dev/null 2>&1 || true
+  as_root systemctl stop "${THINPOOL_SERVICE_NAME}" >/dev/null 2>&1 || true
+  as_root rm -f \
+    "${THINPOOL_SERVICE_FILE}" \
+    "${THINPOOL_TIMER_FILE}" \
+    "${THINPOOL_HELPER_FILE}" \
+    "${LEGACY_THINPOOL_CRON_FILE}" >/dev/null 2>&1 || true
 }
 
 write_smart_cache_helper() {
@@ -881,10 +1375,6 @@ EOF"
 }
 
 enable_smart_cache_timer() {
-  if ! need_cmd systemctl; then
-    msg systemctl_missing_smart >&2
-    return 0
-  fi
   if ! as_root systemctl enable --now "${SMART_TIMER_NAME}" >/dev/null 2>&1; then
     msg enable_smart_failed "${SMART_TIMER_NAME}" >&2
     return 0
@@ -1291,7 +1781,7 @@ write_connections_cache_helper() {
 }
 
 disable_connections_cache_timer() {
-  if need_cmd systemctl; then
+  if systemd_available; then
     as_root systemctl disable --now "${CONNECTIONS_TIMER_NAME}" >/dev/null 2>&1 || true
     as_root systemctl stop "${CONNECTIONS_SERVICE_NAME}" >/dev/null 2>&1 || true
   fi
@@ -1329,10 +1819,6 @@ EOF"
 }
 
 enable_connections_cache_timer() {
-  if ! need_cmd systemctl; then
-    msg systemctl_missing_connections >&2
-    return 0
-  fi
   if ! as_root systemctl enable --now "${CONNECTIONS_TIMER_NAME}" >/dev/null 2>&1; then
     msg enable_connections_failed "${CONNECTIONS_TIMER_NAME}" >&2
     return 0
@@ -1340,7 +1826,163 @@ enable_connections_cache_timer() {
   as_root systemctl start "${CONNECTIONS_SERVICE_NAME}" >/dev/null 2>&1 || true
 }
 
+remove_openrc_cron_jobs() {
+  [[ -f "$OPENRC_CRONTAB" ]] || return 0
+  local tmp
+  tmp="$(mktemp)"
+  as_root awk -v marker="$OPENRC_CRON_MARKER" 'index($0, marker) == 0' "$OPENRC_CRONTAB" >"$tmp"
+  as_root install -m 0600 "$tmp" "$OPENRC_CRONTAB"
+  rm -f "$tmp"
+}
+
+install_openrc_cron_jobs() {
+  local lvm_detected="$1"
+  need_cmd crond || { echo "crond is required for OpenRC periodic collectors" >&2; return 1; }
+  as_root install -d -m 0755 "$(dirname "$OPENRC_CRONTAB")"
+  remove_openrc_cron_jobs
+
+  local tmp
+  tmp="$(mktemp)"
+  [[ ! -f "$OPENRC_CRONTAB" ]] || as_root cat "$OPENRC_CRONTAB" >"$tmp"
+  printf '*/5 * * * * %s >/dev/null 2>&1 %s\n' "$SMART_HELPER_FILE" "$OPENRC_CRON_MARKER" >>"$tmp"
+  if [[ "$lvm_detected" -eq 1 ]]; then
+    printf '* * * * * %s >/dev/null 2>&1 %s\n' "$THINPOOL_HELPER_FILE" "$OPENRC_CRON_MARKER" >>"$tmp"
+  fi
+  as_root install -m 0600 "$tmp" "$OPENRC_CRONTAB"
+  rm -f "$tmp"
+
+  as_root rc-update add crond default >/dev/null 2>&1 || true
+  as_root rc-service crond start
+  as_root "$SMART_HELPER_FILE" >/dev/null 2>&1 || true
+  if [[ "$lvm_detected" -eq 1 ]]; then
+    as_root "$THINPOOL_HELPER_FILE" >/dev/null 2>&1 || true
+  fi
+}
+
+cleanup_systemd_periodic() {
+  if systemd_available; then
+    as_root systemctl disable --now \
+      "$SMART_TIMER_NAME" \
+      "$CONNECTIONS_TIMER_NAME" \
+      "$THINPOOL_TIMER_NAME" >/dev/null 2>&1 || true
+    as_root systemctl stop \
+      "$SMART_SERVICE_NAME" \
+      "$CONNECTIONS_SERVICE_NAME" \
+      "$THINPOOL_SERVICE_NAME" >/dev/null 2>&1 || true
+  fi
+  as_root rm -f \
+    "$SMART_SERVICE_FILE" "$SMART_TIMER_FILE" \
+    "$CONNECTIONS_SERVICE_FILE" "$CONNECTIONS_TIMER_FILE" \
+    "$THINPOOL_SERVICE_FILE" "$THINPOOL_TIMER_FILE"
+  if systemd_available; then
+    as_root systemctl daemon-reload
+  fi
+}
+
+cleanup_other_service_managers() {
+  case "$SERVICE_MANAGER" in
+    systemd)
+      if need_cmd rc-service; then
+        as_root rc-service "$APP" stop >/dev/null 2>&1 || true
+        as_root rc-update del "$APP" default >/dev/null 2>&1 || true
+      fi
+      as_root rm -f "$OPENRC_SERVICE_FILE"
+      as_root rm -f "$OPENRC_RUN_FILE"
+      remove_openrc_cron_jobs
+      ;;
+    openrc)
+      if systemd_available; then
+        as_root systemctl disable --now "${APP}.service" >/dev/null 2>&1 || true
+      fi
+      as_root rm -f "$SERVICE_FILE"
+      cleanup_systemd_periodic
+      ;;
+    none)
+      if systemd_available; then
+        as_root systemctl disable --now "${APP}.service" >/dev/null 2>&1 || true
+      fi
+      if need_cmd rc-service; then
+        as_root rc-service "$APP" stop >/dev/null 2>&1 || true
+        as_root rc-update del "$APP" default >/dev/null 2>&1 || true
+      fi
+      as_root rm -f "$SERVICE_FILE" "$OPENRC_SERVICE_FILE"
+      as_root rm -f "$OPENRC_RUN_FILE"
+      cleanup_systemd_periodic
+      remove_openrc_cron_jobs
+      ;;
+  esac
+}
+
+configure_systemd_collectors() {
+  local lvm_detected="$1"
+  write_smart_cache_helper
+  write_smart_cache_service
+  write_smart_cache_timer
+
+  local connections_cache_enabled=0
+  if write_connections_cache_helper; then
+    connections_cache_enabled=1
+    msg connections_helper_installed
+    write_connections_cache_service
+    write_connections_cache_timer
+  else
+    msg connections_helper_failed >&2
+    msg connections_helper_solution >&2
+    disable_connections_cache_timer
+  fi
+
+  if [[ "$lvm_detected" -eq 1 ]]; then
+    write_thinpool_cache_helper
+    write_thinpool_cache_service
+    write_thinpool_cache_timer
+  else
+    disable_thinpool_cache
+  fi
+
+  as_root systemctl daemon-reload
+  if [[ "$lvm_detected" -eq 1 ]]; then
+    enable_thinpool_cache_timer
+  fi
+  enable_smart_cache_timer
+  if [[ "$connections_cache_enabled" -eq 1 ]]; then
+    enable_connections_cache_timer
+  fi
+  SYSTEMD_CONNECTIONS_CACHE_ENABLED="$connections_cache_enabled"
+}
+
+configure_openrc_collectors() {
+  local lvm_detected="$1"
+  write_smart_cache_helper
+  if [[ "$lvm_detected" -eq 1 ]]; then
+    write_thinpool_cache_helper
+  else
+    as_root rm -f "$THINPOOL_HELPER_FILE"
+  fi
+  as_root rm -f "$CONNECTIONS_HELPER_FILE"
+  install_openrc_cron_jobs "$lvm_detected"
+}
+
 main() {
+  local -a filtered=()
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --service-manager=*)
+        SERVICE_MANAGER_MODE="${1#--service-manager=}"
+        shift
+        ;;
+      --service-manager)
+        [[ $# -ge 2 ]] || usage
+        SERVICE_MANAGER_MODE="$2"
+        shift 2
+        ;;
+      *)
+        filtered+=("$1")
+        shift
+        ;;
+    esac
+  done
+  set -- "${filtered[@]}"
+
   if [[ $# -lt 2 ]]; then
     usage
   fi
@@ -1366,6 +2008,12 @@ main() {
     exit 1
   fi
 
+  detect_os
+  validate_runtime_identity
+  select_service_manager
+  ensure_process_control
+  ensure_alpine_runtime
+
   local interval=""
   if [[ $# -gt 0 && "$1" =~ ^[0-9]+$ ]]; then
     interval="$1"
@@ -1380,94 +2028,108 @@ main() {
     fi
   done
 
-  local arch url tmp node_version release_dir
+  local arch url node_version
   arch="$(detect_arch)"
   url="${DOWNLOAD_SCHEME}://${DOWNLOAD_HOST}${DOWNLOAD_PATH}/${DOWNLOAD_PREFIX}${arch}"
 
   echo "[+] arch=${arch}"
   echo "[+] url=${url}"
   echo "[+] install=${INSTALL_DIR}"
+  echo "[+] service_manager=${SERVICE_MANAGER}"
   echo "[+] mode=push dash_ip=${dash_ip} dash_port=${dash_port} interval=${interval:-default}"
 
-  enable_time_sync
+  if [[ "$SERVICE_MANAGER" != "none" ]]; then
+    enable_time_sync
+  fi
   ensure_user
 
   as_root mkdir -p "${INSTALL_DIR}"
-  as_root mkdir -p "${RELEASES_DIR}"
   as_root mkdir -p "${DATA_DIR}"
-  as_root chown -R "${RUN_USER}:${RUN_GROUP}" "${DATA_DIR}"
+  as_root mkdir -p "${RELEASES_DIR}"
 
+  if [[ "$SERVICE_MANAGER" != "none" ]]; then
+    install_smartmontools
+  fi
+
+  INSTALL_TMP="$(mktemp)"
+  trap finish_node_install EXIT
+  download_file "${url}" "${INSTALL_TMP}" "${secret}"
+  INSTALL_STAGE="$(as_root mktemp -d "${RELEASES_DIR}/.stage.XXXXXX")"
+  as_root install -m 0755 "${INSTALL_TMP}" "${INSTALL_STAGE}/${APP}"
+  if ! node_version="$(as_root "${INSTALL_STAGE}/${APP}" --version)"; then
+    msg incompatible_binary >&2
+    exit 1
+  fi
+  node_version="${node_version//$'\r'/}"
+  valid_node_version "$node_version" || { msg invalid_node_version "$node_version" >&2; exit 1; }
+
+  INSTALL_RELEASE="${RELEASES_DIR}/${node_version}"
+  [[ ! -e "$CURRENT_DIR" || -L "$CURRENT_DIR" ]] || {
+    echo "Refusing to replace non-symlink node current path: ${CURRENT_DIR}" >&2
+    exit 1
+  }
+  if ! stop_installed_services; then
+    echo "Failed to stop the installed node before replacing managed files." >&2
+    exit 1
+  fi
   write_tmpfiles
-  install_smartmontools
-
-  tmp="$(mktemp)"
-  trap "rm -f '$tmp'" EXIT
-  download_file "${url}" "${tmp}" "${secret}"
-  chmod +x "${tmp}"
-  node_version="$("${tmp}" --version | head -n1 | tr -d '\r')"
-  release_dir="${RELEASES_DIR}/${node_version}"
-  as_root mkdir -p "${release_dir}"
-  as_root install -m 0755 "${tmp}" "${release_dir}/${APP}"
-  as_root ln -sfn "${release_dir}" "${CURRENT_DIR}"
+  # This is deliberately a force-install path. Reinstalling the same version
+  # replaces its active release; rollback belongs to the separate self-updater.
+  as_root rm -rf "$INSTALL_RELEASE"
+  as_root mv "$INSTALL_STAGE" "$INSTALL_RELEASE"
+  INSTALL_STAGE=""
+  switch_node_current "$INSTALL_RELEASE"
   if [[ "${require_https}" -eq 1 ]]; then
     configure_report "$(report_url "${dash_ip}" "${dash_port}")" "${secret}" --require-https
   else
     configure_report "$(report_url "${dash_ip}" "${dash_port}")" "${secret}"
   fi
-  as_root chown -R "${RUN_USER}:${RUN_GROUP}" "${DATA_DIR}"
+  set_node_ownership
   as_root chown -h "${RUN_USER}:${RUN_GROUP}" "${CURRENT_DIR}" >/dev/null 2>&1 || true
 
-  as_root systemctl stop "${APP}.service" >/dev/null 2>&1 || true
-
-  if [[ $# -gt 0 ]]; then
-    write_service_push "${interval}" "$@"
-  else
-    write_service_push "${interval}"
-  fi
+  cleanup_other_service_managers
+  service_install "${interval}" "$@"
 
   local lvm_detected=0
   if has_lvm; then
     lvm_detected=1
     msg lvm_detected
-    install_cron || true
-    write_collector
-    write_cron
-    as_root "${COLLECTOR}" || true
   else
     msg lvm_missing
-    as_root rm -f "${CRON_FILE}" >/dev/null 2>&1 || true
-    as_root rm -f "${COLLECTOR}" >/dev/null 2>&1 || true
   fi
 
-  write_smart_cache_helper
-  write_smart_cache_service
-  write_smart_cache_timer
   local connections_cache_enabled=0
-  if write_connections_cache_helper; then
-    connections_cache_enabled=1
-    msg connections_helper_installed
-    write_connections_cache_service
-    write_connections_cache_timer
-  else
-    msg connections_helper_failed >&2
-    msg connections_helper_solution >&2
-    disable_connections_cache_timer
-  fi
+  case "$SERVICE_MANAGER" in
+    systemd)
+      configure_systemd_collectors "$lvm_detected"
+      connections_cache_enabled="$SYSTEMD_CONNECTIONS_CACHE_ENABLED"
+      ;;
+    openrc)
+      configure_openrc_collectors "$lvm_detected"
+      ;;
+    none)
+      as_root rm -f "$SMART_HELPER_FILE" "$CONNECTIONS_HELPER_FILE" "$THINPOOL_HELPER_FILE"
+      ;;
+  esac
 
-  as_root systemctl daemon-reload
-  enable_smart_cache_timer
-  if [[ "${connections_cache_enabled}" -eq 1 ]]; then
-    enable_connections_cache_timer
+  if [[ "$SERVICE_MANAGER" != "none" ]]; then
+    service_enable
+    service_start
+    msg done
   fi
-  as_root systemctl enable --now "${APP}.service"
-
-  msg done
-  msg status
-  msg logs
-  msg smart_timer
-  if [[ "${connections_cache_enabled}" -eq 1 ]]; then
-    msg connections_timer
-  else
+  service_status
+  if [[ "$SERVICE_MANAGER" == "systemd" ]]; then
+    msg smart_timer
+    if [[ "$connections_cache_enabled" -eq 1 ]]; then
+      msg connections_timer
+    else
+      msg connections_timer_skipped
+    fi
+  elif [[ "$SERVICE_MANAGER" == "openrc" ]]; then
+    msg smart_cron
+    if [[ "$lvm_detected" -eq 1 ]]; then
+      msg lvm_cron
+    fi
     msg connections_timer_skipped
   fi
   if [[ "${lvm_detected}" -eq 1 ]]; then
