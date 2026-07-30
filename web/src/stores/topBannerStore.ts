@@ -3,7 +3,7 @@ import type { BannerItem } from '@app-types/topBanner';
 
 type NewBannerItem = Omit<BannerItem, 'id' | 'closing'>;
 
-export interface TopBannerState {
+interface TopBannerState {
   topBanners: BannerItem[];
 }
 
@@ -51,5 +51,3 @@ export const clearTopBannersState = (): void => {
   if (getTopBanners().length === 0) return;
   useTopBannerStore.setState({ topBanners: [] });
 };
-
-export type { BannerItem, BannerOptions, BannerTone, PushBanner } from '@app-types/topBanner';

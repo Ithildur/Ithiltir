@@ -2,7 +2,7 @@ import React from 'react';
 import Button, { type ButtonVariant } from './Button';
 import { Modal, ModalHeader, ModalBody, ModalFooter } from './Modal';
 
-export type ConfirmDialogTone = 'default' | 'danger';
+type ConfirmDialogTone = 'default' | 'danger';
 
 export interface ConfirmDialogState {
   title: string;

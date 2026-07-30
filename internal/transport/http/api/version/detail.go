@@ -23,7 +23,6 @@ func detailRoute(r *routes.Blueprint) {
 }
 
 func detailHandler(w http.ResponseWriter, _ *http.Request) {
-	w.Header().Set("Cache-Control", "no-store")
 	response.WriteJSON(w, http.StatusOK, view{
 		Version:     appversion.CurrentString(),
 		NodeVersion: appversion.BundledNodeString(),

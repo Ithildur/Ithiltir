@@ -1,7 +1,7 @@
 import type { ThemeManifest } from '@app-types/admin';
 import type { I18nValue } from '@i18n';
 
-export type ThemeInfo = ThemeManifest & { broken?: boolean; missing?: boolean };
+type ThemeInfo = ThemeManifest & { broken?: boolean; missing?: boolean };
 export type DefaultThemeOption = ThemeManifest & { active: boolean };
 
 export const formatTimestamp = (value: string | null): string => {

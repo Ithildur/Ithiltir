@@ -10,7 +10,7 @@ import { create } from 'zustand';
 import { readThemeMode } from './themeModeBridge';
 import { createSeqGate } from '@utils/seqGate';
 
-export interface ThemeState {
+interface ThemeState {
   themeMode: ThemeMode;
   themeManifest: ThemeManifest;
   setThemeMode: (mode: ThemeMode) => void;

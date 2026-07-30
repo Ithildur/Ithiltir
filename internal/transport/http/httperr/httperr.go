@@ -81,10 +81,6 @@ func ServiceUnavailable(cause error) *Error {
 	return Wrap(http.StatusServiceUnavailable, "service_unavailable", "service unavailable", cause)
 }
 
-func Internal(cause error) *Error {
-	return Wrap(http.StatusInternalServerError, "internal_error", "internal error", cause)
-}
-
 // Write writes a JSON HTTP error payload.
 func Write(w http.ResponseWriter, status int, code, message string) {
 	response.WriteJSONError(w, status, code, message)

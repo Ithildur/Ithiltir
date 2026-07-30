@@ -1,8 +1,8 @@
 import type { PushBanner } from '@app-types/topBanner';
 
-export type ClipboardCopyResult = 'success' | 'https_required' | 'unsupported' | 'failed';
+type ClipboardCopyResult = 'success' | 'https_required' | 'unsupported' | 'failed';
 
-export type BannerPusher = PushBanner;
+type BannerPusher = PushBanner;
 
 const isIpHostname = (hostname: string): boolean => {
   if (!hostname) return false;
@@ -22,10 +22,10 @@ const isLocalHostname = (hostname: string): boolean => {
   );
 };
 
-export const canBypassClipboardHttpsRequirement = (hostname: string): boolean =>
+const canBypassClipboardHttpsRequirement = (hostname: string): boolean =>
   isIpHostname(hostname) || isLocalHostname(hostname);
 
-export const canBypassClipboardHttpsRequirementForCurrentHost = (): boolean => {
+const canBypassClipboardHttpsRequirementForCurrentHost = (): boolean => {
   if (typeof window === 'undefined') return false;
   return canBypassClipboardHttpsRequirement(window.location.hostname);
 };
@@ -41,18 +41,16 @@ const attemptLegacyCopy = (text: string): boolean => {
   document.body.appendChild(textarea);
   textarea.focus();
   textarea.select();
-  let succeeded = false;
   try {
-    succeeded = document.execCommand('copy');
+    return document.execCommand('copy');
   } catch {
-    succeeded = false;
+    return false;
   } finally {
     document.body.removeChild(textarea);
   }
-  return succeeded;
 };
 
-export const copyTextToClipboard = async (
+const copyTextToClipboard = async (
   text: string,
   opts: { allowInsecureContextBypass?: boolean } = {},
 ): Promise<ClipboardCopyResult> => {

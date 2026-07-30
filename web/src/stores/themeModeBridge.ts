@@ -1,7 +1,5 @@
 import type { ThemeMode } from '@app-types/theme';
 
-export type { ThemeMode };
-
 const themeRuntime = (): NonNullable<Window['__theme']> => {
   if (!window.__theme) {
     throw new Error('Theme runtime is not installed');

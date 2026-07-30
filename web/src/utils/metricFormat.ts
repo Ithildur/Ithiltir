@@ -1,4 +1,4 @@
-export type UnitScale = {
+type UnitScale = {
   divisor: number;
   unitLabel: string;
   joiner: string;

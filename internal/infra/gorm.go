@@ -61,11 +61,6 @@ func NewGORMTimescale(ctx context.Context, cfg config.DatabaseConfig) (*gorm.DB,
 	})
 }
 
-// PingGORM runs a light ping using the underlying sql.DB.
-func PingGORM(ctx context.Context, db *gorm.DB) error {
-	return kitgorm.Ping(ctx, db)
-}
-
 // WithPGReadTimeout runs fn with the default PG read timeout.
 func WithPGReadTimeout[T any](ctx context.Context, fn func(context.Context) (T, error)) (T, error) {
 	return contextutil.WithTimeout(ctx, config.PGReadTimeout, fn)

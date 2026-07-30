@@ -1,4 +1,4 @@
-export type OsLogoRule = {
+type OsLogoRule = {
   match: (haystack: string) => boolean;
   src: string;
   mode: 'mask' | 'image';

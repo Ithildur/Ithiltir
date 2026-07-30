@@ -25,10 +25,7 @@ const (
 )
 
 // Front API pagination.
-const (
-	FrontDefaultLimit = 200
-	FrontMaxLimit     = 1000
-)
+const FrontMaxLimit = 1000
 
 // Node metrics ingest settings.
 const (

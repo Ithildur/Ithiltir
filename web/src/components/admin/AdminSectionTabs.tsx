@@ -1,7 +1,7 @@
 import type { LucideIcon } from 'lucide-react';
 import { useI18n, type TranslationKey } from '@i18n';
 
-export interface AdminSectionTab<Key extends string> {
+interface AdminSectionTab<Key extends string> {
   key: Key;
   labelKey: TranslationKey;
   icon: LucideIcon;

@@ -2,13 +2,11 @@ package infra
 
 import (
 	"context"
-	"fmt"
 	"log/slog"
 	"os"
 	"strings"
 	"sync"
 	"sync/atomic"
-	"time"
 
 	kitlog "github.com/Ithildur/EiluneKit/logging"
 )
@@ -116,14 +114,6 @@ func SlogWithModule(name string) *slog.Logger {
 	return Slog().With(slog.String("module", name))
 }
 
-// Debugf logs a formatted debug message when debug logging is enabled.
-func Debugf(format string, args ...any) {
-	if !DebugEnabled() {
-		return
-	}
-	Log().Debug(fmt.Sprintf(format, args...), nil)
-}
-
 func setDefaultSlog(logger *slog.Logger) {
 	if logger == nil {
 		return
@@ -136,35 +126,4 @@ func setDefaultSlog(logger *slog.Logger) {
 func Fatal(msg string, err error, attrs ...slog.Attr) {
 	Log().Error(msg, err, attrs...)
 	os.Exit(1)
-}
-
-// Attr is a short alias for slog.Attr.
-type Attr = slog.Attr
-
-func String(key, value string) Attr {
-	return kitlog.String(key, value)
-}
-
-func Int(key string, value int) Attr {
-	return kitlog.Int(key, value)
-}
-
-func Int64(key string, value int64) Attr {
-	return kitlog.Int64(key, value)
-}
-
-func Bool(key string, value bool) Attr {
-	return kitlog.Bool(key, value)
-}
-
-func Float64(key string, value float64) Attr {
-	return kitlog.Float64(key, value)
-}
-
-func Time(key string, value time.Time) Attr {
-	return kitlog.Time(key, value)
-}
-
-func Any(key string, value any) Attr {
-	return kitlog.Any(key, value)
 }

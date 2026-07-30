@@ -16,6 +16,5 @@ func WriteWarningHeader(w http.ResponseWriter, code string) {
 	if code == "" {
 		return
 	}
-
 	w.Header().Set(HeaderWarning, code)
 }

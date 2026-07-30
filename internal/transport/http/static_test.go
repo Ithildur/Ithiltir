@@ -107,7 +107,6 @@ func TestDeployAssetRequiresNodeSecret(t *testing.T) {
 	if rr.Body.String() != "node asset" {
 		t.Fatalf("grant token body = %q", rr.Body.String())
 	}
-
 	req = httptest.NewRequest(http.MethodGet, "/deploy/linux/node_linux_arm64?"+request.DeployGrantQuery+"="+token, nil)
 	rr = httptest.NewRecorder()
 	router.ServeHTTP(rr, req)

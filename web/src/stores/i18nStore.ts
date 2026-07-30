@@ -4,7 +4,7 @@ import { Translations } from '@i18n/translations';
 export type Lang = keyof typeof Translations;
 export type LangUpdate = Lang | ((current: Lang) => Lang);
 
-export interface I18nState {
+interface I18nState {
   lang: Lang;
   setLang: (next: LangUpdate) => void;
 }

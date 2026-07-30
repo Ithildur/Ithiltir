@@ -4,7 +4,7 @@ import type { Lang, LangUpdate } from '@stores/i18nStore';
 import { Translations } from './translations';
 
 export type TranslationKey = keyof typeof Translations.en;
-export type { Lang, LangUpdate };
+export type { Lang };
 
 const _zhMustCoverEn: Record<TranslationKey, string> = Translations.zh;
 void _zhMustCoverEn;
