@@ -3,7 +3,7 @@ import ExternalLink from 'lucide-react/dist/esm/icons/external-link';
 import LoaderCircle from 'lucide-react/dist/esm/icons/loader-circle';
 import RefreshCw from 'lucide-react/dist/esm/icons/refresh-cw';
 import RotateCcw from 'lucide-react/dist/esm/icons/rotate-ccw';
-import { Link } from 'react-router-dom';
+import { Link } from 'react-router';
 import type { AppVersion } from '@app-types/api';
 import type { DashUpdateChannel, DashUpdateMode, SystemSettings } from '@app-types/admin';
 import Badge, { type BadgeColor } from '@components/ui/Badge';

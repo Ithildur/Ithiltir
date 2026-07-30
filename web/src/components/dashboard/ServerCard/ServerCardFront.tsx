@@ -7,7 +7,7 @@ import MemoryStick from 'lucide-react/dist/esm/icons/memory-stick';
 import Network from 'lucide-react/dist/esm/icons/network';
 import RefreshCw from 'lucide-react/dist/esm/icons/refresh-cw';
 import TrendingUp from 'lucide-react/dist/esm/icons/trending-up';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router';
 import { useI18n } from '@i18n';
 import Button from '@components/ui/Button';
 import { Tooltip } from '@components/ui/Tooltip';

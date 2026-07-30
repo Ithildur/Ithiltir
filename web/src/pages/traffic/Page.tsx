@@ -5,7 +5,7 @@ import LoaderCircle from 'lucide-react/dist/esm/icons/loader-circle';
 import RefreshCw from 'lucide-react/dist/esm/icons/refresh-cw';
 import Wrench from 'lucide-react/dist/esm/icons/wrench';
 import type { LucideIcon } from 'lucide-react';
-import { Link } from 'react-router-dom';
+import { Link } from 'react-router';
 import Button from '@components/ui/Button';
 import ConfirmDialog from '@components/ui/ConfirmDialog';
 import Select from '@components/ui/Select';

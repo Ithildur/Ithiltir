@@ -5,7 +5,7 @@ import Copy from 'lucide-react/dist/esm/icons/copy';
 import GripVertical from 'lucide-react/dist/esm/icons/grip-vertical';
 import Settings from 'lucide-react/dist/esm/icons/settings';
 import Trash2 from 'lucide-react/dist/esm/icons/trash-2';
-import { Link } from 'react-router-dom';
+import { Link } from 'react-router';
 import Button from '@components/ui/Button';
 import IOSSwitch from '@components/ui/IOSSwitch';
 import Input from '@components/ui/Input';

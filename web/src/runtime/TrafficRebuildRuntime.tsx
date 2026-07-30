@@ -1,5 +1,5 @@
 import React from 'react';
-import { useLocation } from 'react-router-dom';
+import { useLocation } from 'react-router';
 import { pushTopBanner } from '@runtime/topBannerRuntime';
 import { useAuthStore } from '@stores/authStore';
 import { useI18n } from '@i18n';

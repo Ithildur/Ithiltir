@@ -6,7 +6,7 @@ import Search from 'lucide-react/dist/esm/icons/search';
 import SlidersHorizontal from 'lucide-react/dist/esm/icons/sliders-horizontal';
 import UserCog from 'lucide-react/dist/esm/icons/user-cog';
 import X from 'lucide-react/dist/esm/icons/x';
-import { Link } from 'react-router-dom';
+import { Link } from 'react-router';
 import BrandLogo from '@components/BrandLogo';
 import { useI18n } from '@i18n';
 import Button from '@components/ui/Button';

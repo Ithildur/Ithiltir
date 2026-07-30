@@ -3,7 +3,7 @@ import ArrowUpFromLine from 'lucide-react/dist/esm/icons/arrow-up-from-line';
 import Copy from 'lucide-react/dist/esm/icons/copy';
 import Globe from 'lucide-react/dist/esm/icons/globe';
 import Settings from 'lucide-react/dist/esm/icons/settings';
-import { Link } from 'react-router-dom';
+import { Link } from 'react-router';
 import Button from '@components/ui/Button';
 import Card from '@components/ui/Card';
 import IOSSwitch from '@components/ui/IOSSwitch';

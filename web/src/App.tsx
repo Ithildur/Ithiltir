@@ -1,5 +1,5 @@
 import React from 'react';
-import { BrowserRouter, Navigate, Route, Routes, useLocation } from 'react-router-dom';
+import { BrowserRouter, Navigate, Route, Routes, useLocation } from 'react-router';
 import DashboardPage from '@pages/DashboardPage';
 import LoginPage from '@pages/LoginPage';
 import FullScreenLoader from '@components/ui/FullScreenLoader';

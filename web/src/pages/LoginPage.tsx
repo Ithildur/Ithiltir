@@ -4,7 +4,7 @@ import CheckCircle2 from 'lucide-react/dist/esm/icons/check-circle-2';
 import Eye from 'lucide-react/dist/esm/icons/eye';
 import EyeOff from 'lucide-react/dist/esm/icons/eye-off';
 import Lock from 'lucide-react/dist/esm/icons/lock';
-import { useLocation, useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router';
 import BrandLogo from '@components/BrandLogo';
 import Input from '@components/ui/Input';
 import ThemeToggle from '@components/ui/ThemeToggle';

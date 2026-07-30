@@ -9,7 +9,7 @@ import { logout } from '@stores/authStore';
 import { useSiteBrandStore } from '@stores/siteBrandStore';
 import { useI18n } from '@i18n';
 import type { AdminConsoleTab } from '@app-types/admin';
-import { Link } from 'react-router-dom';
+import { Link } from 'react-router';
 import type { AdminNavItem } from './adminNav';
 
 interface Props {

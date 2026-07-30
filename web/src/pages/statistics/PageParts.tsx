@@ -4,7 +4,7 @@ import Maximize2 from 'lucide-react/dist/esm/icons/maximize-2';
 import RefreshCw from 'lucide-react/dist/esm/icons/refresh-cw';
 import SlidersHorizontal from 'lucide-react/dist/esm/icons/sliders-horizontal';
 import X from 'lucide-react/dist/esm/icons/x';
-import { Link } from 'react-router-dom';
+import { Link } from 'react-router';
 import MetricHistoryChart from '@components/dashboard/MetricHistoryChart';
 import { useI18n } from '@i18n';
 import Button from '@components/ui/Button';

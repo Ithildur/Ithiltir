@@ -5,7 +5,7 @@ import Users from 'lucide-react/dist/esm/icons/users';
 import LayoutDashboard from 'lucide-react/dist/esm/icons/layout-dashboard';
 import Bell from 'lucide-react/dist/esm/icons/bell';
 import Settings2 from 'lucide-react/dist/esm/icons/settings-2';
-import { Link, useSearchParams } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router';
 import AdminMobileMenu from '@components/admin/AdminMobileMenu';
 import AdminSidebar from '@components/admin/AdminSidebar';
 import type { AdminNavItem } from '@components/admin/adminNav';

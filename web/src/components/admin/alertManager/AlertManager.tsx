@@ -4,7 +4,7 @@ import BellRing from 'lucide-react/dist/esm/icons/bell-ring';
 import History from 'lucide-react/dist/esm/icons/history';
 import Plus from 'lucide-react/dist/esm/icons/plus';
 import SlidersHorizontal from 'lucide-react/dist/esm/icons/sliders-horizontal';
-import { useSearchParams } from 'react-router-dom';
+import { useSearchParams } from 'react-router';
 import { useI18n } from '@i18n';
 import { AdminSectionTabs } from '@components/admin/AdminSectionTabs';
 import Button from '@components/ui/Button';
