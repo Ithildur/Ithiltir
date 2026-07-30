@@ -196,8 +196,7 @@ func (s *Store) updateStatic(ctx context.Context, secret string, serverID int64,
 	}
 
 	if err := tx.Commit().Error; err != nil {
-		_ = s.RefreshMetaByID(ctx, serverID)
-		return err
+		return s.reconcileCommit(ctx, []int64{serverID}, err)
 	}
 	committed = true
 	s.syncServerCache(fresh, old.Secret)

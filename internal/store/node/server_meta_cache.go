@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	"dash/internal/config"
 	"dash/internal/model"
 
 	"gorm.io/datatypes"
@@ -202,6 +203,18 @@ func (s *Store) removeServerState(id int64, secret string) {
 	s.mem.updateMu.Lock()
 	delete(s.mem.updates, id)
 	s.mem.updateMu.Unlock()
+}
+
+// reconcileCommit reloads PostgreSQL-owned metadata after Commit reports an
+// unknown durable outcome. The caller's context may already be cancelled, so
+// reconciliation owns a fresh bounded read lifetime.
+func (s *Store) reconcileCommit(ctx context.Context, ids []int64, commitErr error) error {
+	readCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), config.PGReadTimeout)
+	defer cancel()
+	if err := s.RefreshMetaByIDs(readCtx, ids); err != nil {
+		return errors.Join(commitErr, fmt.Errorf("reconcile node metadata after commit error: %w", err))
+	}
+	return commitErr
 }
 
 func (s *Store) RefreshMetaByID(ctx context.Context, id int64) error {

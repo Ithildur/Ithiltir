@@ -199,8 +199,7 @@ func (s *Store) createNode(ctx context.Context, secret string) (model.Server, er
 	}
 
 	if err := tx.Commit().Error; err != nil {
-		_ = s.RefreshMetaByID(ctx, srv.ID)
-		return created, err
+		return created, s.reconcileCommit(ctx, []int64{srv.ID}, err)
 	}
 	committed = true
 	created = srv
@@ -330,9 +329,12 @@ func (s *Store) patchNode(ctx context.Context, id int64, upd NodeUpdate) error {
 		return err
 	}
 	if err := tx.Commit().Error; err != nil {
-		_ = s.RefreshMetaByID(ctx, id)
-		_ = s.clearFrontSnapshotCache(ctx)
-		return err
+		if upd.Secret != nil {
+			// A commit error does not prove rollback. Revoke the old credential
+			// until PostgreSQL can confirm whether the rotation committed.
+			s.deleteServerMeta(id, old.Secret)
+		}
+		return s.reconcileCommit(ctx, []int64{id}, err)
 	}
 	committed = true
 
@@ -549,8 +551,10 @@ func (s *Store) deleteNode(ctx context.Context, id int64) error {
 	}
 
 	if err := tx.Commit().Error; err != nil {
-		_ = s.RefreshMetaByID(ctx, id)
-		return err
+		// Deletion is security-sensitive: an uncertain commit must not leave the
+		// old credential usable while PostgreSQL is being reconciled.
+		s.deleteServerMeta(id, old.Secret)
+		return s.reconcileCommit(ctx, []int64{id}, err)
 	}
 	committed = true
 
@@ -632,8 +636,7 @@ func (s *Store) updateDisplayOrder(ctx context.Context, ids []int64) error {
 		return err
 	}
 	if err := tx.Commit().Error; err != nil {
-		_ = s.RefreshMetaByIDs(ctx, ids)
-		return err
+		return s.reconcileCommit(ctx, ids, err)
 	}
 	committed = true
 

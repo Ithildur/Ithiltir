@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"dash/internal/model"
+	pgtest "dash/internal/testutil/postgres"
 	"gorm.io/datatypes"
 	"gorm.io/gorm"
 )
@@ -91,5 +92,52 @@ func TestSyncServerCacheRotatesSecretInMemory(t *testing.T) {
 	}
 	if got.Name != newSrv.Name {
 		t.Fatalf("GetServerBySecret(new) name = %q, want %q", got.Name, newSrv.Name)
+	}
+}
+
+func TestIntegrationCommitReconciliationIgnoresCancelledCaller(t *testing.T) {
+	st := newTestStore(pgtest.NewDB(t), nil)
+	commitErr := errors.New("commit result unknown")
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	for _, committed := range []bool{false, true} {
+		name := "rolled-back"
+		if committed {
+			name = "committed"
+		}
+		t.Run(name, func(t *testing.T) {
+			srv := model.Server{
+				Name:     name,
+				Hostname: name,
+				Secret:   name + "-old-secret",
+			}
+			if err := st.db.Create(&srv).Error; err != nil {
+				t.Fatalf("Create() error = %v", err)
+			}
+			if err := st.SyncServerCache(context.Background(), srv); err != nil {
+				t.Fatalf("SyncServerCache() error = %v", err)
+			}
+
+			wantSecret := srv.Secret
+			if committed {
+				wantSecret = name + "-new-secret"
+				if err := st.db.Model(&model.Server{}).Where("id = ?", srv.ID).Update("secret", wantSecret).Error; err != nil {
+					t.Fatalf("Update(secret) error = %v", err)
+				}
+			}
+
+			st.deleteServerMeta(srv.ID, srv.Secret)
+			err := st.reconcileCommit(ctx, []int64{srv.ID}, commitErr)
+			if !errors.Is(err, commitErr) {
+				t.Fatalf("reconcileCommit() error = %v, want commit error", err)
+			}
+			if _, err := st.GetServerBySecret(context.Background(), srv.Secret); committed && !errors.Is(err, gorm.ErrRecordNotFound) {
+				t.Fatalf("GetServerBySecret(old) error = %v, want gorm.ErrRecordNotFound", err)
+			}
+			if _, err := st.GetServerBySecret(context.Background(), wantSecret); err != nil {
+				t.Fatalf("GetServerBySecret(current) error = %v", err)
+			}
+		})
 	}
 }
