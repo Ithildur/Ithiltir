@@ -41,6 +41,9 @@ func main() {
 		runMigrate(os.Args[2:])
 		return
 	}
+	if len(os.Args) > 1 && os.Args[1] == "check-redis" {
+		os.Exit(runRedisCheck(os.Args[2:], os.Stdout, os.Stderr))
+	}
 	if len(os.Args) > 1 && os.Args[1] == "pack-theme" {
 		runPackTheme(os.Args[2:])
 		return
@@ -62,7 +65,7 @@ func main() {
 		infra.Log().Warn("init logger from env failed", err)
 	}
 
-	cfg, warnings, err := config.LoadWithWarnings("")
+	cfg, err := config.LoadRuntime("", !noRedis)
 	if err != nil {
 		infra.Fatal("load config failed", err)
 	}
@@ -75,10 +78,6 @@ func main() {
 		infra.Fatal("init logger failed", err)
 	}
 	logger := infra.Log()
-	for _, w := range warnings {
-		logger.Warn(w.Msg, w.Err, w.Attrs...)
-	}
-
 	adminPassword := cfg.Auth.Password
 	if err := authhttp.ValidateStaticPassword(adminPassword); err != nil {
 		infra.Fatal("admin password is invalid for admin login", err, slog.String("env", config.EnvAdminPassword))
@@ -119,15 +118,15 @@ func main() {
 				slog.String("addr", cfg.Redis.Addr),
 				slog.Int("db", cfg.Redis.DB))
 		}
-		pingCtx, pingCancel := context.WithTimeout(ctx, config.RedisFetchTimeout)
-		if err := infra.PingRedis(pingCtx, redisClient); err != nil {
-			pingCancel()
-			infra.Fatal("ping redis failed",
-				err,
+		checkTimeout := cfg.Redis.DialTimeoutDur + cfg.Redis.ReadTimeoutDur
+		redisVersion, checkErr := infra.CheckRedis(ctx, redisClient, checkTimeout)
+		if checkErr != nil {
+			infra.Fatal("validate redis failed",
+				checkErr,
 				slog.String("addr", cfg.Redis.Addr),
 				slog.Int("db", cfg.Redis.DB))
 		}
-		pingCancel()
+		logger.Info("redis connected", nil, slog.String("version", redisVersion))
 		defer redisClient.Close()
 	} else {
 		logger.Warn("redis disabled by startup flag", nil)

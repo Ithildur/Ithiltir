@@ -19,7 +19,7 @@ type AppConfig struct {
 	LogFormat            string `yaml:"log_format"`
 	NodeOfflineThreshold string `yaml:"node_offline_threshold"`
 
-	// Derived fields (compiled in config.Load). Not part of YAML.
+	// Derived fields compiled while loading config. Not part of YAML.
 	PublicURLScheme         string         `yaml:"-"`
 	PublicURLHost           string         `yaml:"-"`
 	PublicURLBasePath       string         `yaml:"-"`

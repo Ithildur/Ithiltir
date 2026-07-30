@@ -14,11 +14,7 @@ func (c AppConfig) EffectiveNodeOfflineThreshold() time.Duration {
 	if c.NodeOfflineThresholdDur > 0 {
 		return c.NodeOfflineThresholdDur
 	}
-	d, _, err := parseNodeOfflineThreshold(c.NodeOfflineThreshold)
-	if err != nil {
-		return DefaultNodeOfflineThreshold
-	}
-	return d
+	return DefaultNodeOfflineThreshold
 }
 
 func parseNodeOfflineThreshold(raw string) (time.Duration, string, error) {
@@ -96,7 +92,7 @@ func effectiveDurationWithDefault(raw string, compiled time.Duration, def time.D
 		return 0, err
 	}
 	if d <= 0 {
-		return def, nil
+		return 0, errDurationNotPositive
 	}
 	return d, nil
 }

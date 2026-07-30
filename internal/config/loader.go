@@ -1,8 +1,10 @@
 package config
 
 import (
+	"bytes"
+	"errors"
 	"fmt"
-	"log/slog"
+	"io"
 	"net"
 	"net/url"
 	"os"
@@ -20,66 +22,40 @@ const (
 	configNotFoundMsg = "config: no config file found (tried: config.local.yaml, config.yaml, configs/config.local.yaml, configs/config.yaml, $DASH_HOME/configs/*)"
 )
 
-// Warning captures non-fatal config issues for upper layers to log.
-type Warning struct {
-	Msg   string
-	Err   error
-	Attrs []slog.Attr
-}
-
-type warningCollector struct {
-	items []Warning
-}
-
-func (c *warningCollector) add(msg string, err error, attrs ...slog.Attr) {
-	if c == nil {
-		return
-	}
-	c.items = append(c.items, Warning{
-		Msg:   msg,
-		Err:   err,
-		Attrs: attrs,
-	})
-}
-
-func Load(path string) (*Config, error) {
-	cfg, _, err := LoadWithWarnings(path)
-	return cfg, err
-}
-
-// LoadWithWarnings loads config and returns any non-fatal warnings.
-func LoadWithWarnings(path string) (*Config, []Warning, error) {
+// LoadRuntime loads runtime config for the selected Redis mode.
+func LoadRuntime(path string, redisEnabled bool) (*Config, error) {
 	var cfg Config
 
 	resolved, err := resolveConfigPath(path)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 
 	if err := readConfigFile(resolved, &cfg); err != nil {
-		return nil, nil, err
+		return nil, err
 	}
-	warns := warningCollector{}
-	overrideFromEnv(&cfg, &warns)
+	if err := overrideFromEnv(&cfg, redisEnabled); err != nil {
+		return nil, err
+	}
 	compileLanguage(&cfg)
 	if err := compileLocation(&cfg); err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 
-	if err := compileDurations(&cfg, &warns); err != nil {
-		return nil, nil, err
+	if err := compileDurations(&cfg, redisEnabled); err != nil {
+		return nil, err
 	}
 	if err := compileHTTP(&cfg); err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	if err := compilePublicURL(&cfg); err != nil {
-		return nil, nil, err
+		return nil, err
 	}
-	if err := validateRuntime(&cfg); err != nil {
-		return nil, nil, err
+	if err := validateRuntime(&cfg, redisEnabled); err != nil {
+		return nil, err
 	}
 
-	return &cfg, warns.items, nil
+	return &cfg, nil
 }
 
 func resolveConfigPath(path string) (string, error) {
@@ -87,7 +63,7 @@ func resolveConfigPath(path string) (string, error) {
 		path = firstConfigPath()
 	}
 	if path == "" {
-		return "", fmt.Errorf(configNotFoundMsg)
+		return "", errors.New(configNotFoundMsg)
 	}
 	return path, nil
 }
@@ -97,42 +73,46 @@ func readConfigFile(path string, cfg *Config) error {
 	if err != nil {
 		return fmt.Errorf("config: read file %q: %w", path, err)
 	}
-	if err := yaml.Unmarshal(data, cfg); err != nil {
+	decoder := yaml.NewDecoder(bytes.NewReader(data))
+	decoder.KnownFields(true)
+	if err := decoder.Decode(cfg); err != nil {
 		return fmt.Errorf("config: parse file %q: %w", path, err)
 	}
-	return nil
+	var extra yaml.Node
+	if err := decoder.Decode(&extra); err != nil {
+		if errors.Is(err, io.EOF) {
+			return nil
+		}
+		return fmt.Errorf("config: parse file %q: %w", path, err)
+	}
+	return fmt.Errorf("config: parse file %q: multiple YAML documents are not supported", path)
 }
 
 // LoadForMigrate loads config for migration only (database fields required).
 func LoadForMigrate(path string) (*Config, error) {
-	cfg, _, err := LoadForMigrateWithWarnings(path)
-	return cfg, err
-}
-
-// LoadForMigrateWithWarnings loads config for migration and returns any non-fatal warnings.
-func LoadForMigrateWithWarnings(path string) (*Config, []Warning, error) {
 	var cfg Config
 
 	resolved, err := resolveConfigPath(path)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 
 	if err := readConfigFile(resolved, &cfg); err != nil {
-		return nil, nil, err
+		return nil, err
 	}
-	warns := warningCollector{}
-	overrideFromEnv(&cfg, &warns)
+	if err := overrideFromEnv(&cfg, false); err != nil {
+		return nil, err
+	}
 	compileLanguage(&cfg)
 	if err := compileHTTP(&cfg); err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 
 	if err := validateMigrate(&cfg); err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 
-	return &cfg, warns.items, nil
+	return &cfg, nil
 }
 
 func compileHTTP(cfg *Config) error {
@@ -154,22 +134,21 @@ func compileLanguage(cfg *Config) {
 	cfg.App.Language = cfg.App.EffectiveLanguage()
 }
 
-func compileDurations(cfg *Config, warns *warningCollector) error {
+func compileDurations(cfg *Config, redisEnabled bool) error {
 	if cfg == nil {
 		return fmt.Errorf("config: cfg is nil")
 	}
 
 	nodeOfflineThreshold, rawNodeOfflineThreshold, nodeOfflineThresholdErr := parseNodeOfflineThreshold(cfg.App.NodeOfflineThreshold)
-	cfg.App.NodeOfflineThresholdDur = nodeOfflineThreshold
 	if nodeOfflineThresholdErr != nil {
-		warns.add("config invalid duration, fallback to default",
+		return fmt.Errorf(
+			"config: parse app.node_offline_threshold %q (expected %s): %w",
+			rawNodeOfflineThreshold,
+			durationSyntaxHint,
 			nodeOfflineThresholdErr,
-			slog.String("key", "app.node_offline_threshold"),
-			slog.String("value", rawNodeOfflineThreshold),
-			slog.String("expected", durationSyntaxHint),
-			slog.String("default", DefaultNodeOfflineThreshold.String()),
 		)
 	}
+	cfg.App.NodeOfflineThresholdDur = nodeOfflineThreshold
 
 	d, specified, err := cfg.Database.EffectiveConnMaxLifetime()
 	if err != nil {
@@ -181,7 +160,7 @@ func compileDurations(cfg *Config, warns *warningCollector) error {
 		cfg.Database.ConnMaxLifetimeDur = 0
 	}
 
-	if strings.TrimSpace(cfg.Redis.Addr) == "" {
+	if !redisEnabled || strings.TrimSpace(cfg.Redis.Addr) == "" {
 		cfg.Redis.DialTimeoutDur = defaultRedisDialTimeout
 		cfg.Redis.ReadTimeoutDur = defaultRedisReadTimeout
 		cfg.Redis.WriteTimeoutDur = defaultRedisWriteTimeout
@@ -224,30 +203,52 @@ func compilePublicURL(cfg *Config) error {
 
 	parsed := raw
 	if !strings.Contains(parsed, "://") {
-		parsed = defaultSchemeForPublicURL(parsed) + "://" + parsed
+		parsed = publicURLWithDefaultScheme(parsed)
 	}
 
 	u, err := url.Parse(parsed)
 	if err != nil {
 		return fmt.Errorf("config: parse app.public_url: %w", err)
 	}
-	if u.Scheme == "" {
-		return fmt.Errorf("config: app.public_url scheme is required")
+	scheme := strings.ToLower(u.Scheme)
+	if scheme != "http" && scheme != "https" {
+		return fmt.Errorf("config: app.public_url scheme must be http or https")
 	}
-	if u.Host == "" {
+	if u.Hostname() == "" {
 		return fmt.Errorf("config: app.public_url host is required")
 	}
+	if u.User != nil {
+		return fmt.Errorf("config: app.public_url must not include user information")
+	}
+	if u.RawQuery != "" || u.ForceQuery {
+		return fmt.Errorf("config: app.public_url must not include a query")
+	}
+	if u.Fragment != "" {
+		return fmt.Errorf("config: app.public_url must not include a fragment")
+	}
 
-	cfg.App.PublicURLScheme = u.Scheme
+	cfg.App.PublicURLScheme = scheme
 	cfg.App.PublicURLHost = u.Host
 
-	basePath := strings.TrimSuffix(u.Path, "/")
-	if strings.HasPrefix(basePath, "/") && basePath != "/" {
-		return fmt.Errorf("config: app.public_url must not include a path prefix (got %q)", basePath)
+	path := u.EscapedPath()
+	if path != "" && path != "/" {
+		return fmt.Errorf("config: app.public_url must not include a path prefix (got %q)", path)
 	}
 	cfg.App.PublicURLBasePath = ""
 
 	return nil
+}
+
+func publicURLWithDefaultScheme(raw string) string {
+	scheme := defaultSchemeForPublicURL(raw)
+	host, suffix := raw, ""
+	if idx := strings.Index(raw, "/"); idx >= 0 {
+		host, suffix = raw[:idx], raw[idx:]
+	}
+	if strings.Contains(host, ":") && net.ParseIP(host) != nil {
+		host = "[" + host + "]"
+	}
+	return scheme + "://" + host + suffix
 }
 
 func defaultSchemeForPublicURL(raw string) string {
@@ -308,11 +309,17 @@ func fileExists(p string) bool {
 	return err == nil && !info.IsDir()
 }
 
-func validateRuntime(cfg *Config) error {
+func validateRuntime(cfg *Config, redisEnabled bool) error {
 	missing := make([]string, 0, 8)
-	missing = append(missing, requireRuntimeFields(cfg)...)
+	missing = append(missing, requireRuntimeFields(cfg, redisEnabled)...)
 	missing = append(missing, requireDatabaseFields(cfg)...)
 	if err := validateMissing(missing); err != nil {
+		return err
+	}
+	if err := validateJWTSigningKey(cfg.Auth.JWTSigningKey); err != nil {
+		return err
+	}
+	if err := validateDatabasePool(cfg.Database); err != nil {
 		return err
 	}
 	if cfg.Database.RetentionDays < 0 {
@@ -320,6 +327,16 @@ func validateRuntime(cfg *Config) error {
 	}
 	if cfg.Database.TrafficRetentionDays < 0 {
 		return fmt.Errorf("config: database.traffic_retention_days must be >= 0")
+	}
+	return nil
+}
+
+func validateJWTSigningKey(key string) error {
+	if key != strings.TrimSpace(key) {
+		return fmt.Errorf("config: auth.jwt_signing_key must not have surrounding whitespace")
+	}
+	if len(key) < 32 {
+		return fmt.Errorf("config: auth.jwt_signing_key must be at least 32 bytes")
 	}
 	return nil
 }
@@ -329,19 +346,39 @@ func validateMigrate(cfg *Config) error {
 	if err := validateMissing(missing); err != nil {
 		return err
 	}
+	if err := validateDatabasePool(cfg.Database); err != nil {
+		return err
+	}
 	if cfg.Database.RetentionDays < 0 {
 		return fmt.Errorf("config: database.retention_days must be >= 0")
 	}
 	if cfg.Database.TrafficRetentionDays < 0 {
 		return fmt.Errorf("config: database.traffic_retention_days must be >= 0")
 	}
-	if _, _, err := cfg.Database.EffectiveConnMaxLifetime(); err != nil {
+	return nil
+}
+
+func validateDatabasePool(cfg DatabaseConfig) error {
+	if cfg.MaxOpenConns < 0 {
+		return fmt.Errorf("config: database.max_open_conns must be >= 0")
+	}
+	if cfg.MaxIdleConns < 0 {
+		return fmt.Errorf("config: database.max_idle_conns must be >= 0")
+	}
+	if cfg.MaxOpenConns > 0 && cfg.MaxIdleConns > cfg.MaxOpenConns {
+		return fmt.Errorf("config: database.max_idle_conns must be <= database.max_open_conns when max_open_conns is positive")
+	}
+	d, specified, err := cfg.EffectiveConnMaxLifetime()
+	if err != nil {
 		return fmt.Errorf("config: parse database.conn_max_lifetime: %w", err)
+	}
+	if specified && d < 0 {
+		return fmt.Errorf("config: database.conn_max_lifetime must be >= 0")
 	}
 	return nil
 }
 
-func requireRuntimeFields(cfg *Config) []string {
+func requireRuntimeFields(cfg *Config, redisEnabled bool) []string {
 	var missing []string
 	if cfg.App.Listen == "" {
 		missing = append(missing, "app.listen")
@@ -351,6 +388,9 @@ func requireRuntimeFields(cfg *Config) []string {
 	}
 	if strings.TrimSpace(cfg.Auth.JWTSigningKey) == "" {
 		missing = append(missing, "auth.jwt_signing_key")
+	}
+	if redisEnabled && strings.TrimSpace(cfg.Redis.Addr) == "" {
+		missing = append(missing, "redis.addr")
 	}
 	return missing
 }
@@ -383,34 +423,29 @@ func validateMissing(missing []string) error {
 }
 
 func envString(key string, dst *string) {
-	if v, ok := os.LookupEnv(key); ok && v != "" {
+	if v, ok := os.LookupEnv(key); ok {
 		*dst = v
 	}
 }
 
-func envInt(key string, dst *int, warns *warningCollector) {
-	if v, ok := os.LookupEnv(key); ok {
-		n, err := strconv.Atoi(v)
-		if err != nil {
-			warns.add("config invalid int", err, slog.String("key", key), slog.String("value", v))
-			return
-		}
-		*dst = n
+func envInt(key string, dst *int) error {
+	v, ok := os.LookupEnv(key)
+	if !ok {
+		return nil
 	}
+	if strings.TrimSpace(v) == "" {
+		*dst = 0
+		return nil
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil {
+		return fmt.Errorf("config: parse environment %s as integer: %w", key, err)
+	}
+	*dst = n
+	return nil
 }
 
-func envBool(key string, dst *bool, warns *warningCollector) {
-	if v, ok := os.LookupEnv(key); ok {
-		b, err := strconv.ParseBool(v)
-		if err != nil {
-			warns.add("config invalid bool", err, slog.String("key", key), slog.String("value", v))
-			return
-		}
-		*dst = b
-	}
-}
-
-func overrideFromEnv(cfg *Config, warns *warningCollector) {
+func overrideFromEnv(cfg *Config, redisEnabled bool) error {
 	// app
 	envString("APP_NAME", &cfg.App.Name)
 	envString("APP_ENV", &cfg.App.Env)
@@ -427,28 +462,47 @@ func overrideFromEnv(cfg *Config, warns *warningCollector) {
 	// database
 	envString("DB_DRIVER", &cfg.Database.Driver)
 	envString("DB_HOST", &cfg.Database.Host)
-	envInt("DB_PORT", &cfg.Database.Port, warns)
+	if err := envInt("DB_PORT", &cfg.Database.Port); err != nil {
+		return err
+	}
 	envString("DB_USER", &cfg.Database.User)
 	envString("DB_PASSWORD", &cfg.Database.Password)
 	envString("DB_NAME", &cfg.Database.Name)
 	envString("DB_SSLMODE", &cfg.Database.SSLMode)
-	envInt("DB_MAX_OPEN_CONNS", &cfg.Database.MaxOpenConns, warns)
-	envInt("DB_MAX_IDLE_CONNS", &cfg.Database.MaxIdleConns, warns)
+	if err := envInt("DB_MAX_OPEN_CONNS", &cfg.Database.MaxOpenConns); err != nil {
+		return err
+	}
+	if err := envInt("DB_MAX_IDLE_CONNS", &cfg.Database.MaxIdleConns); err != nil {
+		return err
+	}
 	envString("DB_CONN_MAX_LIFETIME", &cfg.Database.ConnMaxLifetime)
-	envInt("DB_RETENTION_DAYS", &cfg.Database.RetentionDays, warns)
-	envInt("DB_TRAFFIC_RETENTION_DAYS", &cfg.Database.TrafficRetentionDays, warns)
+	if err := envInt("DB_RETENTION_DAYS", &cfg.Database.RetentionDays); err != nil {
+		return err
+	}
+	if err := envInt("DB_TRAFFIC_RETENTION_DAYS", &cfg.Database.TrafficRetentionDays); err != nil {
+		return err
+	}
 
-	// redis
-	envString("REDIS_ADDR", &cfg.Redis.Addr)
-	envString("REDIS_USERNAME", &cfg.Redis.Username)
-	envString("REDIS_PASSWORD", &cfg.Redis.Password)
-	envInt("REDIS_DB", &cfg.Redis.DB, warns)
-	envInt("REDIS_POOL_SIZE", &cfg.Redis.PoolSize, warns)
-	envInt("REDIS_MIN_IDLE_CONNS", &cfg.Redis.MinIdleConns, warns)
-	envString("REDIS_DIAL_TIMEOUT", &cfg.Redis.DialTimeout)
-	envString("REDIS_READ_TIMEOUT", &cfg.Redis.ReadTimeout)
-	envString("REDIS_WRITE_TIMEOUT", &cfg.Redis.WriteTimeout)
+	if redisEnabled {
+		// redis
+		envString("REDIS_ADDR", &cfg.Redis.Addr)
+		envString("REDIS_USERNAME", &cfg.Redis.Username)
+		envString("REDIS_PASSWORD", &cfg.Redis.Password)
+		if err := envInt("REDIS_DB", &cfg.Redis.DB); err != nil {
+			return err
+		}
+		if err := envInt("REDIS_POOL_SIZE", &cfg.Redis.PoolSize); err != nil {
+			return err
+		}
+		if err := envInt("REDIS_MIN_IDLE_CONNS", &cfg.Redis.MinIdleConns); err != nil {
+			return err
+		}
+		envString("REDIS_DIAL_TIMEOUT", &cfg.Redis.DialTimeout)
+		envString("REDIS_READ_TIMEOUT", &cfg.Redis.ReadTimeout)
+		envString("REDIS_WRITE_TIMEOUT", &cfg.Redis.WriteTimeout)
+	}
 
 	// auth (env only)
 	envString(EnvAdminPassword, &cfg.Auth.Password)
+	return nil
 }

@@ -25,7 +25,7 @@ func runMigrate(args []string) {
 		_, _ = infra.InitLogger("info", "text")
 	}
 
-	cfg, warnings, err := config.LoadForMigrateWithWarnings(configPath)
+	cfg, err := config.LoadForMigrate(configPath)
 	if err != nil {
 		infra.Log().Error("load config failed", err)
 		os.Exit(1)
@@ -39,10 +39,6 @@ func runMigrate(args []string) {
 		infra.Log().Error("init logger failed", err)
 		os.Exit(1)
 	}
-	for _, w := range warnings {
-		infra.Log().Warn(w.Msg, w.Err, w.Attrs...)
-	}
-
 	ctx := context.Background()
 	db, err := infra.NewGORMTimescale(ctx, cfg.Database)
 	if err != nil {

@@ -11,7 +11,9 @@ app:
   log_format: "text" # Log format: text (human-readable) or json (structured). This only changes output formatting.
   node_offline_threshold: "__APP_NODE_OFFLINE_THRESHOLD__"
 http:
-  trusted_proxies: __HTTP_TRUSTED_PROXIES__ # Use an empty array to trust only RemoteAddr. For a local reverse proxy, common values are ["127.0.0.1/32", "::1/128"].
+  # Controls proxy trust for authentication and failed-auth rate limiting. An empty array trusts only RemoteAddr there.
+  # Authenticated node observations still record the first valid X-Forwarded-For value; see docs/architecture.md.
+  trusted_proxies: __HTTP_TRUSTED_PROXIES__ # For a local reverse proxy, common values are ["127.0.0.1/32", "::1/128"].
 database:
   driver: "postgres"
   host: "127.0.0.1"
@@ -20,9 +22,9 @@ database:
   password: "__DB_PASS__"
   name: "__DB_NAME__"
   sslmode: "disable"
-  max_open_conns: 50
-  max_idle_conns: 10
-  conn_max_lifetime: "1h"
+  max_open_conns: 50 # 0 means no explicit open-connection limit.
+  max_idle_conns: 10 # Must not exceed a positive max_open_conns.
+  conn_max_lifetime: "1h" # 0 disables age-based connection expiry.
   # retention_days omitted means default 45 days.
   # traffic_retention_days is independent; omitted means max(retention_days, 45).
   # traffic_5m uses rolling retention and stays writable for rebuilds.
@@ -30,12 +32,12 @@ database:
 redis:
   addr: "__REDIS_ADDR__"
   username: ""
-  password: ""
+  password: "__REDIS_PASSWORD__"
   db: 0
-  pool_size: 50
-  min_idle_conns: 10
+  pool_size: 50 # 0 uses the go-redis default and requires min_idle_conns: 0.
+  min_idle_conns: 10 # Must not exceed a positive pool_size.
   dial_timeout: "5s"
   read_timeout: "1s"
   write_timeout: "1s"
 auth:
-  jwt_signing_key: "__JWT_SIGNING_KEY__"
+  jwt_signing_key: "__JWT_SIGNING_KEY__" # At least 32 bytes with no surrounding whitespace; the installer generates 32 random alphanumeric bytes.
