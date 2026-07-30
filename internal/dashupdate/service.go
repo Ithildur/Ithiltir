@@ -11,9 +11,7 @@ import (
 
 	"dash/internal/infra"
 	"dash/internal/lang"
-	"dash/internal/model"
 	"dash/internal/notify"
-	alertstore "dash/internal/store/alert"
 	systemstore "dash/internal/store/system"
 	kitlog "github.com/Ithildur/EiluneKit/logging"
 )
@@ -22,22 +20,24 @@ const (
 	autoCheckInterval   = 6 * time.Hour
 	autoStatusInterval  = 30 * time.Second
 	autoStartupDelay    = 30 * time.Second
-	autoNotifyTimeout   = 15 * time.Second
 	updateAutoStateName = "auto.env"
+	updateHandledName   = "finish.handled"
+	updateNotifiedName  = "finish.notified"
 )
 
 type Service struct {
-	system   *systemstore.Store
-	alert    *alertstore.Store
-	runner   *Runner
-	language string
-	logger   *kitlog.Helper
+	system        *systemstore.Store
+	notifications notificationQueue
+	runner        *Runner
+	language      string
+	logger        *kitlog.Helper
 }
 
-type autoPolicy struct {
-	Channel systemstore.DashUpdateChannel
-	Mode    systemstore.DashUpdateMode
+type notificationQueue interface {
+	EnqueueDefault(context.Context, string, notify.Message) (notify.EnqueueStatus, error)
 }
+
+type autoPolicy = systemstore.DashUpdatePolicy
 
 type autoState struct {
 	LastAvailableKey string
@@ -45,25 +45,32 @@ type autoState struct {
 	LastFinishedID   string
 }
 
-func NewService(system *systemstore.Store, alert *alertstore.Store, runner *Runner, language string) *Service {
-	if runner == nil {
-		runner = NewRunner()
-	}
+type finishedAutoJob struct {
+	status      State
+	handledPath string
+}
+
+func NewService(
+	system *systemstore.Store,
+	notifications notificationQueue,
+	runner *Runner,
+	language string,
+) *Service {
 	return &Service{
-		system:   system,
-		alert:    alert,
-		runner:   runner,
-		language: language,
-		logger:   infra.WithModule("dash-update"),
+		system:        system,
+		notifications: notifications,
+		runner:        runner,
+		language:      language,
+		logger:        infra.WithModule("dash-update"),
 	}
 }
 
 func (s *Service) Run(ctx context.Context) error {
-	if s == nil || s.system == nil || s.alert == nil || s.runner == nil {
+	if s == nil || s.system == nil || s.notifications == nil || s.runner == nil {
 		return fmt.Errorf("dash update service is not initialized")
 	}
 	if ctx == nil {
-		ctx = context.Background()
+		return fmt.Errorf("dash update context is nil")
 	}
 
 	startup := time.NewTimer(autoStartupDelay)
@@ -116,75 +123,105 @@ func (s *Service) checkAndAct(ctx context.Context) error {
 		return nil
 	}
 
-	autoStatePath, err := s.autoStatePath()
-	if err != nil {
-		return err
-	}
-	state, err := readAutoStateFile(autoStatePath)
-	if err != nil {
-		return err
-	}
 	availableKey := fmt.Sprintf("%s:%s", check.TargetChannel, check.LatestVersion)
 	if policy.Mode == systemstore.DashUpdateModeNotify {
+		autoStatePath, err := s.autoStatePath()
+		if err != nil {
+			return err
+		}
+		state, err := readAutoStateFile(autoStatePath)
+		if err != nil {
+			return err
+		}
 		if state.LastAvailableKey == availableKey {
 			return nil
 		}
-		sent, err := s.send(ctx, s.availableMessage(check))
-		if !sent {
+		if err := s.enqueueNotification(
+			ctx,
+			"dash-update:available:"+availableKey,
+			s.availableMessage(check),
+		); err != nil {
 			return err
 		}
 		state.LastAvailableKey = availableKey
-		return errors.Join(writeAutoStateFile(autoStatePath, state), err)
+		return writeAutoStateFile(autoStatePath, state)
 	}
 
 	if policy.Mode != systemstore.DashUpdateModeAuto {
 		return nil
 	}
 
-	if _, err := s.send(ctx, s.startingMessage(check)); err != nil {
-		s.logger.Warn("send dash update starting notification failed", err)
-	}
 	next, err := s.runner.Start(ctx, RunInput{
-		Action:  ActionUpdate,
-		Channel: Channel(policy.Channel),
-		Lang:    s.updateLang(),
+		Action:                  ActionUpdate,
+		Channel:                 Channel(policy.Channel),
+		Lang:                    s.updateLang(),
+		Origin:                  OriginAuto,
+		TargetVersion:           check.LatestVersion,
+		ExpectedCurrentVersion:  check.CurrentVersion,
+		ExpectedInstallRevision: check.InstallRevision,
 	})
 	if err != nil {
 		if errors.Is(err, ErrRunning) {
 			return nil
 		}
-		_, notifyErr := s.send(ctx, s.startFailedMessage(check, err))
+		if next.ID != "" && next.Origin == OriginAuto && isTerminalUpdateStatus(next.Status) {
+			s.notifyFinishedAutoUpdate(ctx)
+			return err
+		}
+		notifyErr := s.enqueueNotification(
+			ctx,
+			"dash-update:auto-start-failed:"+availableKey,
+			s.startFailedMessage(check, err),
+		)
 		if notifyErr != nil {
 			return errors.Join(err, notifyErr)
 		}
 		return err
 	}
-	if next.ID != "" {
-		state.LastAvailableKey = availableKey
-		state.LastStartedID = next.ID
-		if err := writeAutoStateFile(autoStatePath, state); err != nil {
-			return err
-		}
-	}
 	return nil
 }
 
 func (s *Service) notifyFinishedAutoUpdate(ctx context.Context) {
-	autoStatePath, err := s.autoStatePath()
+	paths, err := s.runner.paths()
 	if err != nil {
-		s.logger.Warn("resolve dash update auto state path failed", err)
+		s.logger.Warn("resolve dash update state path failed", err)
 		return
 	}
+	current := s.runner.Status(ctx)
+	jobs, scanErr := pendingFinishedAutoJobs(paths)
+	if scanErr != nil {
+		s.logger.Warn("scan finished dash auto updates failed", scanErr)
+	}
+	for _, job := range jobs {
+		err := s.enqueueNotification(
+			ctx,
+			"dash-update:finished:"+job.status.ID,
+			s.finishedMessage(job.status),
+		)
+		if err != nil {
+			s.logger.Warn("enqueue dash update finish notification failed", err)
+			continue
+		}
+		if err := markAutoJobHandled(job.handledPath); err != nil {
+			s.logger.Warn("mark dash update finish notification handled failed", err)
+		}
+	}
+	s.notifyLegacyFinishedAutoUpdate(ctx, paths, current)
+	if err := cleanupUpdateJobs(paths, current.ID); err != nil {
+		s.logger.Warn("clean up finished dash update jobs failed", err)
+	}
+}
+
+func (s *Service) notifyLegacyFinishedAutoUpdate(ctx context.Context, paths runnerPaths, status State) {
+	autoStatePath := filepath.Join(paths.stateDir, updateAutoStateName)
 	state, err := readAutoStateFile(autoStatePath)
 	if err != nil {
-		s.logger.Warn("read dash update auto state failed", err)
+		s.logger.Warn("read legacy dash update auto state failed", err)
 		return
 	}
 	if state.LastStartedID == "" || state.LastFinishedID == state.LastStartedID {
 		return
 	}
-
-	status := s.runner.Status(ctx)
 	if status.ID != state.LastStartedID {
 		return
 	}
@@ -194,60 +231,40 @@ func (s *Service) notifyFinishedAutoUpdate(ctx context.Context) {
 		return
 	}
 
-	sent, err := s.send(ctx, s.finishedMessage(status))
-	if err != nil {
-		s.logger.Warn("send dash update finish notification failed", err)
-		if !sent {
-			return
-		}
+	if err := s.enqueueNotification(
+		ctx,
+		"dash-update:finished:"+state.LastStartedID,
+		s.finishedMessage(status),
+	); err != nil {
+		s.logger.Warn("enqueue dash update finish notification failed", err)
+		return
 	}
 	state.LastFinishedID = state.LastStartedID
 	if err := writeAutoStateFile(autoStatePath, state); err != nil {
-		s.logger.Warn("write dash update auto state failed", err)
+		s.logger.Warn("write legacy dash update auto state failed", err)
 	}
 }
 
 func (s *Service) loadPolicy(ctx context.Context) (autoPolicy, error) {
 	return infra.WithPGReadTimeout(ctx, func(c context.Context) (autoPolicy, error) {
-		channel, err := s.system.GetDashUpdateChannel(c)
-		if err != nil {
-			return autoPolicy{}, err
-		}
-		mode, err := s.system.GetDashUpdateMode(c)
-		if err != nil {
-			return autoPolicy{}, err
-		}
-		return autoPolicy{
-			Channel: channel,
-			Mode:    mode,
-		}, nil
+		return s.system.GetDashUpdatePolicy(c)
 	})
 }
 
-func (s *Service) send(ctx context.Context, msg notify.Message) (bool, error) {
-	channels, err := infra.WithPGReadTimeout(ctx, func(c context.Context) ([]model.NotifyChannel, error) {
-		return s.alert.ListDefaultNotifyChannels(c)
-	})
-	if err != nil {
-		return false, fmt.Errorf("load dash update notify channels: %w", err)
-	}
-	if len(channels) == 0 {
-		return false, nil
-	}
-
-	sendCtx, cancel := context.WithTimeout(ctx, autoNotifyTimeout)
-	defer cancel()
-	var errs []error
-	var sent bool
-	for _, channel := range channels {
-		item := channel
-		if err := notify.Send(sendCtx, &item, msg); err != nil {
-			errs = append(errs, err)
-			continue
+func (s *Service) enqueueNotification(ctx context.Context, key string, msg notify.Message) error {
+	status, err := s.notifications.EnqueueDefault(ctx, key, msg)
+	switch status {
+	case notify.EnqueueQueued, notify.EnqueueSkippedNoTargets:
+		if err != nil {
+			s.logger.Warn("notification request handled with warning", err)
 		}
-		sent = true
+		return nil
+	default:
+		if err != nil {
+			return fmt.Errorf("enqueue dash update notification: %w", err)
+		}
+		return fmt.Errorf("enqueue dash update notification returned invalid status %q", status)
 	}
-	return sent, errors.Join(errs...)
 }
 
 func (s *Service) availableMessage(check Check) notify.Message {
@@ -270,29 +287,6 @@ func (s *Service) availableMessage(check Check) notify.Message {
 			"更新通道: " + string(check.TargetChannel),
 		}, "\n"),
 		Metadata: updateMessageMetadata("available", check),
-	}
-}
-
-func (s *Service) startingMessage(check Check) notify.Message {
-	if s.isEnglish() {
-		return notify.Message{
-			Title: "Dash auto update starting",
-			Body: strings.Join([]string{
-				"Current: " + check.CurrentVersion,
-				"Target: " + check.LatestVersion,
-				"Channel: " + string(check.TargetChannel),
-			}, "\n"),
-			Metadata: updateMessageMetadata("auto_starting", check),
-		}
-	}
-	return notify.Message{
-		Title: "Dash 自动更新开始",
-		Body: strings.Join([]string{
-			"当前版本: " + check.CurrentVersion,
-			"目标版本: " + check.LatestVersion,
-			"更新通道: " + string(check.TargetChannel),
-		}, "\n"),
-		Metadata: updateMessageMetadata("auto_starting", check),
 	}
 }
 
@@ -367,6 +361,15 @@ func finishedBody(status State, english bool) string {
 		if status.ExitCode != nil {
 			lines = append(lines, fmt.Sprintf("Exit code: %d", *status.ExitCode))
 		}
+		if status.TargetVersion != "" {
+			lines = append(lines, "Target: "+status.TargetVersion)
+		}
+		if status.Status == StatusFailed && status.FailureCode != "" {
+			lines = append(lines, "Failure: "+status.FailureCode)
+		}
+		if status.RecoveryPath != "" {
+			lines = append(lines, "Recovery files: "+status.RecoveryPath)
+		}
 		if status.Status == StatusFailed && status.LogTail != "" {
 			lines = append(lines, "", "Recent log:", status.LogTail)
 		}
@@ -381,6 +384,15 @@ func finishedBody(status State, english bool) string {
 	)
 	if status.ExitCode != nil {
 		lines = append(lines, fmt.Sprintf("退出码: %d", *status.ExitCode))
+	}
+	if status.TargetVersion != "" {
+		lines = append(lines, "目标版本: "+status.TargetVersion)
+	}
+	if status.Status == StatusFailed && status.FailureCode != "" {
+		lines = append(lines, "失败代码: "+status.FailureCode)
+	}
+	if status.RecoveryPath != "" {
+		lines = append(lines, "恢复文件: "+status.RecoveryPath)
 	}
 	if status.Status == StatusFailed && status.LogTail != "" {
 		lines = append(lines, "", "最近日志:", status.LogTail)
@@ -400,12 +412,14 @@ func updateMessageMetadata(event string, check Check) map[string]string {
 
 func statusMessageMetadata(event string, status State) map[string]string {
 	return map[string]string{
-		"kind":    "dash_update",
-		"event":   event,
-		"job_id":  status.ID,
-		"status":  string(status.Status),
-		"action":  string(status.Action),
-		"channel": string(status.Channel),
+		"kind":           "dash_update",
+		"event":          event,
+		"job_id":         status.ID,
+		"status":         string(status.Status),
+		"action":         string(status.Action),
+		"channel":        string(status.Channel),
+		"target_version": status.TargetVersion,
+		"failure_code":   status.FailureCode,
 	}
 }
 
@@ -426,6 +440,115 @@ func (s *Service) autoStatePath() (string, error) {
 		return "", err
 	}
 	return filepath.Join(paths.stateDir, updateAutoStateName), nil
+}
+
+func pendingFinishedAutoJobs(paths runnerPaths) ([]finishedAutoJob, error) {
+	entries, err := os.ReadDir(paths.jobsDir)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	jobs := make([]finishedAutoJob, 0, len(entries))
+	var scanErr error
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		task := paths.job(entry.Name())
+		item, err := readUpdateStatusFile(task.statusPath)
+		if err != nil {
+			scanErr = errors.Join(scanErr, fmt.Errorf("read update job %q: %w", entry.Name(), err))
+			continue
+		}
+		if item.ID != entry.Name() {
+			scanErr = errors.Join(scanErr, fmt.Errorf("update job directory %q contains id %q", entry.Name(), item.ID))
+			continue
+		}
+		if item.Origin != OriginAuto || !isTerminalUpdateStatus(item.Status) {
+			continue
+		}
+		handled, err := autoJobHandled(task.dir)
+		if err != nil {
+			scanErr = errors.Join(scanErr, fmt.Errorf("inspect update job %q notification marker: %w", item.ID, err))
+			continue
+		}
+		if handled {
+			continue
+		}
+		jobs = append(jobs, finishedAutoJob{
+			status:      stateFromStatus(item, task.logPath),
+			handledPath: filepath.Join(task.dir, updateHandledName),
+		})
+	}
+	return jobs, scanErr
+}
+
+func autoJobHandled(dir string) (bool, error) {
+	for _, name := range []string{updateHandledName, updateNotifiedName} {
+		if _, err := os.Stat(filepath.Join(dir, name)); err == nil {
+			return true, nil
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return false, err
+		}
+	}
+	return false, nil
+}
+
+func markAutoJobHandled(path string) error {
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if errors.Is(err, os.ErrExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	return f.Close()
+}
+
+func cleanupUpdateJobs(paths runnerPaths, currentID string) error {
+	if currentID == "" {
+		return nil
+	}
+	entries, err := os.ReadDir(paths.jobsDir)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+
+	var cleanupErr error
+	for _, entry := range entries {
+		if !entry.IsDir() || entry.Name() == currentID {
+			continue
+		}
+		task := paths.job(entry.Name())
+		item, err := readUpdateStatusFile(task.statusPath)
+		if err != nil || item.ID != entry.Name() || !isTerminalUpdateStatus(item.Status) {
+			continue
+		}
+		switch item.Origin {
+		case OriginManual:
+		case OriginAuto:
+			handled, err := autoJobHandled(task.dir)
+			if err != nil || !handled {
+				continue
+			}
+		default:
+			continue
+		}
+		if err := os.RemoveAll(task.dir); err != nil {
+			cleanupErr = errors.Join(cleanupErr, fmt.Errorf("remove update job %q: %w", item.ID, err))
+		}
+	}
+	return cleanupErr
+}
+
+func isTerminalUpdateStatus(status Status) bool {
+	return status == StatusCompleted || status == StatusFailed
 }
 
 func readAutoStateFile(path string) (autoState, error) {

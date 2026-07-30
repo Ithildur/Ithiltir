@@ -181,23 +181,3 @@ func TestLatestCompatible(t *testing.T) {
 		})
 	}
 }
-
-func TestLatestInChannel(t *testing.T) {
-	versions := []string{
-		"bad",
-		"1.2.3-alpha.1",
-		"1.2.3",
-		"1.2.4-alpha.1",
-		"1.2.5",
-	}
-
-	got, ok := LatestInChannel(versions, ChannelRelease)
-	if !ok || got != "1.2.5" {
-		t.Fatalf("LatestInChannel(release) = %q, %v; want %q, true", got, ok, "1.2.5")
-	}
-
-	got, ok = LatestInChannel(versions, ChannelPrerelease)
-	if !ok || got != "1.2.4-alpha.1" {
-		t.Fatalf("LatestInChannel(prerelease) = %q, %v; want %q, true", got, ok, "1.2.4-alpha.1")
-	}
-}

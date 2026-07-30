@@ -151,20 +151,6 @@ func (s *Store) GetDashUpdatePolicy(ctx context.Context) (DashUpdatePolicy, erro
 	return DashUpdatePolicy{Channel: channel, Mode: mode}, nil
 }
 
-// GetDashUpdateChannel keeps the pre-policy reader available while the update
-// service is migrated in the following commit.
-func (s *Store) GetDashUpdateChannel(ctx context.Context) (DashUpdateChannel, error) {
-	policy, err := s.GetDashUpdatePolicy(ctx)
-	return policy.Channel, err
-}
-
-// GetDashUpdateMode keeps the pre-policy reader available while the update
-// service is migrated in the following commit.
-func (s *Store) GetDashUpdateMode(ctx context.Context) (DashUpdateMode, error) {
-	policy, err := s.GetDashUpdatePolicy(ctx)
-	return policy.Mode, err
-}
-
 func (s *Store) SetDashUpdateChannel(ctx context.Context, channel DashUpdateChannel) error {
 	normalized, ok := ParseDashUpdateChannel(channel)
 	if !ok {

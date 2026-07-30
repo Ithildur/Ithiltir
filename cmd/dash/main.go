@@ -42,6 +42,9 @@ func main() {
 		runMigrate(os.Args[2:])
 		return
 	}
+	if len(os.Args) > 1 && os.Args[1] == "update" {
+		os.Exit(runUpdate(os.Args[2:]))
+	}
 	if len(os.Args) > 1 && os.Args[1] == "check-redis" {
 		os.Exit(runRedisCheck(os.Args[2:], os.Stdout, os.Stderr))
 	}
@@ -187,7 +190,6 @@ func main() {
 		infra.Fatal("init traffic runtime failed", err)
 	}
 	dashUpdateRunner := dashupdate.NewRunner()
-	dashUpdateService := dashupdate.NewService(st.System, st.Alert, dashUpdateRunner, cfg.App.EffectiveLanguage())
 	alertService, err := alert.NewService(st.Alert, st.Front, alert.MessageConfig{
 		Language: cfg.App.EffectiveLanguage(),
 		Location: appLocation,
@@ -195,6 +197,7 @@ func main() {
 	if err != nil {
 		infra.Fatal("init alert service failed", err)
 	}
+	dashUpdateService := dashupdate.NewService(st.System, alertService, dashUpdateRunner, cfg.App.EffectiveLanguage())
 	deps := httpapi.Dependencies{
 		Stores:         st,
 		Auth:           jwtAuth,

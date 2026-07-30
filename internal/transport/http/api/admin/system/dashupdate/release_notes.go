@@ -25,8 +25,6 @@ func releaseNotesRoute(r *routes.Blueprint, h *handler) {
 }
 
 func (h *handler) releaseNotesHandler(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Cache-Control", "no-store")
-
 	sourceURL, ok := releaseNotesURL(r.URL.Query().Get("lang"))
 	if !ok {
 		httperr.Write(w, http.StatusBadRequest, "invalid_fields", "invalid lang")

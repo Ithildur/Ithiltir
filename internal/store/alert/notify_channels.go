@@ -88,39 +88,6 @@ func (s *Store) ListChannelsByIDs(ctx context.Context, ids []int64) ([]model.Not
 	return items, err
 }
 
-// ListDefaultNotifyChannels keeps the direct-send update service working until
-// it switches to the notification queue in the following commit.
-func (s *Store) ListDefaultNotifyChannels(ctx context.Context) ([]model.NotifyChannel, error) {
-	settings, err := s.GetSettings(ctx)
-	if err != nil {
-		return nil, err
-	}
-	if !settings.Enabled {
-		return []model.NotifyChannel{}, nil
-	}
-	ids, err := DecodeChannelIDs(settings.ChannelIDs)
-	if err != nil {
-		return nil, err
-	}
-	channels, err := s.ListChannelsByIDs(ctx, ids)
-	if err != nil {
-		return nil, err
-	}
-	byID := make(map[int64]model.NotifyChannel, len(channels))
-	for _, channel := range channels {
-		if channel.Enabled {
-			byID[channel.ID] = channel
-		}
-	}
-	out := make([]model.NotifyChannel, 0, len(byID))
-	for _, id := range ids {
-		if channel, ok := byID[id]; ok {
-			out = append(out, channel)
-		}
-	}
-	return out, nil
-}
-
 func (s *Store) GetChannel(ctx context.Context, id int64) (*model.NotifyChannel, error) {
 	var item model.NotifyChannel
 	err := s.db.WithContext(ctx).
