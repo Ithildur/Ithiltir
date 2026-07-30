@@ -50,6 +50,7 @@ WITH params AS (
            COALESCE(NULLIF(s.interval_sec, 0), 3) AS interval_sec
     FROM servers s
     WHERE s.id = ?
+      AND s.is_deleted = FALSE
 ),
 series AS (
     SELECT generate_series(
@@ -96,7 +97,7 @@ ORDER BY series.ts
 		if expected <= 0 {
 			expected = 1
 		}
-		rate := float64(row.SampleCount) / float64(expected)
+		rate := math.Min(1, float64(row.SampleCount)/float64(expected))
 		status := onlineStatus(rate)
 		points = append(points, OnlinePoint{
 			TS:     row.TS,

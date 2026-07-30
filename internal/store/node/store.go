@@ -1,44 +1,31 @@
 package node
 
 import (
-	"context"
 	"fmt"
 	"time"
 
-	"dash/internal/model"
 	"dash/internal/store/frontcache"
-	"github.com/redis/go-redis/v9"
+	"dash/internal/store/frontprojection"
 	"gorm.io/gorm"
 )
 
 type Store struct {
-	db      *gorm.DB
-	mem     *memState
-	front   *frontcache.Store
-	auth    nodeAuthBackend
-	runtime nodeRuntimeBackend
+	db         *gorm.DB
+	mem        *memState
+	front      *frontcache.Store
+	projection *frontprojection.Gate
+	mutations  nodeMutations
+	trafficLoc *time.Location
 }
 
-type nodeAuthBackend interface {
-	syncServerCache(srv model.Server, oldSecret string) error
-	deleteServerMeta(id int64, secret string) error
-	getSecretByID(id int64) (string, error)
-	getServerBySecret(secret string) (model.Server, error)
-}
-
-type nodeRuntimeBackend interface {
-	getServerRuntimeIP(ctx context.Context, serverID int64) (string, bool, error)
-	setServerRuntime(ctx context.Context, serverID int64, ip string, lastOnlineAt time.Time) error
-}
-
-func New(db *gorm.DB, redisClient *redis.Client, front *frontcache.Store) *Store {
+func New(db *gorm.DB, front *frontcache.Store, projection *frontprojection.Gate, trafficLoc *time.Location) *Store {
 	mem := newMemory()
 	return &Store{
-		db:      db,
-		mem:     mem,
-		front:   front,
-		auth:    newNodeAuthBackend(mem),
-		runtime: newNodeRuntimeBackend(redisClient, mem),
+		db:         db,
+		mem:        mem,
+		front:      front,
+		projection: projection,
+		trafficLoc: trafficLoc,
 	}
 }
 
@@ -46,8 +33,18 @@ func (s *Store) Validate() error {
 	if s == nil {
 		return fmt.Errorf("store: node store is nil")
 	}
-	if s.db == nil {
-		return fmt.Errorf("store: DB is nil")
+	if s.db == nil || s.mem == nil || s.front == nil || s.projection == nil || s.trafficLoc == nil {
+		return fmt.Errorf("store: node store is not initialized")
 	}
 	return nil
+}
+
+// WithMetricsIngest serializes the full ingest path with lifecycle changes for
+// the authenticated node. Runtime samples do not count as structural
+// projection mutations.
+func (s *Store) WithMetricsIngest(id int64, fn func() error) error {
+	if s == nil {
+		return fmt.Errorf("store: node store is nil")
+	}
+	return s.mutations.runtime(id, fn)
 }

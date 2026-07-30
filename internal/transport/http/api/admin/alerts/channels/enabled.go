@@ -44,9 +44,7 @@ func (h *handler) enabledHandler(w http.ResponseWriter, r *http.Request, rawID s
 	}
 
 	if _, err := infra.WithPGWriteTimeout(r.Context(), func(c context.Context) (struct{}, error) {
-		return struct{}{}, h.store.ReplaceChannel(c, id, map[string]any{
-			"enabled": *in.Enabled,
-		})
+		return struct{}{}, h.store.SetChannelEnabled(c, id, *in.Enabled)
 	}); err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			httperr.Write(w, http.StatusNotFound, "not_found", "channel not found")

@@ -9,7 +9,7 @@ import (
 )
 
 func TestIntegrationGroupNodesGuestVisibleHidesGroupsWithoutVisibleNodes(t *testing.T) {
-	st, _ := newIntegrationStore(t)
+	st := newIntegrationStore(t)
 	ctx := context.Background()
 
 	visibleGroup := createGroupNodeGroup(t, st, "public")

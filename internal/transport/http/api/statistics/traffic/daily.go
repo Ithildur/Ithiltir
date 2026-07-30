@@ -32,6 +32,7 @@ func (h *handler) dailyRoute(r *routes.Blueprint) {
 		"List daily traffic summaries",
 		routes.Func(h.dailyHandler),
 		routes.Auth(routes.AuthOptional),
+		routes.Use(h.optionalBearer),
 	)
 }
 
@@ -54,21 +55,25 @@ func (h *handler) dailyHandler(w http.ResponseWriter, r *http.Request) {
 	in.Period = period
 	allowed, err := h.canReadTraffic(r.Context(), r, in.ServerID)
 	if err != nil {
-		httperr.TryWrite(w, httperr.ServiceUnavailable(err))
+		writeTrafficAccessError(w, err)
 		return
 	}
 	if !allowed {
 		httperr.TryWrite(w, httperr.Forbidden(errTrafficGuestForbidden))
 		return
 	}
-	effectiveSettings, err := loadEffectiveSettings(r.Context(), h.traffic, in.ServerID, settings)
+	effectiveSettings, err := loadEffectiveSettings(r.Context(), h.traffic, in.ServerID, settings, h.location)
 	if err != nil {
 		httperr.Write(w, http.StatusServiceUnavailable, "db_error", "failed to fetch traffic settings")
 		return
 	}
 	in.applySettings(effectiveSettings)
 
-	q := queryFromInput(in, h.location)
+	q, err := queryFromInput(in, h.location)
+	if err != nil {
+		httperr.TryWrite(w, httperr.ServiceUnavailable(err))
+		return
+	}
 	if in.UsageMode == trafficstore.UsageBilling {
 		q.P95Enabled, err = loadP95Enabled(r.Context(), h.traffic, in.ServerID)
 		if err != nil {

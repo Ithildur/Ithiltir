@@ -17,8 +17,6 @@ import (
 	nodestore "dash/internal/store/node"
 	systemstore "dash/internal/store/system"
 	"dash/internal/transport/http/httperr"
-	"dash/internal/transport/http/request"
-	authjwt "github.com/Ithildur/EiluneKit/auth/jwt"
 	"github.com/Ithildur/EiluneKit/http/response"
 	"github.com/Ithildur/EiluneKit/http/routes"
 )
@@ -37,23 +35,23 @@ type listInput struct {
 }
 
 type handler struct {
-	front         *frontcache.Store
-	node          *nodestore.Store
-	system        *systemstore.Store
-	staleAfterSec int
-	auth          *authjwt.Manager
+	front          *frontcache.Store
+	node           *nodestore.Store
+	system         *systemstore.Store
+	staleAfterSec  int
+	optionalBearer routes.Middleware
 }
 
-func newHandler(front *frontcache.Store, node *nodestore.Store, system *systemstore.Store, offlineThreshold time.Duration, auth *authjwt.Manager) *handler {
+func newHandler(front *frontcache.Store, node *nodestore.Store, system *systemstore.Store, offlineThreshold time.Duration, optionalBearer routes.Middleware) *handler {
 	if offlineThreshold <= 0 {
 		offlineThreshold = config.DefaultNodeOfflineThreshold
 	}
 	return &handler{
-		front:         front,
-		node:          node,
-		system:        system,
-		staleAfterSec: metrics.DurationSecondsCeil(offlineThreshold),
-		auth:          auth,
+		front:          front,
+		node:           node,
+		system:         system,
+		staleAfterSec:  metrics.DurationSecondsCeil(offlineThreshold),
+		optionalBearer: optionalBearer,
 	}
 }
 
@@ -64,6 +62,7 @@ func (h *handler) metricsRoute(r *routes.Blueprint) {
 		routes.Func(h.metricsHandler),
 		routes.Tags("front"),
 		routes.Auth(routes.AuthOptional),
+		routes.Use(h.optionalBearer),
 	)
 }
 
@@ -253,7 +252,7 @@ func sortByOrder(nodes []metrics.NodeView) {
 }
 
 func (h *handler) isAuthorized(r *http.Request) bool {
-	return request.HasValidBearer(r, h.auth)
+	return r != nil && routes.Authenticated(r.Context())
 }
 
 func logCacheWarn(action string, err error) {

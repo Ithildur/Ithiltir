@@ -2,7 +2,6 @@ package nodes
 
 import (
 	"context"
-	"fmt"
 	"net/http"
 	"strings"
 
@@ -49,21 +48,13 @@ func listRoute(r *routes.Blueprint, h *handler) {
 
 func (h *handler) listHandler(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	w.Header().Set("Cache-Control", "no-store")
 
 	nodes, err := loadNodes(ctx, h.store)
 	if err != nil {
 		httperr.Write(w, http.StatusServiceUnavailable, "db_error", "failed to fetch nodes")
 		return
 	}
-	views, err := nodeViews(nodes)
-	if err != nil {
-		infra.WithModule("admin.nodes").Error("node tags are invalid", err)
-		httperr.Write(w, http.StatusServiceUnavailable, "invalid_node_tags", "invalid node tags")
-		return
-	}
-
-	response.WriteJSON(w, http.StatusOK, views)
+	response.WriteJSON(w, http.StatusOK, nodeViews(nodes))
 }
 
 func loadNodes(ctx context.Context, st *nodestore.Store) ([]nodestore.NodeItem, error) {
@@ -99,9 +90,9 @@ func loadNodes(ctx context.Context, st *nodestore.Store) ([]nodestore.NodeItem, 
 	})
 }
 
-func nodeViews(nodes []nodestore.NodeItem) ([]nodeView, error) {
+func nodeViews(nodes []nodestore.NodeItem) []nodeView {
 	if len(nodes) == 0 {
-		return make([]nodeView, 0), nil
+		return make([]nodeView, 0)
 	}
 	out := make([]nodeView, 0, len(nodes))
 	for _, n := range nodes {
@@ -109,11 +100,7 @@ func nodeViews(nodes []nodestore.NodeItem) ([]nodeView, error) {
 		if n.AgentVersion != nil {
 			version = strings.TrimSpace(*n.AgentVersion)
 		}
-		tags, err := parseNodeTags(n.Tags)
-		if err != nil {
-			return nil, fmt.Errorf("node %d tags: %w", n.ID, err)
-		}
-		out = append(out, nodeView{
+		view := nodeView{
 			ID:                       n.ID,
 			Name:                     n.Name,
 			Hostname:                 n.Hostname,
@@ -126,7 +113,7 @@ func nodeViews(nodes []nodestore.NodeItem) ([]nodeView, error) {
 			TrafficBillingTimezone:   n.TrafficBillingTimezone,
 			TrafficDirectionMode:     n.TrafficDirectionMode,
 			Secret:                   n.Secret,
-			Tags:                     tags,
+			Tags:                     parseNodeTags(n.Tags),
 			DisplayOrder:             n.DisplayOrder,
 			GroupIDs:                 n.GroupIDs,
 			Version: versionView{
@@ -134,9 +121,10 @@ func nodeViews(nodes []nodestore.NodeItem) ([]nodeView, error) {
 				IsOutdated:         isVersionOutdated(version),
 				SupportsAutoUpdate: supportsAutoUpdate(version),
 			},
-		})
+		}
+		out = append(out, view)
 	}
-	return out, nil
+	return out
 }
 
 func isVersionOutdated(version string) bool {

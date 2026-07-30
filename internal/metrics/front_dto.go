@@ -1,7 +1,6 @@
 package metrics
 
 import (
-	"fmt"
 	"math"
 	"sort"
 	"strconv"
@@ -69,14 +68,14 @@ type CPULoad struct {
 }
 
 type Memory struct {
-	TotalBytes     uint64  `json:"total_bytes"`
-	UsedBytes      uint64  `json:"used_bytes"`
-	AvailableBytes uint64  `json:"available_bytes"`
-	BuffersBytes   uint64  `json:"buffers_bytes"`
-	CachedBytes    uint64  `json:"cached_bytes"`
+	TotalBytes     int64   `json:"total_bytes"`
+	UsedBytes      int64   `json:"used_bytes"`
+	AvailableBytes int64   `json:"available_bytes"`
+	BuffersBytes   int64   `json:"buffers_bytes"`
+	CachedBytes    int64   `json:"cached_bytes"`
 	UsedRatio      float64 `json:"used_ratio"`
-	SwapTotalBytes uint64  `json:"swap_total_bytes"`
-	SwapUsedBytes  uint64  `json:"swap_used_bytes"`
+	SwapTotalBytes int64   `json:"swap_total_bytes"`
+	SwapUsedBytes  int64   `json:"swap_used_bytes"`
 }
 
 type Disk struct {
@@ -89,8 +88,8 @@ type Disk struct {
 type DiskMount struct {
 	Mountpoint string  `json:"mountpoint"`
 	FSType     string  `json:"fs_type"`
-	TotalBytes uint64  `json:"total_bytes"`
-	UsedBytes  uint64  `json:"used_bytes"`
+	TotalBytes int64   `json:"total_bytes"`
+	UsedBytes  int64   `json:"used_bytes"`
 	UsedRatio  float64 `json:"used_ratio"`
 }
 
@@ -105,27 +104,27 @@ type Network struct {
 }
 
 type NetTotal struct {
-	BytesRecv uint64  `json:"bytes_recv"`
-	BytesSent uint64  `json:"bytes_sent"`
+	BytesRecv int64   `json:"bytes_recv"`
+	BytesSent int64   `json:"bytes_sent"`
 	RecvBPS   float64 `json:"recv_bps"`
 	SentBPS   float64 `json:"sent_bps"`
 }
 
 type NetInterface struct {
 	Name      string  `json:"name"`
-	BytesRecv uint64  `json:"bytes_recv"`
-	BytesSent uint64  `json:"bytes_sent"`
+	BytesRecv int64   `json:"bytes_recv"`
+	BytesSent int64   `json:"bytes_sent"`
 	RecvBPS   float64 `json:"recv_bps"`
 	SentBPS   float64 `json:"sent_bps"`
 }
 
 type Processes struct {
-	Count int `json:"count"`
+	Count int32 `json:"count"`
 }
 
 type Connections struct {
-	TCP int `json:"tcp"`
-	UDP int `json:"udp"`
+	TCP int32 `json:"tcp"`
+	UDP int32 `json:"udp"`
 }
 
 type RAID struct {
@@ -165,12 +164,9 @@ func DurationSecondsCeil(d time.Duration) int {
 	return int(math.Ceil(d.Seconds()))
 }
 
-func BuildNodeView(server model.Server, report NodeReport, staleAfterSec int) (NodeView, error) {
+func BuildNodeView(server model.Server, report NodeReport, staleAfterSec int) NodeView {
 	sys := report.Metrics.System
-	tags, err := nodetags.Parse(server.Tags)
-	if err != nil {
-		return NodeView{}, fmt.Errorf("server %d tags: %w", server.ID, err)
-	}
+	tags, _ := nodetags.ParseStored(server.Tags)
 
 	node := NodeMeta{
 		ID:    strconv.FormatInt(server.ID, 10),
@@ -231,11 +227,11 @@ func BuildNodeView(server model.Server, report NodeReport, staleAfterSec int) (N
 	mem := report.Metrics.Memory
 	memTotal := mem.Total
 	if memTotal == 0 && server.MemTotal != nil && *server.MemTotal > 0 {
-		memTotal = uint64(*server.MemTotal)
+		memTotal = *server.MemTotal
 	}
 	swapTotal := mem.SwapTotal
 	if swapTotal == 0 && server.SwapTotal != nil && *server.SwapTotal > 0 {
-		swapTotal = uint64(*server.SwapTotal)
+		swapTotal = *server.SwapTotal
 	}
 	memory := Memory{
 		TotalBytes:     memTotal,
@@ -268,17 +264,7 @@ func BuildNodeView(server model.Server, report NodeReport, staleAfterSec int) (N
 	if raid := report.Metrics.Raid; raid.Supported || raid.Available || len(raid.Arrays) > 0 {
 		arrays := make([]RAIDArray, 0, len(raid.Arrays))
 		for _, array := range raid.Arrays {
-			arrays = append(arrays, RAIDArray{
-				Name:         array.Name,
-				Status:       array.Status,
-				Active:       array.Active,
-				Working:      array.Working,
-				Failed:       array.Failed,
-				Health:       array.Health,
-				Members:      array.Members,
-				SyncStatus:   array.SyncStatus,
-				SyncProgress: array.SyncProgress,
-			})
+			arrays = append(arrays, RAIDArray(array))
 		}
 		out.Raid = &RAID{
 			Supported: raid.Supported,
@@ -287,7 +273,7 @@ func BuildNodeView(server model.Server, report NodeReport, staleAfterSec int) (N
 		}
 	}
 
-	return out, nil
+	return out
 }
 
 func buildSearchText(candidates ...string) []string {

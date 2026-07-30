@@ -49,14 +49,16 @@ const (
 	NotifyTypeSlack    NotifyType = "slack"
 	NotifyTypeDiscord  NotifyType = "discord"
 
-	OutboxStatusPending         OutboxStatus = "pending"
-	OutboxStatusSending         OutboxStatus = "sending"
-	OutboxStatusSent            OutboxStatus = "sent"
-	OutboxStatusRetry           OutboxStatus = "retry"
-	OutboxStatusFailedPermanent OutboxStatus = "failed_permanent"
+	OutboxStatusPending   OutboxStatus = "pending"
+	OutboxStatusSending   OutboxStatus = "sending"
+	OutboxStatusSent      OutboxStatus = "sent"
+	OutboxStatusRetry     OutboxStatus = "retry"
+	OutboxStatusBlocked   OutboxStatus = "blocked"
+	OutboxStatusPaused    OutboxStatus = "paused"
+	OutboxStatusDiscarded OutboxStatus = "discarded"
 
 	TaskStatusPending TaskStatus = "pending"
-	TaskStatusLeased  TaskStatus = "leased"
+	TaskStatusFailed  TaskStatus = "failed"
 )
 
 // Group represents table groups.
@@ -74,19 +76,19 @@ func (Group) TableName() string { return "groups" }
 // Server represents table servers.
 type Server struct {
 	ID                       int64          `gorm:"column:id;primaryKey;autoIncrement"`
-	Name                     string         `gorm:"column:name;size:64;not null"`
-	Hostname                 string         `gorm:"column:hostname;size:128;not null"`
+	Name                     string         `gorm:"column:name;size:255;not null"`
+	Hostname                 string         `gorm:"column:hostname;size:255;not null"`
 	Secret                   string         `gorm:"column:secret;size:128;not null;unique"` // 节点 agent 鉴权密钥，访客接口不能暴露。
 	Tags                     datatypes.JSON `gorm:"column:tags"`
 	IP                       *string        `gorm:"column:ip"`
-	OS                       *string        `gorm:"column:os"`
-	Platform                 *string        `gorm:"column:platform"`
-	PlatformVersion          *string        `gorm:"column:platform_version"`
-	KernelVersion            *string        `gorm:"column:kernel_version"`
-	Arch                     *string        `gorm:"column:arch"`
+	OS                       *string        `gorm:"column:os;size:32"`
+	Platform                 *string        `gorm:"column:platform;size:32"`
+	PlatformVersion          *string        `gorm:"column:platform_version;size:255"`
+	KernelVersion            *string        `gorm:"column:kernel_version;size:255"`
+	Arch                     *string        `gorm:"column:arch;size:32"`
 	Location                 *string        `gorm:"column:location"`
-	CPUModel                 *string        `gorm:"column:cpu_model"`
-	CPUVendor                *string        `gorm:"column:cpu_vendor"`
+	CPUModel                 *string        `gorm:"column:cpu_model;type:text"`
+	CPUVendor                *string        `gorm:"column:cpu_vendor;type:text"`
 	CPUCoresPhys             *int16         `gorm:"column:cpu_cores_physical"`
 	CPUCoresLog              *int16         `gorm:"column:cpu_cores_logical"`
 	CPUSockets               *int16         `gorm:"column:cpu_sockets"`
@@ -94,20 +96,20 @@ type Server struct {
 	MemTotal                 *int64         `gorm:"column:mem_total"`
 	SwapTotal                *int64         `gorm:"column:swap_total"`
 	DiskTotal                *int64         `gorm:"column:disk_total"`
-	RootPath                 *string        `gorm:"column:root_path;size:256"` // 前端根磁盘展示入口，通常来自最大逻辑盘挂载点。
-	RootFSType               *string        `gorm:"column:root_fs_type"`
+	RootPath                 *string        `gorm:"column:root_path;type:text"` // 前端根磁盘展示入口，通常来自最大逻辑盘挂载点。
+	RootFSType               *string        `gorm:"column:root_fs_type;size:32"`
 	RaidSupported            *bool          `gorm:"column:raid_supported"`
 	RaidAvailable            *bool          `gorm:"column:raid_available"`
 	IntervalSec              *int32         `gorm:"column:interval_sec"`
 	IsGuestVisible           bool           `gorm:"column:is_guest_visible;not null;default:false"`    // 访客读取历史指标和流量时按它过滤。
 	TrafficP95Enabled        bool           `gorm:"column:traffic_p95_enabled;not null;default:false"` // 高级计费模式下是否为该节点计算 95 带宽。
-	TrafficCycleMode         string         `gorm:"column:traffic_cycle_mode;size:32;not null;default:'default'"`
+	TrafficCycleMode         string         `gorm:"column:traffic_cycle_mode;size:32;not null;default:'calendar_month'"`
 	TrafficBillingStartDay   int16          `gorm:"column:traffic_billing_start_day;not null;default:1"`
 	TrafficBillingAnchorDate string         `gorm:"column:traffic_billing_anchor_date;size:10;not null;default:''"`
 	TrafficBillingTimezone   string         `gorm:"column:traffic_billing_timezone;size:64;not null;default:''"`
 	TrafficDirectionMode     string         `gorm:"column:traffic_direction_mode;size:16;not null;default:'default'"`
 	IsDeleted                bool           `gorm:"column:is_deleted;not null;default:false"`
-	AgentVersion             *string        `gorm:"column:agent_version"`
+	AgentVersion             *string        `gorm:"column:agent_version;size:64"`
 	Remark                   *string        `gorm:"column:remark"`
 	DisplayOrder             int            `gorm:"column:display_order;not null;default:0"`
 	CreatedAt                time.Time      `gorm:"column:created_at;autoCreateTime"`
@@ -158,7 +160,7 @@ type MetricValues struct {
 	UptimeSeconds     int64    `gorm:"column:uptime_seconds;default:0"`
 	RaidSupported     bool     `gorm:"column:raid_supported;default:false"`
 	RaidAvailable     bool     `gorm:"column:raid_available;default:false"`
-	RaidOverallHealth string   `gorm:"column:raid_overall_health;default:''"`
+	RaidOverallHealth string   `gorm:"column:raid_overall_health;size:16;default:''"`
 	PSICPUSomeAvg10   *float64 `gorm:"column:psi_cpu_some_avg10"`
 	PSICPUSomeAvg60   *float64 `gorm:"column:psi_cpu_some_avg60"`
 	PSICPUSomeAvg300  *float64 `gorm:"column:psi_cpu_some_avg300"`
@@ -292,11 +294,11 @@ func ServerCurrentMetricUpdateColumns() []string {
 // DiskMetric represents table disk_metrics (per base_io time series).
 type DiskMetric struct {
 	ServerID    int64     `gorm:"column:server_id;primaryKey"`
-	Name        string    `gorm:"column:name;size:128;primaryKey"`
-	Ref         string    `gorm:"column:ref;size:128"`
+	Name        string    `gorm:"column:name;size:255;primaryKey"`
+	Ref         string    `gorm:"column:ref;size:320"`
 	Kind        string    `gorm:"column:kind;size:16"`
 	Role        string    `gorm:"column:role;size:16"` // primary 设备进入前端磁盘 IO 汇总，其他设备只保留明细。
-	Path        string    `gorm:"column:path;size:256"`
+	Path        string    `gorm:"column:path;type:text"`
 	CollectedAt time.Time `gorm:"column:collected_at;primaryKey"`
 
 	ReadBytes            int64   `gorm:"column:read_bytes"`
@@ -317,9 +319,9 @@ func (DiskMetric) TableName() string { return "disk_metrics" }
 // DiskPhysicalMetric is one disk_physical_metrics temperature sample.
 type DiskPhysicalMetric struct {
 	ServerID    int64     `gorm:"column:server_id;primaryKey"`
-	Name        string    `gorm:"column:name;size:128;primaryKey"`
-	Ref         string    `gorm:"column:ref;size:128"`
-	Path        string    `gorm:"column:path;size:256"`
+	Name        string    `gorm:"column:name;size:255;primaryKey"`
+	Ref         string    `gorm:"column:ref;size:320"`
+	Path        string    `gorm:"column:path;type:text"`
 	CollectedAt time.Time `gorm:"column:collected_at;primaryKey"`
 	TempC       float64   `gorm:"column:temp_c"`
 }
@@ -329,11 +331,11 @@ func (DiskPhysicalMetric) TableName() string { return "disk_physical_metrics" }
 // ServerCurrentDiskMetric represents table server_current_disk_metrics (latest per base_io device).
 type ServerCurrentDiskMetric struct {
 	ServerID    int64     `gorm:"column:server_id;primaryKey"`
-	Name        string    `gorm:"column:name;size:128;primaryKey"`
-	Ref         string    `gorm:"column:ref;size:128"`
+	Name        string    `gorm:"column:name;size:255;primaryKey"`
+	Ref         string    `gorm:"column:ref;size:320"`
 	Kind        string    `gorm:"column:kind;size:16"`
 	Role        string    `gorm:"column:role;size:16"` // primary 设备进入前端磁盘 IO 汇总，其他设备只保留明细。
-	Path        string    `gorm:"column:path;size:256"`
+	Path        string    `gorm:"column:path;type:text"`
 	CollectedAt time.Time `gorm:"column:collected_at;not null"` // 当前态对应的历史采集时间。
 
 	ReadBytes            int64     `gorm:"column:read_bytes"`
@@ -356,11 +358,11 @@ func (ServerCurrentDiskMetric) TableName() string { return "server_current_disk_
 // DiskUsageMetric represents table disk_usage_metrics (per logical disk usage time series).
 type DiskUsageMetric struct {
 	ServerID    int64     `gorm:"column:server_id;primaryKey"`
-	Name        string    `gorm:"column:name;size:128;primaryKey"`
-	Ref         string    `gorm:"column:ref;size:128"`
+	Name        string    `gorm:"column:name;size:255;primaryKey"`
+	Ref         string    `gorm:"column:ref;size:320"`
 	Kind        string    `gorm:"column:kind;size:16"`
-	Mountpoint  string    `gorm:"column:mountpoint;size:256"`
-	Path        string    `gorm:"column:path;size:256"`
+	Mountpoint  string    `gorm:"column:mountpoint;type:text"`
+	Path        string    `gorm:"column:path;type:text"`
 	CollectedAt time.Time `gorm:"column:collected_at;primaryKey"`
 
 	Total     int64   `gorm:"column:total"`
@@ -380,11 +382,11 @@ func (DiskUsageMetric) TableName() string { return "disk_usage_metrics" }
 // ServerCurrentDiskUsageMetric represents table server_current_disk_usage_metrics (latest per logical disk).
 type ServerCurrentDiskUsageMetric struct {
 	ServerID    int64     `gorm:"column:server_id;primaryKey"`
-	Name        string    `gorm:"column:name;size:128;primaryKey"`
-	Ref         string    `gorm:"column:ref;size:128"`
+	Name        string    `gorm:"column:name;size:255;primaryKey"`
+	Ref         string    `gorm:"column:ref;size:320"`
 	Kind        string    `gorm:"column:kind;size:16"`
-	Mountpoint  string    `gorm:"column:mountpoint;size:256"`
-	Path        string    `gorm:"column:path;size:256"`
+	Mountpoint  string    `gorm:"column:mountpoint;type:text"`
+	Path        string    `gorm:"column:path;type:text"`
 	CollectedAt time.Time `gorm:"column:collected_at;not null"` // 当前态对应的历史采集时间。
 
 	Total     int64   `gorm:"column:total"`
@@ -487,6 +489,7 @@ type TrafficMonthUsage struct {
 	Timezone        string    `gorm:"column:timezone;size:64"`
 	CycleStart      time.Time `gorm:"column:cycle_start;primaryKey"`
 	CycleEnd        time.Time `gorm:"column:cycle_end;primaryKey"`
+	CoveredFrom     time.Time `gorm:"column:covered_from"`      // 本账期实际纳入统计的起点。
 	CoveredUntil    time.Time `gorm:"column:covered_until"`     // 本账期已累计到的业务时间。
 	LastCollectedAt time.Time `gorm:"column:last_collected_at"` // 增量回填进度，防止重复累计同一对采样点。
 
@@ -503,6 +506,32 @@ type TrafficMonthUsage struct {
 }
 
 func (TrafficMonthUsage) TableName() string { return "traffic_month_usage" }
+
+// TrafficMaterializationProgress is the durable scan high-water mark for one
+// of the two fixed traffic materializers.
+type TrafficMaterializationProgress struct {
+	Kind         string    `gorm:"column:kind;size:16;primaryKey"`
+	ScannedUntil time.Time `gorm:"column:scanned_until"`
+	UpdatedAt    time.Time `gorm:"column:updated_at;autoUpdateTime"`
+}
+
+func (TrafficMaterializationProgress) TableName() string {
+	return "traffic_materialization_progress"
+}
+
+// TrafficUsageRepair is a short-lived per-node repair cursor created by an
+// immediate billing-cycle change. Its presence excludes the node from the live
+// Usage scan until retained raw samples have been replayed.
+type TrafficUsageRepair struct {
+	ServerID     int64     `gorm:"column:server_id;primaryKey"`
+	ScannedUntil time.Time `gorm:"column:scanned_until"`
+	CreatedAt    time.Time `gorm:"column:created_at;autoCreateTime"`
+	UpdatedAt    time.Time `gorm:"column:updated_at;autoUpdateTime"`
+}
+
+func (TrafficUsageRepair) TableName() string {
+	return "traffic_usage_repairs"
+}
 
 // TrafficMonthly is the persisted monthly snapshot used by historical billing reads.
 // The current cycle is calculated live; old cycles prefer this table to avoid rescanning 5-minute samples.
@@ -616,14 +645,21 @@ func (TaskLog) TableName() string { return "task_logs" }
 
 // NotifyChannel represents table notify_channels.
 type NotifyChannel struct {
-	ID        int64          `gorm:"column:id;primaryKey;autoIncrement"`
-	Name      string         `gorm:"column:name;size:64;not null"`
-	Type      NotifyType     `gorm:"column:type;type:notify_type;not null"`
-	Config    datatypes.JSON `gorm:"column:config;not null"` // 按 Type 存放不同渠道配置；更新时空 secret 表示保留旧 secret。
-	Enabled   bool           `gorm:"column:enabled;not null"`
-	IsDeleted bool           `gorm:"column:is_deleted;not null;default:false"`
-	CreatedAt time.Time      `gorm:"column:created_at;autoCreateTime"`
-	UpdatedAt time.Time      `gorm:"column:updated_at;autoUpdateTime"`
+	ID                  int64          `gorm:"column:id;primaryKey;autoIncrement"`
+	Name                string         `gorm:"column:name;size:64;not null"`
+	Type                NotifyType     `gorm:"column:type;type:notify_type;not null"`
+	Config              datatypes.JSON `gorm:"column:config;not null"` // 按 Type 存放不同渠道配置；更新时空 secret 表示保留旧 secret。
+	Enabled             bool           `gorm:"column:enabled;not null"`
+	IsDeleted           bool           `gorm:"column:is_deleted;not null;default:false"`
+	Revision            int64          `gorm:"column:revision;not null;default:1"`
+	LastSuccessAt       *time.Time     `gorm:"column:last_success_at"`
+	LastFailureAt       *time.Time     `gorm:"column:last_failure_at"`
+	ConsecutiveFailures int32          `gorm:"column:consecutive_failures;not null;default:0"`
+	LastErrorCode       *string        `gorm:"column:last_error_code;size:64"`
+	LastError           *string        `gorm:"column:last_error"`
+	ConfigUpdatedAt     time.Time      `gorm:"column:config_updated_at;autoCreateTime"`
+	CreatedAt           time.Time      `gorm:"column:created_at;autoCreateTime"`
+	UpdatedAt           time.Time      `gorm:"column:updated_at;autoUpdateTime"`
 }
 
 func (NotifyChannel) TableName() string { return "notify_channels" }
@@ -733,17 +769,20 @@ func (AlertEvent) TableName() string { return "alert_events" }
 // AlertNotificationOutbox represents table alert_notification_outbox.
 type AlertNotificationOutbox struct {
 	ID            int64          `gorm:"column:id;primaryKey;autoIncrement"`
-	EventID       int64          `gorm:"column:event_id;not null"`
-	Transition    string         `gorm:"column:transition;size:16;not null"` // open/close；同一事件不同 transition 要分别投递。
+	EventID       *int64         `gorm:"column:event_id"`
+	Transition    string         `gorm:"column:transition;size:32;not null"` // 通知事件；告警使用 opened/closed，系统通知使用自己的稳定事件名。
 	ChannelID     int64          `gorm:"column:channel_id;not null"`
 	ChannelType   NotifyType     `gorm:"column:channel_type;type:notify_type;not null"`
 	Payload       datatypes.JSON `gorm:"column:payload;not null"`             // 已渲染通知内容；发送器不再读当前规则重建文案。
 	DedupeKey     string         `gorm:"column:dedupe_key;size:255;not null"` // 幂等键，防止控制流重试造成重复通知。
 	Status        OutboxStatus   `gorm:"column:status;size:32;not null"`
 	AttemptCount  int32          `gorm:"column:attempt_count;not null"`
+	ProbeCount    int32          `gorm:"column:probe_count;not null"`
+	IsProbe       bool           `gorm:"column:is_probe;not null"`
 	NextAttemptAt time.Time      `gorm:"column:next_attempt_at;not null"`
+	FailureCode   *string        `gorm:"column:failure_code;size:64"`
 	LastError     *string        `gorm:"column:last_error"`
-	LeasedUntil   *time.Time     `gorm:"column:leased_until"`
+	LeasedUntil   *time.Time     `gorm:"column:leased_until"` // 历史 schema 兼容字段；当前单实例 worker 不使用租约。
 	CreatedAt     time.Time      `gorm:"column:created_at;autoCreateTime"`
 	SentAt        *time.Time     `gorm:"column:sent_at"`
 }
@@ -759,7 +798,7 @@ type AlertControlTask struct {
 	Status       TaskStatus     `gorm:"column:status;size:16;not null"`
 	AttemptCount int32          `gorm:"column:attempt_count;not null"`
 	AvailableAt  time.Time      `gorm:"column:available_at;not null"`
-	LeasedUntil  *time.Time     `gorm:"column:leased_until"`
+	LeasedUntil  *time.Time     `gorm:"column:leased_until"` // 历史 schema 兼容字段；当前单实例 worker 不按租约截止时间取件。
 	LastError    *string        `gorm:"column:last_error"`
 	CreatedAt    time.Time      `gorm:"column:created_at;autoCreateTime"`
 	UpdatedAt    time.Time      `gorm:"column:updated_at;autoUpdateTime"`

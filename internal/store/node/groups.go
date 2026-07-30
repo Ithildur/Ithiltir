@@ -2,6 +2,8 @@ package node
 
 import (
 	"context"
+	"errors"
+
 	"dash/internal/model"
 
 	"gorm.io/gorm"
@@ -172,7 +174,7 @@ func ensureDefaultGroupID(ctx context.Context, tx *gorm.DB) (int64, error) {
 		Order("id ASC").
 		Take(&active).Error; err == nil && active.ID > 0 {
 		return active.ID, nil
-	} else if err != nil && err != gorm.ErrRecordNotFound {
+	} else if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
 		return 0, err
 	}
 
@@ -190,7 +192,7 @@ func ensureDefaultGroupID(ctx context.Context, tx *gorm.DB) (int64, error) {
 			return 0, err
 		}
 		return deleted.ID, nil
-	} else if err != nil && err != gorm.ErrRecordNotFound {
+	} else if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
 		return 0, err
 	}
 

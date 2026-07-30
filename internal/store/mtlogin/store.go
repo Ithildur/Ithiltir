@@ -1,23 +1,20 @@
 package mtlogin
 
 import (
-	"context"
-	"time"
-
-	"github.com/redis/go-redis/v9"
+	"fmt"
 )
 
 type Store struct {
-	backend mtprotoLoginBackend
+	mem *memState
 }
 
-type mtprotoLoginBackend interface {
-	setMTProtoLogin(ctx context.Context, id string, raw []byte, ttl time.Duration) error
-	getMTProtoLogin(ctx context.Context, id string) ([]byte, error)
-	deleteMTProtoLogin(ctx context.Context, id string) error
+func (s *Store) Validate() error {
+	if s == nil || s.mem == nil {
+		return fmt.Errorf("store: mtproto login store is not initialized")
+	}
+	return nil
 }
 
-func New(redisClient *redis.Client) *Store {
-	mem := newMemory()
-	return &Store{backend: newMTProtoLoginBackend(redisClient, mem)}
+func New() *Store {
+	return &Store{mem: newMemory()}
 }

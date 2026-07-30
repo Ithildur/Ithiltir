@@ -18,6 +18,7 @@ func (h *handler) groupsRoute(r *routes.Blueprint) {
 		routes.Func(h.groupsHandler),
 		routes.Tags("front"),
 		routes.Auth(routes.AuthOptional),
+		routes.Use(h.optionalBearer),
 	)
 }
 

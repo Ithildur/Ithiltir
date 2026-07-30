@@ -14,10 +14,11 @@ import (
 var errInvalidChannel = errors.New("invalid mtproto channel")
 
 type channelConfig struct {
-	APIID   int
-	APIHash string
-	Phone   string
-	Session string
+	Revision int64
+	APIID    int
+	APIHash  string
+	Phone    string
+	Session  string
 }
 
 func loadChannelConfig(ctx context.Context, st *alertstore.Store, channelID int64) (channelConfig, error) {
@@ -37,17 +38,21 @@ func loadChannelConfig(ctx context.Context, st *alertstore.Store, channelID int6
 		return channelConfig{}, errInvalidChannel
 	}
 	return channelConfig{
-		APIID:   cfg.APIID,
-		APIHash: cfg.APIHash,
-		Phone:   cfg.Phone,
-		Session: cfg.Session,
+		Revision: item.Revision,
+		APIID:    cfg.APIID,
+		APIHash:  cfg.APIHash,
+		Phone:    cfg.Phone,
+		Session:  cfg.Session,
 	}, nil
 }
 
-func updateSession(ctx context.Context, st *alertstore.Store, channelID int64, session string) error {
+func updateSession(ctx context.Context, st *alertstore.Store, channelID, revision int64, session string) error {
 	item, err := loadChannel(ctx, st, channelID)
 	if err != nil {
 		return err
+	}
+	if item.Revision != revision {
+		return alertstore.ErrChannelVersionStale
 	}
 	if item.Type != model.NotifyTypeTelegram {
 		return errInvalidChannel
@@ -66,9 +71,7 @@ func updateSession(ctx context.Context, st *alertstore.Store, channelID int64, s
 		return errInvalidChannel
 	}
 	_, err = infra.WithPGWriteTimeout(ctx, func(c context.Context) (struct{}, error) {
-		return struct{}{}, st.ReplaceChannel(c, channelID, map[string]any{
-			"config": payload,
-		})
+		return struct{}{}, st.UpdateChannelConfig(c, channelID, revision, payload)
 	})
 	return err
 }

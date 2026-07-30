@@ -6,13 +6,12 @@ import (
 	"testing"
 
 	"dash/internal/model"
-	"dash/internal/store/frontcache"
 	"gorm.io/datatypes"
 	"gorm.io/gorm"
 )
 
 func TestGetServerBySecretUsesMemoryAuthIndex(t *testing.T) {
-	st := New(nil, nil, frontcache.New(nil, nil))
+	st := newTestStore(nil, nil)
 	ctx := context.Background()
 	srv := model.Server{
 		ID:           7,
@@ -52,7 +51,7 @@ func TestGetServerBySecretUsesMemoryAuthIndex(t *testing.T) {
 }
 
 func TestGetServerBySecretUnknownSecretReturnsNotFound(t *testing.T) {
-	st := New(nil, nil, frontcache.New(nil, nil))
+	st := newTestStore(nil, nil)
 
 	_, err := st.GetServerBySecret(context.Background(), "missing-secret")
 	if !errors.Is(err, gorm.ErrRecordNotFound) {
@@ -61,7 +60,7 @@ func TestGetServerBySecretUnknownSecretReturnsNotFound(t *testing.T) {
 }
 
 func TestSyncServerCacheRotatesSecretInMemory(t *testing.T) {
-	st := New(nil, nil, frontcache.New(nil, nil))
+	st := newTestStore(nil, nil)
 	ctx := context.Background()
 
 	oldSrv := model.Server{
@@ -77,9 +76,7 @@ func TestSyncServerCacheRotatesSecretInMemory(t *testing.T) {
 	newSrv := oldSrv
 	newSrv.Secret = "new-secret"
 	newSrv.Name = "node-11-new"
-	if err := st.syncServerCache(ctx, newSrv, oldSrv.Secret); err != nil {
-		t.Fatalf("syncServerCache(new) error = %v", err)
-	}
+	st.syncServerCache(newSrv, oldSrv.Secret)
 
 	if _, err := st.GetServerBySecret(ctx, oldSrv.Secret); !errors.Is(err, gorm.ErrRecordNotFound) {
 		t.Fatalf("GetServerBySecret(old) error = %v, want gorm.ErrRecordNotFound", err)

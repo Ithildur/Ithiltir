@@ -15,7 +15,7 @@ var errCorruptGuestVisibility = errors.New("corrupt guest visibility")
 func (b *memCacheBackend) loadGuestVisibleIDs(_ context.Context, ids []int64) (map[int64]struct{}, bool, error) {
 	b.mem.mu.RLock()
 	defer b.mem.mu.RUnlock()
-	if !b.mem.guestVisibleMeta {
+	if !b.mem.guestCatalog {
 		return nil, false, nil
 	}
 	out := make(map[int64]struct{}, len(ids))
@@ -74,9 +74,9 @@ func (b *memCacheBackend) replaceGuestVisibleIDs(_ context.Context, allowed map[
 		guest[strconv.FormatInt(id, 10)] = struct{}{}
 	}
 	b.mem.mu.Lock()
-	b.mem.guestVisibleMeta = false
+	b.mem.guestCatalog = false
 	b.mem.frontGuestVisible = guest
-	b.mem.guestVisibleMeta = true
+	b.mem.guestCatalog = true
 	b.mem.mu.Unlock()
 	return nil
 }
@@ -101,7 +101,7 @@ func (b *redisCacheBackend) replaceGuestVisibleIDs(ctx context.Context, allowed 
 
 func (b *memCacheBackend) clearGuestVisibilityMeta(_ context.Context) error {
 	b.mem.mu.Lock()
-	b.mem.guestVisibleMeta = false
+	b.mem.guestCatalog = false
 	b.mem.mu.Unlock()
 	return nil
 }

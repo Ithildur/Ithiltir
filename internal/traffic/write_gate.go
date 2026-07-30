@@ -12,20 +12,7 @@ func newWriteGate() *writeGate {
 	return g
 }
 
-func writeGateOrNew(g *writeGate) *writeGate {
-	if g != nil {
-		return g
-	}
-	return newWriteGate()
-}
-
 func (g *writeGate) with(ctx context.Context, fn func(context.Context) error) error {
-	if g == nil {
-		return fn(ctx)
-	}
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	select {
 	case <-ctx.Done():
 		return ctx.Err()

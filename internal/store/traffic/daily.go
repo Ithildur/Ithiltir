@@ -22,7 +22,10 @@ func (s *Store) TrafficDaily(ctx context.Context, q TrafficQuery) ([]TrafficDail
 	if s == nil || s.db == nil {
 		return nil, fmt.Errorf("store: db is nil")
 	}
-	q = normalizeTrafficQuery(q)
+	q, err := normalizeTrafficQuery(q)
+	if err != nil {
+		return nil, err
+	}
 	if q.ServerID <= 0 {
 		return nil, fmt.Errorf("invalid server id")
 	}
@@ -33,7 +36,25 @@ func (s *Store) TrafficDaily(ctx context.Context, q TrafficQuery) ([]TrafficDail
 		return nil, ErrTrafficDailyUnsupported
 	}
 
-	cycle := trafficCycleForPeriod(q.CycleMode, q.BillingStartDay, q.BillingAnchorDate, q.Location, q.Ref, q.Period)
+	rule, err := newCycleRule(
+		q.CycleMode,
+		q.BillingStartDay,
+		q.BillingAnchorDate,
+		q.Location,
+	)
+	if err != nil {
+		return nil, err
+	}
+	cycle, err := rule.at(q.Ref)
+	if err != nil {
+		return nil, err
+	}
+	if q.Period == TrafficPeriodPrev {
+		cycle, err = rule.previous(cycle)
+		if err != nil {
+			return nil, err
+		}
+	}
 	statEnd, cycleComplete := trafficStatEnd(cycle, q.Ref)
 	status := trafficSnapshotStatus(cycle, q.Ref)
 	effectiveStart, effectiveEnd, err := s.trafficEffectiveWindow(ctx, q.ServerID, q.Iface, cycle.Start, statEnd)
@@ -48,30 +69,23 @@ func (s *Store) TrafficDaily(ctx context.Context, q TrafficQuery) ([]TrafficDail
 		return nil, ErrNoTrafficData
 	}
 
-	items := buildTrafficDaily(q, rows, effectiveStart, effectiveEnd, statEnd, cycleComplete, status)
+	q.Location = cycle.location
+	items, err := buildTrafficDaily(q, rows, effectiveStart, effectiveEnd, statEnd, cycleComplete, status)
+	if err != nil {
+		return nil, err
+	}
 	if len(items) == 0 {
 		return nil, ErrNoTrafficData
 	}
 	return items, nil
 }
 
-func trafficCycleForPeriod(mode BillingCycleMode, day int, anchorDate string, loc *time.Location, ref time.Time, period TrafficPeriod) TrafficCycle {
-	cycle := currentTrafficCycleAnchored(mode, day, anchorDate, loc, ref)
-	if period == TrafficPeriodPrev {
-		return prevTrafficCycle(cycle)
-	}
-	return cycle
-}
-
-func buildTrafficDaily(q TrafficQuery, rows []trafficBucket, effectiveStart, effectiveEnd, statEnd time.Time, cycleComplete bool, status TrafficSnapshotStatus) []TrafficDaily {
+func buildTrafficDaily(q TrafficQuery, rows []trafficBucket, effectiveStart, effectiveEnd, statEnd time.Time, cycleComplete bool, status TrafficSnapshotStatus) ([]TrafficDaily, error) {
 	if !effectiveEnd.After(effectiveStart) {
-		return nil
+		return nil, nil
 	}
 
 	loc := q.Location
-	if loc == nil {
-		loc = time.Local
-	}
 	rowsByDay := make(map[time.Time][]trafficBucket)
 	for _, row := range rows {
 		day := trafficDayStart(row.Bucket, loc)
@@ -91,7 +105,10 @@ func buildTrafficDaily(q TrafficQuery, rows []trafficBucket, effectiveStart, eff
 
 		dayRows := trafficRowsInWindow(rowsByDay[cursor], windowStart, windowEnd)
 		dayComplete := cycleComplete || !dayEnd.After(statEnd)
-		stat := buildTrafficStat(dayRows, windowStart, windowEnd, dayComplete, status, q.DirectionMode, q.UsageMode, q.P95Enabled)
+		stat, err := buildTrafficStat(dayRows, windowStart, windowEnd, dayComplete, status, q.DirectionMode, q.UsageMode, q.P95Enabled)
+		if err != nil {
+			return nil, err
+		}
 		out = append(out, TrafficDaily{
 			ServerID:  q.ServerID,
 			Iface:     normalizeTrafficIface(q.Iface),
@@ -101,13 +118,10 @@ func buildTrafficDaily(q TrafficQuery, rows []trafficBucket, effectiveStart, eff
 			Stat:      stat,
 		})
 	}
-	return out
+	return out, nil
 }
 
 func trafficDayStart(t time.Time, loc *time.Location) time.Time {
-	if loc == nil {
-		loc = time.Local
-	}
 	local := t.In(loc)
 	return time.Date(local.Year(), local.Month(), local.Day(), 0, 0, 0, 0, loc)
 }

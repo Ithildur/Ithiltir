@@ -4,9 +4,12 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
+	"time"
 )
 
 const (
@@ -14,6 +17,15 @@ const (
 	telegramAlertCloseIcon = "✅"
 	telegramAlertTimeIcon  = "🕒"
 )
+
+type telegramBotResponse struct {
+	OK          bool   `json:"ok"`
+	ErrorCode   int    `json:"error_code"`
+	Description string `json:"description"`
+	Parameters  struct {
+		RetryAfter int `json:"retry_after"`
+	} `json:"parameters"`
+}
 
 func sendTelegramBot(ctx context.Context, cfg TelegramBotConfig, msg Message) error {
 	endpoint := fmt.Sprintf("https://api.telegram.org/bot%s/sendMessage", cfg.BotToken)
@@ -37,28 +49,42 @@ func sendTelegramBot(ctx context.Context, cfg TelegramBotConfig, msg Message) er
 
 	resp, err := defaultHTTPClient.Do(req)
 	if err != nil {
-		return err
+		return requestError(err)
 	}
 	defer resp.Body.Close()
 
+	var parsed telegramBotResponse
+	decodeErr := json.NewDecoder(io.LimitReader(resp.Body, 64<<10)).Decode(&parsed)
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("telegram bot status: %s", resp.Status)
+		return telegramBotStatusError(resp, parsed)
 	}
-
-	var parsed struct {
-		OK          bool   `json:"ok"`
-		Description string `json:"description"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&parsed); err != nil {
-		return err
+	if decodeErr != nil {
+		return fmt.Errorf("decode telegram bot response: %w", decodeErr)
 	}
 	if !parsed.OK {
-		if parsed.Description == "" {
-			return fmt.Errorf("telegram bot send failed")
+		status := parsed.ErrorCode
+		if status <= 0 {
+			status = http.StatusBadRequest
 		}
-		return fmt.Errorf("telegram bot send failed: %s", parsed.Description)
+		return deliveryStatusError(
+			"telegram_api",
+			status,
+			retryAfterSeconds(int64(parsed.Parameters.RetryAfter)),
+			parsed.Description,
+		)
 	}
 	return nil
+}
+
+func telegramBotStatusError(resp *http.Response, parsed telegramBotResponse) error {
+	if resp == nil {
+		return retryError("telegram_http_no_response", 0, errors.New("telegram endpoint returned no response"))
+	}
+	retryAfter := max(
+		parseRetryAfter(resp.Header.Get("Retry-After"), time.Now()),
+		retryAfterSeconds(int64(parsed.Parameters.RetryAfter)),
+	)
+	return deliveryStatusError("telegram_http", resp.StatusCode, retryAfter, parsed.Description)
 }
 
 func sendMTProto(ctx context.Context, cfg TelegramMTProtoConfig, msg Message) error {

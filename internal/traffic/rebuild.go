@@ -27,8 +27,9 @@ const (
 )
 
 var (
-	ErrRebuildRunning = errors.New("traffic rebuild is running")
-	ErrRebuildStopped = errors.New("traffic rebuild runner is stopped")
+	ErrRebuildRunning         = errors.New("traffic rebuild is running")
+	ErrRebuildStopped         = errors.New("traffic rebuild runner is stopped")
+	ErrRebuildRequiresBilling = errors.New("traffic rebuild requires billing mode")
 )
 
 type RebuildState struct {
@@ -42,8 +43,8 @@ type RebuildState struct {
 }
 
 type rebuildStore interface {
+	GetSettings(context.Context) (trafficstore.Settings, error)
 	ServerTrafficSource(context.Context, int64, time.Time) (trafficstore.ServerTrafficSource, error)
-	DeleteTrafficMonthlySnapshots(context.Context, int64, time.Time, time.Time) error
 	RebuildTraffic5mChunk(context.Context, int64, []string, time.Time, time.Time) error
 }
 
@@ -65,15 +66,6 @@ type RebuildRunner struct {
 }
 
 func newRebuildRunner(ctx context.Context, store rebuildStore, gate trafficWriteGate, retain time.Duration) *RebuildRunner {
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	if gate == nil {
-		gate = newWriteGate()
-	}
-	if retain <= 0 {
-		retain = trafficRetention(0)
-	}
 	runCtx, stop := context.WithCancel(ctx)
 	return &RebuildRunner{
 		store:  store,
@@ -120,6 +112,9 @@ func (r *RebuildRunner) Stop() {
 }
 
 func (r *RebuildRunner) Start(serverID int64) (RebuildState, error) {
+	if serverID <= 0 {
+		return r.Current(), fmt.Errorf("invalid traffic rebuild server id")
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -128,6 +123,16 @@ func (r *RebuildRunner) Start(serverID int64) (RebuildState, error) {
 	}
 	if r.state.Status == RebuildRunning {
 		return r.currentLocked(), ErrRebuildRunning
+	}
+	if r.store == nil {
+		return r.currentLocked(), fmt.Errorf("traffic store is nil")
+	}
+	settings, err := infra.WithPGReadTimeout(r.ctx, r.store.GetSettings)
+	if err != nil {
+		return r.currentLocked(), err
+	}
+	if settings.UsageMode != trafficstore.UsageBilling {
+		return r.currentLocked(), ErrRebuildRequiresBilling
 	}
 
 	startedAt := r.now().UTC()
@@ -147,14 +152,7 @@ func (r *RebuildRunner) Start(serverID int64) (RebuildState, error) {
 func (r *RebuildRunner) run(serverID int64) {
 	defer r.wg.Done()
 
-	var err error
-	if r.store == nil {
-		err = fmt.Errorf("traffic store is nil")
-	} else {
-		err = r.gate.with(r.ctx, func(c context.Context) error {
-			return r.rebuild(c, serverID)
-		})
-	}
+	err := r.rebuild(r.ctx, serverID)
 	if err != nil && !errors.Is(err, context.Canceled) {
 		infra.WithModule("traffic").Warn("traffic rebuild failed", err, slog.Int64("server_id", serverID))
 	}
@@ -177,20 +175,15 @@ func (r *RebuildRunner) rebuild(ctx context.Context, serverID int64) error {
 		return nil
 	}
 
-	// Invalidate monthly snapshots once rebuild starts; old snapshots are no longer trusted.
-	if _, err := infra.WithPGWriteTimeout(ctx, func(c context.Context) (struct{}, error) {
-		return struct{}{}, r.store.DeleteTrafficMonthlySnapshots(c, serverID, source.Start, source.End)
-	}); err != nil {
-		return fmt.Errorf("delete server traffic monthly snapshots %d %s..%s: %w", serverID, source.Start, source.End, err)
-	}
-
 	for cursor := source.Start; cursor.Before(source.End); {
 		next := cursor.Add(rebuildChunkSize)
 		if next.After(source.End) {
 			next = source.End
 		}
 		chunkCtx, cancel := context.WithTimeout(ctx, rebuildChunkTimeout)
-		err := r.store.RebuildTraffic5mChunk(chunkCtx, serverID, source.Ifaces, cursor, next)
+		err := r.gate.with(chunkCtx, func(c context.Context) error {
+			return r.store.RebuildTraffic5mChunk(c, serverID, source.Ifaces, cursor, next)
+		})
 		cancel()
 		if err != nil {
 			return fmt.Errorf("rebuild server traffic 5m %d %s..%s: %w", serverID, cursor, next, err)
@@ -212,10 +205,8 @@ func (r *RebuildRunner) finish(serverID int64, err error) {
 	state.Running = false
 	state.FinishedAt = &finishedAt
 	if err != nil {
-		code, msg := rebuildFailure(err)
+		state.Code, state.Error = rebuildFailure(err)
 		state.Status = RebuildFailed
-		state.Code = code
-		state.Error = msg
 	} else {
 		state.Status = RebuildCompleted
 		state.Code = ""
@@ -230,6 +221,8 @@ func rebuildFailure(err error) (string, string) {
 		return "traffic_rebuild_canceled", "traffic rebuild canceled"
 	case errors.Is(err, context.DeadlineExceeded):
 		return "traffic_rebuild_timeout", "traffic rebuild timed out"
+	case errors.Is(err, trafficstore.ErrTrafficFactsDisabled):
+		return "traffic_rebuild_requires_billing", "traffic rebuild requires billing mode"
 	default:
 		return "traffic_rebuild_failed", "traffic rebuild failed"
 	}

@@ -6,28 +6,20 @@ import (
 	"testing"
 
 	"dash/internal/model"
-	"dash/internal/store/frontcache"
 	pgtest "dash/internal/testutil/postgres"
 
-	"github.com/alicebob/miniredis/v2"
-	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
 )
 
-func newIntegrationStore(t *testing.T) (*Store, *redis.Client) {
+func newIntegrationStore(t *testing.T) *Store {
 	t.Helper()
 
 	db := pgtest.NewDB(t)
-	srv := miniredis.RunT(t)
-	client := redis.NewClient(&redis.Options{Addr: srv.Addr()})
-	t.Cleanup(func() { _ = client.Close() })
-
-	front := frontcache.New(db, client)
-	return New(db, client, front), client
+	return newTestStore(db, nil)
 }
 
 func TestIntegrationUpdateStaticRejectsStaleSecret(t *testing.T) {
-	st, _ := newIntegrationStore(t)
+	st := newIntegrationStore(t)
 	ctx := context.Background()
 
 	srv := model.Server{
@@ -52,28 +44,11 @@ func TestIntegrationUpdateStaticRejectsStaleSecret(t *testing.T) {
 		Error; err != nil {
 		t.Fatalf("Update(secret) error = %v", err)
 	}
-	if err := st.syncServerCache(ctx, newSrv, srv.Secret); err != nil {
-		t.Fatalf("syncServerCache(new) error = %v", err)
-	}
+	st.syncServerCache(newSrv, srv.Secret)
 
-	patch := ServerStaticPatch{
-		Hostname:        strPtr("host-21"),
-		OS:              strPtr("linux"),
-		Platform:        strPtr("ubuntu"),
-		PlatformVersion: strPtr("24.04"),
-		KernelVersion:   strPtr("6.8.0"),
-		Arch:            strPtr("x86_64"),
-		AgentVersion:    strPtr("1.0.0"),
-		CPUCoresPhys:    int16Ptr(4),
-		CPUCoresLog:     int16Ptr(8),
-		CPUSockets:      int16Ptr(1),
-		MemTotal:        int64Ptr(16 << 30),
-		RaidSupported:   boolPtr(false),
-		RaidAvailable:   boolPtr(false),
-		IntervalSec:     int32Ptr(10),
-	}
+	static := ServerStaticPatch{Hostname: strPtr("host-21")}
 
-	err := st.UpdateStatic(ctx, srv.Secret, srv.ID, patch)
+	err := st.UpdateStatic(ctx, srv.Secret, srv.ID, static)
 	if !errors.Is(err, gorm.ErrRecordNotFound) {
 		t.Fatalf("UpdateStatic() error = %v, want gorm.ErrRecordNotFound", err)
 	}
@@ -90,7 +65,84 @@ func TestIntegrationUpdateStaticRejectsStaleSecret(t *testing.T) {
 	}
 }
 
-func int16Ptr(v int16) *int16 { return &v }
-func int32Ptr(v int32) *int32 { return &v }
-func int64Ptr(v int64) *int64 { return &v }
-func boolPtr(v bool) *bool    { return &v }
+func TestIntegrationUpdateStaticClearsSwapWithExplicitZero(t *testing.T) {
+	st := newIntegrationStore(t)
+	ctx := context.Background()
+
+	previous := int64(2 << 30)
+	srv := model.Server{
+		Name:         "node-1",
+		Hostname:     "node-1",
+		Secret:       "node-secret",
+		SwapTotal:    &previous,
+		DisplayOrder: 1,
+	}
+	if err := st.db.WithContext(ctx).Create(&srv).Error; err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+
+	zero := int64(0)
+	if err := st.UpdateStatic(ctx, srv.Secret, srv.ID, ServerStaticPatch{SwapTotal: &zero}); err != nil {
+		t.Fatalf("UpdateStatic() error = %v", err)
+	}
+
+	var stored model.Server
+	if err := st.db.WithContext(ctx).Select("swap_total").First(&stored, srv.ID).Error; err != nil {
+		t.Fatalf("load updated server: %v", err)
+	}
+	if stored.SwapTotal == nil || *stored.SwapTotal != 0 {
+		t.Fatalf("stored swap total = %v, want explicit zero", stored.SwapTotal)
+	}
+}
+
+func TestIntegrationUpdateStaticKeepsDiskObservationAtomic(t *testing.T) {
+	st := newIntegrationStore(t)
+	ctx := context.Background()
+
+	oldTotal := int64(4 << 30)
+	oldPath := "/old"
+	oldFSType := "ext4"
+	srv := model.Server{
+		Name:         "node-1",
+		Hostname:     "node-1",
+		Secret:       "disk-observation-secret",
+		DiskTotal:    &oldTotal,
+		RootPath:     &oldPath,
+		RootFSType:   &oldFSType,
+		DisplayOrder: 1,
+	}
+	if err := st.db.WithContext(ctx).Create(&srv).Error; err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+
+	hostname := "node-1-updated"
+	if err := st.UpdateStatic(ctx, srv.Secret, srv.ID, ServerStaticPatch{Hostname: &hostname}); err != nil {
+		t.Fatalf("UpdateStatic(no disk observation) error = %v", err)
+	}
+	preserved := loadServerDiskObservation(t, st.db.WithContext(ctx), srv.ID)
+	if preserved.DiskTotal == nil || *preserved.DiskTotal != oldTotal ||
+		preserved.RootPath == nil || *preserved.RootPath != oldPath ||
+		preserved.RootFSType == nil || *preserved.RootFSType != oldFSType {
+		t.Fatalf("disk observation after unavailable report = %+v, want preserved tuple", preserved)
+	}
+
+	if err := st.UpdateStatic(ctx, srv.Secret, srv.ID, ServerStaticPatch{
+		Disk: &DiskObservation{Path: "/new"},
+	}); err != nil {
+		t.Fatalf("UpdateStatic(partial disk observation) error = %v", err)
+	}
+	replaced := loadServerDiskObservation(t, st.db.WithContext(ctx), srv.ID)
+	if replaced.RootPath == nil || *replaced.RootPath != "/new" ||
+		replaced.RootFSType != nil || replaced.DiskTotal != nil {
+		t.Fatalf("disk observation = %+v, want new path with unknown dependent fields", replaced)
+	}
+}
+
+func loadServerDiskObservation(t *testing.T, db *gorm.DB, id int64) model.Server {
+	t.Helper()
+	var server model.Server
+	if err := db.Select("disk_total", "root_path", "root_fs_type").First(&server, id).Error; err != nil {
+		t.Fatalf("load disk observation: %v", err)
+	}
+	return server
+}

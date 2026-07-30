@@ -2,41 +2,68 @@ package frontcache
 
 import (
 	"context"
+	"errors"
+	"fmt"
+	"sync"
 
 	"dash/internal/metrics"
+	"dash/internal/store/frontprojection"
 
 	"github.com/redis/go-redis/v9"
 	"golang.org/x/sync/singleflight"
 	"gorm.io/gorm"
 )
 
+const projectionBuildAttempts = 3
+
+var errProjectionChanged = errors.New("front cache projection changed while rebuilding")
+
 type Store struct {
 	db                *gorm.DB
 	backend           cacheBackend
+	projection        *frontprojection.Gate
+	unknownMu         sync.Mutex
+	unknownRuntime    map[int64]struct{}
 	snapshotSF        singleflight.Group
 	guestVisibilitySF singleflight.Group
 }
 
+func (s *Store) currentProjectionVersion() uint64 {
+	return s.projection.Version()
+}
+
+func (s *Store) publishProjectionIfCurrent(version uint64, fn func() error) (bool, error) {
+	return s.projection.Publish(version, fn)
+}
+
+func (s *Store) Validate() error {
+	if s == nil || s.db == nil || s.backend == nil || s.projection == nil {
+		return fmt.Errorf("store: front cache is not initialized")
+	}
+	return nil
+}
+
 type cacheBackend interface {
-	loadFrontNodeSnapshot(ctx context.Context, id int64) (*metrics.NodeView, error)
 	loadSmartRuntimes(ctx context.Context, ids []int64) (map[int64]*frontSmartRuntime, error)
-	listFrontSnapshotIDs(ctx context.Context) ([]int64, error)
 	fetchSnapshotCache(ctx context.Context) ([]metrics.NodeView, bool, error)
-	putNodeSnapshot(ctx context.Context, node metrics.NodeView) error
-	patchNodeSnapshot(ctx context.Context, id int64, name *string, order *int) error
+	hasNodeRuntime(ctx context.Context, id int64) (bool, error)
+	putNodeRuntime(ctx context.Context, projection frontNodeProjection, invalidateCatalog bool) error
+	removeNodeMetadata(ctx context.Context, id int64) error
 	removeNodeSnapshot(ctx context.Context, id int64) error
-	replaceSnapshot(ctx context.Context, nodes []metrics.NodeView) error
+	replaceSnapshot(ctx context.Context, nodes []frontNodeProjection) error
 	clearFrontMeta(ctx context.Context) error
 	loadGuestVisibleIDs(ctx context.Context, ids []int64) (map[int64]struct{}, bool, error)
 	replaceGuestVisibleIDs(ctx context.Context, allowed map[int64]struct{}) error
 	clearGuestVisibilityMeta(ctx context.Context) error
 }
 
-func New(db *gorm.DB, redisClient *redis.Client) *Store {
+func New(db *gorm.DB, redisClient *redis.Client, projection *frontprojection.Gate) *Store {
 	mem := newMemory()
 	return &Store{
-		db:      db,
-		backend: newCacheBackend(redisClient, mem),
+		db:             db,
+		backend:        newCacheBackend(redisClient, mem),
+		projection:     projection,
+		unknownRuntime: make(map[int64]struct{}),
 	}
 }
 

@@ -26,17 +26,26 @@ type MetricsSample struct {
 	Network   []metrics.NetIOMetrics
 }
 
-// SaveMetrics persists a node metrics snapshot and related tables in a single transaction.
-func (s *Store) SaveMetrics(ctx context.Context, sample MetricsSample) error {
+// SaveMetrics persists a node metrics snapshot and related tables in a single
+// transaction. The result reports whether the current projection accepted this
+// sample; history is still retained for an older sample.
+func (s *Store) SaveMetrics(ctx context.Context, sample MetricsSample) (bool, error) {
 	if s == nil || s.db == nil {
-		return fmt.Errorf("store: db is nil")
+		return false, fmt.Errorf("store: db is nil")
+	}
+	if sample.ServerID <= 0 || sample.Metric.ServerID != sample.ServerID {
+		return false, fmt.Errorf("store: inconsistent metrics server id")
+	}
+	if sample.Metric.CollectedAt.IsZero() {
+		return false, fmt.Errorf("store: metrics collected_at is required")
 	}
 	diskIORows := buildDiskIORows(sample.ServerID, sample.Metric.CollectedAt, sample.DiskIO)
 	diskPhysicalRows := buildDiskPhysicalRows(sample.ServerID, sample.Metric.CollectedAt, sample.DiskSmart)
 	diskUsageRows := buildDiskUsageRows(sample.ServerID, sample.Metric.CollectedAt, sample.DiskUsage)
 	nicRows := buildNICRows(sample.ServerID, sample.Metric.CollectedAt, sample.Network)
 
-	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	var currentUpdated bool
+	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := insertServerMetric(tx, sample.Metric); err != nil {
 			return err
 		}
@@ -52,21 +61,27 @@ func (s *Store) SaveMetrics(ctx context.Context, sample MetricsSample) error {
 		if err := insertNICs(tx, nicRows); err != nil {
 			return err
 		}
-		if err := saveCurrentMetrics(tx, sample.ServerID, sample.Metric, sample.Runtime, diskIORows, diskUsageRows, nicRows); err != nil {
+		var err error
+		currentUpdated, err = saveCurrentMetrics(tx, sample.ServerID, sample.Metric, sample.Runtime, diskIORows, diskUsageRows, nicRows)
+		if err != nil {
 			return err
 		}
-		if len(sample.Updates) > 0 {
+		if currentUpdated && len(sample.Updates) > 0 {
 			if err := tx.Model(&model.Server{}).Where("id = ?", sample.ServerID).Updates(sample.Updates).Error; err != nil {
 				return err
 			}
 		}
 		return nil
 	})
+	if err != nil {
+		return false, err
+	}
+	return currentUpdated, nil
 }
 
 func insertServerMetric(tx *gorm.DB, metric model.ServerMetric) error {
 	if tx == nil {
-		return nil
+		return fmt.Errorf("store: metrics transaction is nil")
 	}
 	return tx.Create(&metric).Error
 }
@@ -90,8 +105,8 @@ func buildDiskIORows(serverID int64, collectedAt time.Time, items []metrics.Disk
 			Role:                 strings.TrimSpace(item.Role),
 			Path:                 strings.TrimSpace(item.DevicePath),
 			CollectedAt:          collectedAt,
-			ReadBytes:            int64(item.ReadBytes),
-			WriteBytes:           int64(item.WriteBytes),
+			ReadBytes:            item.ReadBytes,
+			WriteBytes:           item.WriteBytes,
 			ReadRateBytesPerSec:  item.ReadRateBytesPerSec,
 			WriteRateBytesPerSec: item.WriteRateBytesPerSec,
 			IOPS:                 item.IOPS,
@@ -139,14 +154,20 @@ func buildDiskPhysicalRows(serverID int64, collectedAt time.Time, smart *metrics
 }
 
 func insertDiskPhysical(tx *gorm.DB, rows []model.DiskPhysicalMetric) error {
-	if tx == nil || len(rows) == 0 {
+	if tx == nil {
+		return fmt.Errorf("store: metrics transaction is nil")
+	}
+	if len(rows) == 0 {
 		return nil
 	}
 	return tx.Create(&rows).Error
 }
 
 func insertDiskIO(tx *gorm.DB, rows []model.DiskMetric) error {
-	if tx == nil || len(rows) == 0 {
+	if tx == nil {
+		return fmt.Errorf("store: metrics transaction is nil")
+	}
+	if len(rows) == 0 {
 		return nil
 	}
 	return tx.Create(&rows).Error
@@ -163,9 +184,9 @@ func buildDiskUsageRows(serverID int64, collectedAt time.Time, items []metrics.D
 		if ref == "" {
 			ref = name
 		}
-		total := int64(item.Total)
+		total := item.Total
 		if total == 0 {
-			total = int64(item.Used + item.Free)
+			total = item.Used + item.Free
 		}
 		rows = append(rows, model.DiskUsageMetric{
 			ServerID:    serverID,
@@ -176,8 +197,8 @@ func buildDiskUsageRows(serverID int64, collectedAt time.Time, items []metrics.D
 			Path:        strings.TrimSpace(item.DevicePath),
 			CollectedAt: collectedAt,
 			Total:       total,
-			Used:        int64(item.Used),
-			Free:        int64(item.Free),
+			Used:        item.Used,
+			Free:        item.Free,
 			UsedRatio:   item.UsedRatio,
 			FSType:      mountpointFSType(item),
 			Devices:     dbtypes.TextArray(sanitizeDevices(item.Devices)),
@@ -189,7 +210,10 @@ func buildDiskUsageRows(serverID int64, collectedAt time.Time, items []metrics.D
 }
 
 func insertDiskUsage(tx *gorm.DB, rows []model.DiskUsageMetric) error {
-	if tx == nil || len(rows) == 0 {
+	if tx == nil {
+		return fmt.Errorf("store: metrics transaction is nil")
+	}
+	if len(rows) == 0 {
 		return nil
 	}
 	return tx.Create(&rows).Error
@@ -209,33 +233,39 @@ func buildNICRows(serverID int64, collectedAt time.Time, items []metrics.NetIOMe
 			ServerID:              serverID,
 			Iface:                 iface,
 			CollectedAt:           collectedAt,
-			BytesRecv:             int64(item.BytesRecv),
-			BytesSent:             int64(item.BytesSent),
+			BytesRecv:             item.BytesRecv,
+			BytesSent:             item.BytesSent,
 			RecvRateBytesPerSec:   item.RecvRateBytesPerSec,
 			SentRateBytesPerSec:   item.SentRateBytesPerSec,
-			PacketsRecv:           int64(item.PacketsRecv),
-			PacketsSent:           int64(item.PacketsSent),
+			PacketsRecv:           item.PacketsRecv,
+			PacketsSent:           item.PacketsSent,
 			RecvRatePacketsPerSec: item.RecvRatePacketsPerSec,
 			SentRatePacketsPerSec: item.SentRatePacketsPerSec,
-			ErrIn:                 int64(item.ErrIn),
-			ErrOut:                int64(item.ErrOut),
-			DropIn:                int64(item.DropIn),
-			DropOut:               int64(item.DropOut),
+			ErrIn:                 item.ErrIn,
+			ErrOut:                item.ErrOut,
+			DropIn:                item.DropIn,
+			DropOut:               item.DropOut,
 		})
 	}
 	return rows
 }
 
 func insertNICs(tx *gorm.DB, rows []model.NICMetric) error {
-	if tx == nil || len(rows) == 0 {
+	if tx == nil {
+		return fmt.Errorf("store: metrics transaction is nil")
+	}
+	if len(rows) == 0 {
 		return nil
 	}
 	return tx.Create(&rows).Error
 }
 
-func saveCurrentMetrics(tx *gorm.DB, serverID int64, metric model.ServerMetric, runtime model.MetricRuntime, diskIO []model.DiskMetric, diskUsage []model.DiskUsageMetric, nics []model.NICMetric) error {
-	if tx == nil || serverID <= 0 {
-		return nil
+func saveCurrentMetrics(tx *gorm.DB, serverID int64, metric model.ServerMetric, runtime model.MetricRuntime, diskIO []model.DiskMetric, diskUsage []model.DiskUsageMetric, nics []model.NICMetric) (bool, error) {
+	if tx == nil {
+		return false, fmt.Errorf("store: metrics transaction is nil")
+	}
+	if serverID <= 0 {
+		return false, fmt.Errorf("store: invalid metrics server id")
 	}
 
 	current := model.ServerCurrentMetric{
@@ -255,19 +285,22 @@ func saveCurrentMetrics(tx *gorm.DB, serverID int64, metric model.ServerMetric, 
 		}},
 	}).Create(&current)
 	if result.Error != nil {
-		return result.Error
+		return false, result.Error
 	}
 	if result.RowsAffected == 0 {
-		return nil
+		return false, nil
 	}
 
 	if err := replaceCurrentDiskIO(tx, serverID, diskIO); err != nil {
-		return err
+		return false, err
 	}
 	if err := replaceCurrentDiskUsage(tx, serverID, diskUsage); err != nil {
-		return err
+		return false, err
 	}
-	return replaceCurrentNICs(tx, serverID, nics)
+	if err := replaceCurrentNICs(tx, serverID, nics); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 func replaceCurrentDiskIO(tx *gorm.DB, serverID int64, rows []model.DiskMetric) error {

@@ -41,6 +41,7 @@ func (h *handler) onlineRoute(r *routes.Blueprint) {
 		routes.Func(h.onlineHandler),
 		routes.Tags("metrics"),
 		routes.Auth(routes.AuthOptional),
+		routes.Use(h.optionalBearer),
 	)
 }
 

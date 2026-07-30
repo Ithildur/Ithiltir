@@ -25,7 +25,10 @@ const (
 	trafficMinP95Samples    = 20
 )
 
-var ErrNoTrafficData = errors.New("no traffic data")
+var (
+	ErrNoTrafficData       = errors.New("no traffic data")
+	ErrTrafficDataOverflow = errors.New("traffic data overflow")
+)
 
 type TrafficPeriod string
 type TrafficSnapshotStatus string
@@ -47,7 +50,6 @@ const (
 	TrafficP95InsufficientSamples TrafficP95Status = "insufficient_samples"
 	TrafficP95SnapshotMissing     TrafficP95Status = "snapshot_without_p95"
 
-	TrafficDirectionNone   TrafficDirection = ""
 	TrafficDirectionInKey  TrafficDirection = "in"
 	TrafficDirectionOutKey TrafficDirection = "out"
 	TrafficDirectionTotal  TrafficDirection = "total"
@@ -102,9 +104,6 @@ func (s *Store) TrafficServerName(ctx context.Context, serverID int64) (string, 
 		Where("id = ? AND is_deleted = ?", serverID, false).
 		Take(&row).Error
 	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return "", nil
-		}
 		return "", err
 	}
 	return strings.TrimSpace(row.Name), nil
@@ -117,6 +116,7 @@ type TrafficCycle struct {
 	Timezone          string           `json:"timezone"`
 	Start             time.Time        `json:"start"`
 	End               time.Time        `json:"end"`
+	location          *time.Location
 }
 
 type TrafficStat struct {
@@ -148,7 +148,6 @@ type TrafficStat struct {
 	CycleComplete           bool
 	DataComplete            bool
 	Status                  TrafficSnapshotStatus
-	Partial                 bool
 }
 
 type TrafficSummary struct {
@@ -216,9 +215,9 @@ func (s *Store) EffectiveServerSettings(ctx context.Context, serverID int64, def
 	if serverID <= 0 {
 		return Settings{}, fmt.Errorf("invalid server id")
 	}
-	defaults, ok := NormalizeSettings(defaults)
-	if !ok {
-		return Settings{}, fmt.Errorf("invalid traffic settings")
+	defaults, err := NormalizeSettings(defaults)
+	if err != nil {
+		return Settings{}, err
 	}
 	var row struct {
 		CycleMode         string `gorm:"column:traffic_cycle_mode"`
@@ -227,7 +226,7 @@ func (s *Store) EffectiveServerSettings(ctx context.Context, serverID int64, def
 		BillingTimezone   string `gorm:"column:traffic_billing_timezone"`
 		DirectionMode     string `gorm:"column:traffic_direction_mode"`
 	}
-	err := s.db.WithContext(ctx).
+	err = s.db.WithContext(ctx).
 		Model(&model.Server{}).
 		Select("traffic_cycle_mode", "traffic_billing_start_day", "traffic_billing_anchor_date", "traffic_billing_timezone", "traffic_direction_mode").
 		Where("id = ? AND is_deleted = ?", serverID, false).
@@ -258,7 +257,10 @@ func (s *Store) TrafficSummary(ctx context.Context, q TrafficQuery) (TrafficSumm
 	if s == nil || s.db == nil {
 		return TrafficSummary{}, fmt.Errorf("store: db is nil")
 	}
-	q = normalizeTrafficQuery(q)
+	q, err := normalizeTrafficQuery(q)
+	if err != nil {
+		return TrafficSummary{}, err
+	}
 	if q.ServerID <= 0 {
 		return TrafficSummary{}, fmt.Errorf("invalid server id")
 	}
@@ -266,7 +268,19 @@ func (s *Store) TrafficSummary(ctx context.Context, q TrafficQuery) (TrafficSumm
 		return TrafficSummary{}, fmt.Errorf("invalid iface")
 	}
 
-	cycle := currentTrafficCycleAnchored(q.CycleMode, q.BillingStartDay, q.BillingAnchorDate, q.Location, q.Ref)
+	rule, err := newCycleRule(
+		q.CycleMode,
+		q.BillingStartDay,
+		q.BillingAnchorDate,
+		q.Location,
+	)
+	if err != nil {
+		return TrafficSummary{}, err
+	}
+	cycle, err := rule.at(q.Ref)
+	if err != nil {
+		return TrafficSummary{}, err
+	}
 	if q.UsageMode == UsageLite {
 		return s.trafficUsageSummaryForCycle(ctx, q, cycle)
 	}
@@ -278,13 +292,13 @@ func (s *Store) TrafficMonthly(ctx context.Context, q TrafficMonthlyQuery) ([]Tr
 		return nil, fmt.Errorf("store: db is nil")
 	}
 	if q.Months <= 0 {
-		q.Months = 6
+		return nil, fmt.Errorf("months must be between 1 and %d", trafficMaxMonthlyMonths)
 	}
 	if q.Months > trafficMaxMonthlyMonths {
-		q.Months = trafficMaxMonthlyMonths
+		return nil, fmt.Errorf("months must be between 1 and %d", trafficMaxMonthlyMonths)
 	}
 
-	base := normalizeTrafficQuery(TrafficQuery{
+	base, err := normalizeTrafficQuery(TrafficQuery{
 		ServerID:          q.ServerID,
 		Iface:             q.Iface,
 		UsageMode:         q.UsageMode,
@@ -297,6 +311,9 @@ func (s *Store) TrafficMonthly(ctx context.Context, q TrafficMonthlyQuery) ([]Tr
 		Ref:               q.Ref,
 		Period:            q.Period,
 	})
+	if err != nil {
+		return nil, err
+	}
 	if base.ServerID <= 0 {
 		return nil, fmt.Errorf("invalid server id")
 	}
@@ -304,7 +321,25 @@ func (s *Store) TrafficMonthly(ctx context.Context, q TrafficMonthlyQuery) ([]Tr
 		return nil, fmt.Errorf("invalid iface")
 	}
 
-	cycle := trafficCycleForPeriod(base.CycleMode, base.BillingStartDay, base.BillingAnchorDate, base.Location, base.Ref, base.Period)
+	rule, err := newCycleRule(
+		base.CycleMode,
+		base.BillingStartDay,
+		base.BillingAnchorDate,
+		base.Location,
+	)
+	if err != nil {
+		return nil, err
+	}
+	cycle, err := rule.at(base.Ref)
+	if err != nil {
+		return nil, err
+	}
+	if base.Period == TrafficPeriodPrev {
+		cycle, err = rule.previous(cycle)
+		if err != nil {
+			return nil, err
+		}
+	}
 	out := make([]TrafficSummary, 0, q.Months)
 	for i := 0; i < q.Months; i++ {
 		if base.UsageMode == UsageLite {
@@ -332,7 +367,10 @@ func (s *Store) TrafficMonthly(ctx context.Context, q TrafficMonthlyQuery) ([]Tr
 				out = append(out, summary)
 			}
 		}
-		cycle = prevTrafficCycle(cycle)
+		cycle, err = rule.previous(cycle)
+		if err != nil {
+			return nil, err
+		}
 	}
 	return out, nil
 }
@@ -441,16 +479,15 @@ func (s *Store) RefreshTrafficMonthlySnapshots(ctx context.Context, settings Set
 	if s == nil || s.db == nil {
 		return fmt.Errorf("store: db is nil")
 	}
-	var ok bool
-	settings, ok = NormalizeSettings(settings)
-	if !ok {
-		return fmt.Errorf("invalid traffic settings")
+	settings, err := NormalizeSettings(settings)
+	if err != nil {
+		return err
 	}
 	if settings.UsageMode != UsageBilling {
 		return nil
 	}
 	if loc == nil {
-		loc = time.Local
+		return fmt.Errorf("traffic snapshot location is nil")
 	}
 	if ref.IsZero() {
 		ref = time.Now().In(loc)
@@ -464,9 +501,25 @@ func (s *Store) RefreshTrafficMonthlySnapshots(ctx context.Context, settings Set
 		return err
 	}
 	for _, cycleSetting := range cycleSettings {
-		cycleLoc := SettingsLocation(cycleSetting, loc)
+		cycleLoc, err := SettingsLocation(cycleSetting, loc)
+		if err != nil {
+			return err
+		}
+		rule, err := newCycleRule(
+			cycleSetting.CycleMode,
+			cycleSetting.BillingStartDay,
+			cycleSetting.BillingAnchorDate,
+			cycleLoc,
+		)
+		if err != nil {
+			return err
+		}
 		since := ref.In(cycleLoc).Add(-lookback)
-		for _, cycle := range closedTrafficCycles(cycleSetting.CycleMode, cycleSetting.BillingStartDay, cycleSetting.BillingAnchorDate, cycleLoc, ref, since) {
+		cycles, err := rule.closed(ref, since)
+		if err != nil {
+			return err
+		}
+		for _, cycle := range cycles {
 			candidates, err := s.trafficMonthlyCandidates(ctx, settings, cycleSetting, cycle)
 			if err != nil {
 				return err
@@ -480,7 +533,7 @@ func (s *Store) RefreshTrafficMonthlySnapshots(ctx context.Context, settings Set
 				if sealed {
 					continue
 				}
-				q := normalizeTrafficQuery(TrafficQuery{
+				q, err := normalizeTrafficQuery(TrafficQuery{
 					ServerID:          candidate.ServerID,
 					Iface:             candidate.Iface,
 					UsageMode:         UsageBilling,
@@ -491,7 +544,11 @@ func (s *Store) RefreshTrafficMonthlySnapshots(ctx context.Context, settings Set
 					P95Enabled:        true,
 					Location:          cycleLoc,
 					Ref:               ref,
+					Period:            TrafficPeriodCurrent,
 				})
+				if err != nil {
+					return err
+				}
 				summary, err := s.trafficSummaryForCycle(ctx, q, cycle)
 				if errors.Is(err, ErrNoTrafficData) {
 					continue
@@ -513,7 +570,7 @@ func (s *Store) trafficMonthlyCycleSettings(ctx context.Context, global Settings
 	var rows []trafficMonthlyCandidate
 	if err := s.db.WithContext(ctx).
 		Model(&model.Server{}).
-		Select("traffic_cycle_mode", "traffic_billing_start_day", "traffic_billing_anchor_date", "traffic_billing_timezone").
+		Select("id AS server_id", "traffic_cycle_mode", "traffic_billing_start_day", "traffic_billing_anchor_date", "traffic_billing_timezone").
 		Where("is_deleted = ?", false).
 		Scan(&rows).Error; err != nil {
 		return nil, err
@@ -533,8 +590,6 @@ func (s *Store) trafficMonthlyCycleSettings(ctx context.Context, global Settings
 		out = append(out, settings)
 	}
 	if len(out) == 0 {
-		key := trafficMonthlySettingsKeyFrom(global)
-		seen[key] = struct{}{}
 		out = append(out, global)
 	}
 	return out, nil
@@ -547,7 +602,7 @@ func (s *Store) trafficMonthlyCandidates(ctx context.Context, global, target Set
 		Select(`DISTINCT
 			t.server_id,
 			t.iface,
-			COALESCE(NULLIF(s.traffic_cycle_mode, ''), 'default') AS traffic_cycle_mode,
+			COALESCE(NULLIF(s.traffic_cycle_mode, ''), 'calendar_month') AS traffic_cycle_mode,
 			COALESCE(s.traffic_billing_start_day, 1) AS traffic_billing_start_day,
 			COALESCE(s.traffic_billing_anchor_date, '') AS traffic_billing_anchor_date,
 			COALESCE(s.traffic_billing_timezone, '') AS traffic_billing_timezone`).
@@ -557,17 +612,16 @@ func (s *Store) trafficMonthlyCandidates(ctx context.Context, global, target Set
 		Scan(&rows).Error; err != nil {
 		return nil, err
 	}
-	out := make([]trafficMonthlyCandidate, 0, len(rows))
 	targetKey := trafficMonthlySettingsKeyFrom(target)
+	out := make([]trafficMonthlyCandidate, 0, len(rows))
 	for _, row := range rows {
 		effective, err := SettingsWithServerCycle(global, row.serverCycleSettings())
 		if err != nil {
 			return nil, fmt.Errorf("server %d traffic cycle settings: %w", row.ServerID, err)
 		}
-		if trafficMonthlySettingsKeyFrom(effective) != targetKey {
-			continue
+		if trafficMonthlySettingsKeyFrom(effective) == targetKey {
+			out = append(out, row)
 		}
-		out = append(out, row)
 	}
 	return out, nil
 }
@@ -676,7 +730,6 @@ func (s *Store) trafficMonthlySnapshot(ctx context.Context, q TrafficQuery, cycl
 		CycleComplete:       true,
 		DataComplete:        dataComplete,
 		Status:              status,
-		Partial:             !dataComplete,
 	}
 	if q.P95Enabled && row.P95Enabled {
 		stat.InP95BytesPerSec = row.InP95BytesPerSec
@@ -684,7 +737,9 @@ func (s *Store) trafficMonthlySnapshot(ctx context.Context, q TrafficQuery, cycl
 		stat.BothP95BytesPerSec = row.BothP95BytesPerSec
 	}
 	applyP95Status(&stat, q.UsageMode, row.P95Enabled)
-	applyTrafficSelection(&stat, q.DirectionMode)
+	if err := applyTrafficSelection(&stat, q.DirectionMode); err != nil {
+		return TrafficSummary{}, false, err
+	}
 	return TrafficSummary{
 		ServerID:  q.ServerID,
 		Iface:     normalizeTrafficIface(q.Iface),
@@ -715,7 +770,10 @@ func (s *Store) trafficSummaryForCycle(ctx context.Context, q TrafficQuery, cycl
 		}, ErrNoTrafficData
 	}
 
-	stat := buildTrafficStat(rows, effectiveStart, effectiveEnd, cycleComplete, status, q.DirectionMode, q.UsageMode, q.P95Enabled)
+	stat, err := buildTrafficStat(rows, effectiveStart, effectiveEnd, cycleComplete, status, q.DirectionMode, q.UsageMode, q.P95Enabled)
+	if err != nil {
+		return TrafficSummary{}, err
+	}
 	summary := TrafficSummary{
 		ServerID:  q.ServerID,
 		Iface:     normalizeTrafficIface(q.Iface),
@@ -739,9 +797,6 @@ func (s *Store) trafficEffectiveWindow(ctx context.Context, serverID int64, ifac
 		Where("id = ?", serverID).
 		Take(&row).Error
 	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return start, end, nil
-		}
 		return time.Time{}, time.Time{}, err
 	}
 	effectiveStart := start
@@ -820,28 +875,28 @@ func (s *Store) fetchTrafficBuckets(ctx context.Context, q TrafficQuery, cycle T
 	return rows, err
 }
 
-func normalizeTrafficQuery(q TrafficQuery) TrafficQuery {
+func normalizeTrafficQuery(q TrafficQuery) (TrafficQuery, error) {
 	if q.Location == nil {
-		q.Location = time.Local
+		return TrafficQuery{}, fmt.Errorf("traffic query location is nil")
 	}
 	if q.Ref.IsZero() {
-		q.Ref = time.Now()
+		q.Ref = time.Now().In(q.Location)
 	}
 	cycle, ok := NormalizeCycleMode(q.CycleMode)
 	if !ok {
-		cycle = CycleCalendarMonth
+		return TrafficQuery{}, fmt.Errorf("invalid traffic cycle mode")
 	}
 	usage, ok := NormalizeUsageMode(q.UsageMode)
 	if !ok {
-		usage = UsageLite
+		return TrafficQuery{}, fmt.Errorf("invalid traffic usage mode")
 	}
 	direction, ok := NormalizeDirectionMode(q.DirectionMode)
 	if !ok {
-		direction = DirectionOut
+		return TrafficQuery{}, fmt.Errorf("invalid traffic direction mode")
 	}
 	day := q.BillingStartDay
 	if day < 1 || day > 31 {
-		day = 1
+		return TrafficQuery{}, fmt.Errorf("invalid traffic billing start day")
 	}
 	if cycle == CycleCalendarMonth {
 		day = 1
@@ -849,16 +904,20 @@ func normalizeTrafficQuery(q TrafficQuery) TrafficQuery {
 	anchor := ""
 	if cycle == CycleWHMCS {
 		anchor = strings.TrimSpace(q.BillingAnchorDate)
-		if anchorTime, ok := parseTrafficAnchorDate(anchor, q.Location); ok {
-			anchor = formatTrafficAnchorDate(anchorTime)
-			day = anchorTime.Day()
+		anchorTime, ok := parseTrafficAnchorDate(anchor, q.Location)
+		if !ok {
+			return TrafficQuery{}, fmt.Errorf("invalid traffic billing anchor date")
 		}
+		anchor = formatTrafficAnchorDate(anchorTime)
+		day = anchorTime.Day()
 	}
 	if usage == UsageLite {
 		q.P95Enabled = false
 	}
-	if q.Period != TrafficPeriodPrev {
-		q.Period = TrafficPeriodCurrent
+	switch q.Period {
+	case TrafficPeriodCurrent, TrafficPeriodPrev:
+	default:
+		return TrafficQuery{}, fmt.Errorf("invalid traffic period")
 	}
 	q.UsageMode = usage
 	q.CycleMode = cycle
@@ -866,7 +925,7 @@ func normalizeTrafficQuery(q TrafficQuery) TrafficQuery {
 	q.BillingStartDay = day
 	q.BillingAnchorDate = anchor
 	q.Iface = normalizeTrafficIface(q.Iface)
-	return q
+	return q, nil
 }
 
 func normalizeTrafficIface(iface string) string {
@@ -877,7 +936,7 @@ func validTrafficIface(iface string) bool {
 	return iface != "" && !strings.EqualFold(iface, "all")
 }
 
-func buildTrafficStat(rows []trafficBucket, start, end time.Time, cycleComplete bool, status TrafficSnapshotStatus, direction DirectionMode, usage UsageMode, p95Enabled bool) TrafficStat {
+func buildTrafficStat(rows []trafficBucket, start, end time.Time, cycleComplete bool, status TrafficSnapshotStatus, direction DirectionMode, usage UsageMode, p95Enabled bool) (TrafficStat, error) {
 	stat := emptyTrafficStat(start, end, cycleComplete, status)
 	stat.P95Enabled = p95Enabled
 
@@ -885,8 +944,13 @@ func buildTrafficStat(rows []trafficBucket, start, end time.Time, cycleComplete 
 	outValues := make([]float64, 0, len(rows))
 	bothValues := make([]float64, 0, len(rows))
 	for _, row := range rows {
-		stat.InBytes += row.InBytes
-		stat.OutBytes += row.OutBytes
+		nextIn, inOK := addTrafficBytes(stat.InBytes, row.InBytes)
+		nextOut, outOK := addTrafficBytes(stat.OutBytes, row.OutBytes)
+		if !inOK || !outOK {
+			return TrafficStat{}, ErrTrafficDataOverflow
+		}
+		stat.InBytes = nextIn
+		stat.OutBytes = nextOut
 		stat.GapCount += row.GapCount
 		stat.ResetCount += row.ResetCount
 
@@ -914,10 +978,11 @@ func buildTrafficStat(rows []trafficBucket, start, end time.Time, cycleComplete 
 	}
 	stat.CoverageRatio = coverageRatio(stat.SampleCount, stat.ExpectedSampleCount)
 	stat.DataComplete = trafficDataComplete(stat.SampleCount, stat.ExpectedSampleCount, stat.GapCount, stat.ResetCount)
-	stat.Partial = !stat.DataComplete
 	applyP95Status(&stat, usage, p95Enabled && len(inValues) >= trafficMinP95Samples)
-	applyTrafficSelection(&stat, direction)
-	return stat
+	if err := applyTrafficSelection(&stat, direction); err != nil {
+		return TrafficStat{}, err
+	}
+	return stat, nil
 }
 
 func emptyTrafficStat(start, end time.Time, cycleComplete bool, status TrafficSnapshotStatus) TrafficStat {
@@ -932,11 +997,22 @@ func emptyTrafficStat(start, end time.Time, cycleComplete bool, status TrafficSn
 		CycleComplete:       cycleComplete,
 		DataComplete:        dataComplete,
 		Status:              status,
-		Partial:             !dataComplete,
 	}
 }
 
-func applyTrafficSelection(stat *TrafficStat, direction DirectionMode) {
+// Normal traffic cannot exhaust int64 within a billing period. This guard
+// isolates corrupt counters so one node cannot roll back shared progress.
+func addTrafficBytes(current, delta int64) (int64, bool) {
+	if current < 0 || delta < 0 || current > math.MaxInt64-delta {
+		return current, false
+	}
+	return current + delta, true
+}
+
+func applyTrafficSelection(stat *TrafficStat, direction DirectionMode) error {
+	if stat.InBytes < 0 || stat.OutBytes < 0 {
+		return ErrTrafficDataOverflow
+	}
 	switch direction {
 	case DirectionOut:
 		stat.SelectedBytes = stat.OutBytes
@@ -946,7 +1022,11 @@ func applyTrafficSelection(stat *TrafficStat, direction DirectionMode) {
 		stat.SelectedP95Direction = TrafficDirectionOutKey
 		stat.SelectedPeakDirection = TrafficDirectionOutKey
 	case DirectionBoth:
-		stat.SelectedBytes = stat.InBytes + stat.OutBytes
+		total, ok := addTrafficBytes(stat.InBytes, stat.OutBytes)
+		if !ok {
+			return ErrTrafficDataOverflow
+		}
+		stat.SelectedBytes = total
 		stat.SelectedP95BytesPerSec = stat.BothP95BytesPerSec
 		stat.SelectedPeakBytesPerSec = stat.BothPeakBytesPerSec
 		stat.SelectedBytesDirection = TrafficDirectionTotal
@@ -966,13 +1046,9 @@ func applyTrafficSelection(stat *TrafficStat, direction DirectionMode) {
 			stat.OutPeakBytesPerSec,
 		)
 	default:
-		stat.SelectedBytes = stat.OutBytes
-		stat.SelectedP95BytesPerSec = stat.OutP95BytesPerSec
-		stat.SelectedPeakBytesPerSec = stat.OutPeakBytesPerSec
-		stat.SelectedBytesDirection = TrafficDirectionOutKey
-		stat.SelectedP95Direction = TrafficDirectionOutKey
-		stat.SelectedPeakDirection = TrafficDirectionOutKey
+		return fmt.Errorf("invalid traffic direction mode %q", direction)
 	}
+	return nil
 }
 
 func maxTrafficBytes(inBytes, outBytes int64) (int64, TrafficDirection) {

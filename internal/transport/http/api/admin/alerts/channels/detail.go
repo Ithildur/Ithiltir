@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
-	"time"
 
 	"dash/internal/infra"
 	"dash/internal/model"
@@ -28,7 +27,6 @@ func detailRoute(r *routes.Blueprint, h *handler) {
 }
 
 func (h *handler) detailHandler(w http.ResponseWriter, r *http.Request, rawID string) {
-	w.Header().Set("Cache-Control", "no-store")
 
 	id, err := request.ParseIDInt64(rawID)
 	if err != nil {
@@ -36,7 +34,7 @@ func (h *handler) detailHandler(w http.ResponseWriter, r *http.Request, rawID st
 		return
 	}
 
-	item, err := loadChannel(r.Context(), h.store, id)
+	item, err := loadChannelDelivery(r.Context(), h.store, id)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			httperr.Write(w, http.StatusNotFound, "not_found", "channel not found")
@@ -45,20 +43,18 @@ func (h *handler) detailHandler(w http.ResponseWriter, r *http.Request, rawID st
 		httperr.Write(w, http.StatusServiceUnavailable, "db_error", "failed to fetch channel")
 		return
 	}
-	configView, err := notify.SanitizeConfig(item.Type, json.RawMessage(item.Config))
+	configView, err := notify.SanitizeConfig(item.Channel.Type, json.RawMessage(item.Channel.Config))
 	if err != nil {
 		httperr.Write(w, http.StatusServiceUnavailable, "db_error", "failed to decode channel config")
 		return
 	}
 
-	response.WriteJSON(w, http.StatusOK, channelView{
-		ID:        item.ID,
-		Name:      item.Name,
-		Type:      item.Type,
-		Config:    configView,
-		Enabled:   item.Enabled,
-		CreatedAt: item.CreatedAt.Format(time.RFC3339),
-		UpdatedAt: item.UpdatedAt.Format(time.RFC3339),
+	response.WriteJSON(w, http.StatusOK, viewFromDelivery(item, configView))
+}
+
+func loadChannelDelivery(ctx context.Context, st *alertstore.Store, id int64) (alertstore.ChannelDelivery, error) {
+	return infra.WithPGReadTimeout(ctx, func(c context.Context) (alertstore.ChannelDelivery, error) {
+		return st.GetChannelDelivery(c, id)
 	})
 }
 

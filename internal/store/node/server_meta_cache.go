@@ -136,45 +136,72 @@ func (m ServerMeta) toServer(secret string) model.Server {
 	}
 }
 
-type memNodeAuthBackend struct {
-	mem *memState
-}
-
-func newNodeAuthBackend(mem *memState) nodeAuthBackend {
-	return &memNodeAuthBackend{mem: mem}
-}
-
-func (s *Store) syncServerCache(_ context.Context, srv model.Server, oldSecret string) error {
-	if s == nil || s.auth == nil {
-		return fmt.Errorf("store: node auth backend is nil")
-	}
-	return s.auth.syncServerCache(srv, oldSecret)
-}
-
 func (s *Store) SyncServerCache(ctx context.Context, srv model.Server) error {
-	return s.syncServerCache(ctx, srv, srv.Secret)
-}
-
-func (s *Store) deleteServerMeta(_ context.Context, id int64, secret string) error {
-	if s == nil || s.auth == nil {
-		return nil
-	}
-	return s.auth.deleteServerMeta(id, secret)
-}
-
-func (s *Store) getSecretByID(_ context.Context, id int64) (string, error) {
-	if s == nil || s.auth == nil {
-		return "", nil
-	}
-	return s.auth.getSecretByID(id)
-}
-
-func (s *Store) deleteMetaByID(ctx context.Context, id int64) error {
-	secret, err := s.getSecretByID(ctx, id)
-	if err != nil {
+	if err := ctx.Err(); err != nil {
 		return err
 	}
-	return s.deleteServerMeta(ctx, id, secret)
+	if s == nil || s.mem == nil {
+		return fmt.Errorf("store: memory auth is nil")
+	}
+	if srv.ID <= 0 {
+		return fmt.Errorf("store: invalid server id %d", srv.ID)
+	}
+	if strings.TrimSpace(srv.Secret) == "" {
+		return fmt.Errorf("store: secret is empty")
+	}
+	s.syncServerCache(srv, srv.Secret)
+	return nil
+}
+
+func (s *Store) syncServerCache(srv model.Server, oldSecret string) {
+	if s == nil || s.mem == nil || srv.ID <= 0 {
+		return
+	}
+	newSecret := strings.TrimSpace(srv.Secret)
+	if newSecret == "" {
+		return
+	}
+	oldSecret = strings.TrimSpace(oldSecret)
+	entry := authEntry{secret: newSecret, meta: metaFromServer(srv)}
+
+	s.mem.authMu.Lock()
+	defer s.mem.authMu.Unlock()
+	if oldSecret != "" && oldSecret != newSecret {
+		delete(s.mem.authBySecret, oldSecret)
+	}
+	if old, ok := s.mem.authByID[srv.ID]; ok && old.secret != "" && old.secret != newSecret {
+		delete(s.mem.authBySecret, old.secret)
+	}
+	s.mem.authByID[srv.ID] = entry
+	s.mem.authBySecret[newSecret] = entry
+}
+
+func (s *Store) deleteServerMeta(id int64, secret string) {
+	if s == nil || s.mem == nil || id <= 0 {
+		return
+	}
+	secret = strings.TrimSpace(secret)
+	s.mem.authMu.Lock()
+	defer s.mem.authMu.Unlock()
+	if secret == "" {
+		if old, ok := s.mem.authByID[id]; ok {
+			secret = old.secret
+		}
+	}
+	delete(s.mem.authByID, id)
+	if secret != "" {
+		delete(s.mem.authBySecret, secret)
+	}
+}
+
+func (s *Store) removeServerState(id int64, secret string) {
+	s.deleteServerMeta(id, secret)
+	if s == nil || s.mem == nil || id <= 0 {
+		return
+	}
+	s.mem.updateMu.Lock()
+	delete(s.mem.updates, id)
+	s.mem.updateMu.Unlock()
 }
 
 func (s *Store) RefreshMetaByID(ctx context.Context, id int64) error {
@@ -193,10 +220,12 @@ func (s *Store) RefreshMetaByID(ctx context.Context, id int64) error {
 		if !errors.Is(err, gorm.ErrRecordNotFound) {
 			return err
 		}
-		return s.deleteMetaByID(ctx, id)
+		s.removeServerState(id, "")
+		return nil
 	}
 	if srv.IsDeleted {
-		return s.deleteServerMeta(ctx, srv.ID, srv.Secret)
+		s.removeServerState(srv.ID, srv.Secret)
+		return nil
 	}
 	return s.SyncServerCache(ctx, srv)
 }
@@ -220,9 +249,7 @@ func (s *Store) RefreshMetaByIDs(ctx context.Context, ids []int64) error {
 	for _, srv := range rows {
 		seen[srv.ID] = struct{}{}
 		if srv.IsDeleted {
-			if err := s.deleteServerMeta(ctx, srv.ID, srv.Secret); err != nil {
-				return err
-			}
+			s.removeServerState(srv.ID, srv.Secret)
 			continue
 		}
 		if err := s.SyncServerCache(ctx, srv); err != nil {
@@ -234,9 +261,7 @@ func (s *Store) RefreshMetaByIDs(ctx context.Context, ids []int64) error {
 		if _, ok := seen[id]; ok {
 			continue
 		}
-		if err := s.deleteMetaByID(ctx, id); err != nil {
-			return err
-		}
+		s.removeServerState(id, "")
 	}
 	return nil
 }
@@ -282,80 +307,7 @@ func (s *Store) RebuildServerCache(ctx context.Context) error {
 }
 
 func (s *Store) GetServerBySecret(_ context.Context, secret string) (model.Server, error) {
-	if s == nil || s.auth == nil {
-		return model.Server{}, fmt.Errorf("store: node auth backend is nil")
-	}
-	return s.auth.getServerBySecret(secret)
-}
-
-func (b *memNodeAuthBackend) syncServerCache(srv model.Server, oldSecret string) error {
-	if b == nil || b.mem == nil {
-		return fmt.Errorf("store: memory auth is nil")
-	}
-	newSecret := strings.TrimSpace(srv.Secret)
-	oldSecret = strings.TrimSpace(oldSecret)
-	if newSecret == "" {
-		return fmt.Errorf("store: secret is empty")
-	}
-	if srv.ID <= 0 {
-		return fmt.Errorf("store: invalid server id %d", srv.ID)
-	}
-
-	entry := authEntry{
-		secret: newSecret,
-		meta:   metaFromServer(srv),
-	}
-
-	b.mem.authMu.Lock()
-	defer b.mem.authMu.Unlock()
-
-	if oldSecret != "" && oldSecret != newSecret {
-		delete(b.mem.authBySecret, oldSecret)
-	}
-	if old, ok := b.mem.authByID[srv.ID]; ok && old.secret != "" && old.secret != newSecret {
-		delete(b.mem.authBySecret, old.secret)
-	}
-	b.mem.authByID[srv.ID] = entry
-	b.mem.authBySecret[newSecret] = entry
-	return nil
-}
-
-func (b *memNodeAuthBackend) deleteServerMeta(id int64, secret string) error {
-	if b == nil || b.mem == nil || id <= 0 {
-		return nil
-	}
-	secret = strings.TrimSpace(secret)
-
-	b.mem.authMu.Lock()
-	defer b.mem.authMu.Unlock()
-
-	if secret == "" {
-		if old, ok := b.mem.authByID[id]; ok {
-			secret = old.secret
-		}
-	}
-	delete(b.mem.authByID, id)
-	if secret != "" {
-		delete(b.mem.authBySecret, secret)
-	}
-	return nil
-}
-
-func (b *memNodeAuthBackend) getSecretByID(id int64) (string, error) {
-	if b == nil || b.mem == nil || id <= 0 {
-		return "", nil
-	}
-	b.mem.authMu.RLock()
-	defer b.mem.authMu.RUnlock()
-	entry, ok := b.mem.authByID[id]
-	if !ok {
-		return "", nil
-	}
-	return strings.TrimSpace(entry.secret), nil
-}
-
-func (b *memNodeAuthBackend) getServerBySecret(secret string) (model.Server, error) {
-	if b == nil || b.mem == nil {
+	if s == nil || s.mem == nil {
 		return model.Server{}, fmt.Errorf("store: memory auth is nil")
 	}
 	secret = strings.TrimSpace(secret)
@@ -363,9 +315,9 @@ func (b *memNodeAuthBackend) getServerBySecret(secret string) (model.Server, err
 		return model.Server{}, gorm.ErrRecordNotFound
 	}
 
-	b.mem.authMu.RLock()
-	entry, ok := b.mem.authBySecret[secret]
-	b.mem.authMu.RUnlock()
+	s.mem.authMu.RLock()
+	entry, ok := s.mem.authBySecret[secret]
+	s.mem.authMu.RUnlock()
 	if !ok {
 		return model.Server{}, gorm.ErrRecordNotFound
 	}

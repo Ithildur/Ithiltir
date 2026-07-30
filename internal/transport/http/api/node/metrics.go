@@ -17,16 +17,17 @@ import (
 	"dash/internal/store/metricdata"
 	nodestore "dash/internal/store/node"
 	"dash/internal/transport/http/httperr"
-	"dash/internal/transport/http/request"
 	"dash/internal/version"
 	"github.com/Ithildur/EiluneKit/contextutil"
 	"github.com/Ithildur/EiluneKit/http/decoder"
 	"github.com/Ithildur/EiluneKit/http/response"
 	"github.com/Ithildur/EiluneKit/http/routes"
 	kitlog "github.com/Ithildur/EiluneKit/logging"
-
-	"gorm.io/gorm"
 )
+
+var errMetricsIdentityChanged = errors.New("node identity changed while acquiring the projection lock")
+
+const metricsIdentityAttempts = 3
 
 type handler struct {
 	node          *nodestore.Store
@@ -35,9 +36,10 @@ type handler struct {
 	alert         *alertstore.Store
 	serverID      *serverid.Store
 	staleAfterSec int
+	failedAuth    http.Handler
 }
 
-func newHandler(node *nodestore.Store, metric *metricdata.Store, front *frontcache.Store, alert *alertstore.Store, serverID *serverid.Store, staleAfterSec int) *handler {
+func newHandler(node *nodestore.Store, metric *metricdata.Store, front *frontcache.Store, alert *alertstore.Store, serverID *serverid.Store, staleAfterSec int, failedAuth http.Handler) *handler {
 	return &handler{
 		node:          node,
 		metric:        metric,
@@ -45,6 +47,7 @@ func newHandler(node *nodestore.Store, metric *metricdata.Store, front *frontcac
 		alert:         alert,
 		serverID:      serverID,
 		staleAfterSec: staleAfterSec,
+		failedAuth:    failedAuth,
 	}
 }
 
@@ -64,26 +67,74 @@ func (h *handler) metricsHandler(w http.ResponseWriter, r *http.Request) {
 	receivedAt := time.Now().UTC()
 	logger := infra.WithModule("node")
 
-	validated, err := h.validateMetrics(ctx, r, receivedAt, logger)
+	secret, server, err := h.authenticate(ctx, r, logger)
 	if err != nil {
-		httperr.WriteOrInternal(w, logger, err)
+		h.writeError(w, r, logger, err)
+		return
+	}
+	in, err := h.validateMetricsInput(r, receivedAt, secret)
+	if err != nil {
+		h.writeError(w, r, logger, err)
 		return
 	}
 
-	if err := h.persistMetrics(ctx, validated, r, logger); err != nil {
-		httperr.WriteOrInternal(w, logger, err)
+	var validated *validatedMetrics
+	for attempt := range metricsIdentityAttempts {
+		if err != nil {
+			break
+		}
+		lockedID := server.ID
+		err = h.node.WithMetricsIngest(lockedID, func() error {
+			current, authErr := h.serverBySecret(ctx, in.secret, logger)
+			if authErr != nil {
+				return authErr
+			}
+			if current.ID != lockedID {
+				server = current
+				return errMetricsIdentityChanged
+			}
+
+			validated, err = validateMetrics(in, current)
+			if err != nil {
+				return err
+			}
+			var currentUpdated bool
+			currentUpdated, err = h.persistMetrics(ctx, validated, r, logger)
+			if err == nil && currentUpdated && validated.snapshot != nil {
+				h.alert.MarkServerMetrics(validated.server.ID, *validated.snapshot)
+			}
+			return err
+		})
+		if !errors.Is(err, errMetricsIdentityChanged) {
+			break
+		}
+		if attempt+1 < metricsIdentityAttempts {
+			err = nil
+		}
+	}
+	if errors.Is(err, errMetricsIdentityChanged) {
+		logger.Warn("node identity kept changing during metrics ingest", err)
+		err = httperr.ServiceUnavailable(err)
+	}
+	if err != nil {
+		h.writeError(w, r, logger, err)
 		return
 	}
+	h.writeMetricsResponse(w, validated, logger)
+}
 
-	h.writeMetricsResponse(ctx, w, validated, logger)
+type metricsInput struct {
+	secret     string
+	report     metrics.NodeReport
+	receivedAt time.Time
 }
 
 type validatedMetrics struct {
-	server     model.Server
-	report     metrics.NodeReport
-	metric     model.ServerMetric
-	runtime    model.MetricRuntime
-	receivedAt time.Time
+	server   model.Server
+	report   metrics.NodeReport
+	metric   model.ServerMetric
+	runtime  model.MetricRuntime
+	snapshot *metrics.NodeView
 }
 
 type metricsResponse struct {
@@ -99,20 +150,7 @@ type updateManifest struct {
 	Size    int64  `json:"size"`
 }
 
-func readSecret(r *http.Request) (string, bool) {
-	secret := r.Header.Get(request.NodeSecretHeader)
-	if secret == "" {
-		return "", false
-	}
-	return secret, true
-}
-
-func (h *handler) validateMetrics(ctx context.Context, r *http.Request, receivedAt time.Time, logger *kitlog.Helper) (*validatedMetrics, error) {
-	secret, ok := readSecret(r)
-	if !ok {
-		return nil, httperr.Unauthorized(nil)
-	}
-
+func (h *handler) validateMetricsInput(r *http.Request, receivedAt time.Time, secret string) (*metricsInput, error) {
 	report, err := decodeReport(r)
 	if err != nil {
 		if errors.Is(err, decoder.ErrBodyTooLarge) {
@@ -137,27 +175,21 @@ func (h *handler) validateMetrics(ctx context.Context, r *http.Request, received
 	if err := metrics.ValidateReport(report); err != nil {
 		return nil, httperr.InvalidMetrics(err)
 	}
+	return &metricsInput{secret: secret, report: report, receivedAt: receivedAt}, nil
+}
 
-	server, err := h.loadServer(ctx, secret)
-	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, httperr.Unauthorized(err)
-		}
-		logger.Error("redis load server failed", err)
-		return nil, httperr.ServiceUnavailable(err)
-	}
-	report, reportedAtRaw := metrics.NormalizeReport(server.ID, server.DisplayOrder, report, receivedAt)
-	metric, runtime, err := metrics.BuildMetric(server.ID, report.Metrics, receivedAt, reportedAtRaw)
+func validateMetrics(in *metricsInput, server model.Server) (*validatedMetrics, error) {
+	report, reportedAtRaw := metrics.NormalizeReport(server.ID, server.DisplayOrder, in.report, in.receivedAt)
+	metric, runtime, err := metrics.BuildMetric(server.ID, report.Metrics, in.receivedAt, reportedAtRaw)
 	if err != nil {
 		return nil, httperr.InvalidMetrics(err)
 	}
 
 	return &validatedMetrics{
-		server:     server,
-		report:     report,
-		metric:     metric,
-		runtime:    runtime,
-		receivedAt: receivedAt,
+		server:  server,
+		report:  report,
+		metric:  metric,
+		runtime: runtime,
 	}, nil
 }
 
@@ -169,11 +201,11 @@ func decodeReport(r *http.Request) (metrics.NodeReport, error) {
 	return report, nil
 }
 
-func (h *handler) persistMetrics(ctx context.Context, validated *validatedMetrics, r *http.Request, logger *kitlog.Helper) error {
-	updates := h.buildRuntimeUpdates(ctx, validated.server.ID, validated.receivedAt, r)
+func (h *handler) persistMetrics(ctx context.Context, validated *validatedMetrics, r *http.Request, logger *kitlog.Helper) (bool, error) {
+	updates, nextIP := buildServerUpdates(validated.server, r)
 
 	// Agent disk.physical is validated but not persisted; base_io feeds disk IO history.
-	if err := h.saveMetrics(ctx, metricdata.MetricsSample{
+	currentUpdated, err := h.saveMetrics(ctx, metricdata.MetricsSample{
 		ServerID:  validated.server.ID,
 		Metric:    validated.metric,
 		Runtime:   validated.runtime,
@@ -182,29 +214,51 @@ func (h *handler) persistMetrics(ctx context.Context, validated *validatedMetric
 		DiskSmart: validated.report.Metrics.Disk.Smart,
 		DiskUsage: validated.report.Metrics.Disk.Logical,
 		Network:   validated.report.Metrics.Network,
-	}); err != nil {
+	})
+	if err != nil {
 		logger.Error("save metrics failed", err, kitlog.String("node", validated.report.Hostname))
-		return httperr.ServiceUnavailable(err)
+		return false, httperr.ServiceUnavailable(err)
 	}
-
-	if err := h.refreshFrontSnapshot(ctx, validated.server, validated.report); err != nil {
-		logger.Warn("refresh front snapshot failed", err)
-		if clearErr := h.front.ClearFrontMeta(ctx); clearErr != nil {
-			logger.Warn("clear front snapshot meta failed", clearErr)
+	if currentUpdated && nextIP != nil {
+		validated.server.IP = nextIP
+		if err := h.node.SyncServerCache(context.WithoutCancel(ctx), validated.server); err != nil {
+			return false, httperr.ServiceUnavailable(err)
 		}
 	}
-	if err := h.markAlertDirty(ctx, validated.server.ID); err != nil {
-		logger.Error("mark alert dirty failed", err, kitlog.Int64("server_id", validated.server.ID))
-		return httperr.ServiceUnavailable(err)
+
+	if currentUpdated {
+		frontNode := metrics.BuildNodeView(validated.server, validated.report, h.staleAfterSec)
+		validated.snapshot = &frontNode
+		if err := h.refreshFrontSnapshot(ctx, frontNode, validated.report); err != nil {
+			logger.Warn("refresh front snapshot failed", err)
+			if clearErr := h.clearFrontMeta(ctx); clearErr != nil {
+				logger.Warn("clear front snapshot meta failed", clearErr)
+			}
+		}
 	}
 
-	return nil
+	return currentUpdated, nil
 }
 
-func (h *handler) writeMetricsResponse(ctx context.Context, w http.ResponseWriter, validated *validatedMetrics, logger *kitlog.Helper) {
+func buildServerUpdates(server model.Server, r *http.Request) (map[string]any, *string) {
+	updates := map[string]any{}
+	ip, ok := nodeClientIP(r)
+	if !ok {
+		return updates, nil
+	}
+
+	ipStr := ip.String()
+	if server.IP != nil && *server.IP == ipStr {
+		return updates, nil
+	}
+	updates["ip"] = ipStr
+	return updates, &ipStr
+}
+
+func (h *handler) writeMetricsResponse(w http.ResponseWriter, validated *validatedMetrics, logger *kitlog.Helper) {
 	resp := metricsResponse{OK: true}
 
-	manifest, err := h.updateManifest(ctx, validated)
+	manifest, err := h.updateManifest(validated)
 	if err != nil {
 		logger.Warn("node update manifest unavailable", err, kitlog.Int64("server_id", validated.server.ID))
 	} else {
@@ -213,91 +267,37 @@ func (h *handler) writeMetricsResponse(ctx context.Context, w http.ResponseWrite
 
 	response.WriteJSON(w, http.StatusOK, resp)
 }
-
-func (h *handler) updateManifest(ctx context.Context, validated *validatedMetrics) (*updateManifest, error) {
-	type resolved struct {
-		target nodestore.AgentUpdateTarget
-		ok     bool
-	}
-	got, err := infra.WithPGWriteTimeout(ctx, func(c context.Context) (resolved, error) {
-		target, ok, err := h.node.ResolveAgentUpdate(c, validated.server.ID, validated.report.Version)
-		return resolved{target: target, ok: ok}, err
-	})
-	if err != nil || !got.ok {
+func (h *handler) updateManifest(validated *validatedMetrics) (*updateManifest, error) {
+	target, ok, err := h.node.ResolveAgentUpdate(validated.server.ID, validated.report.Version)
+	if err != nil || !ok {
 		return nil, err
 	}
 
 	return &updateManifest{
-		ID:      got.target.Version,
-		Version: got.target.Version,
-		URL:     got.target.URL,
-		SHA256:  got.target.SHA256,
-		Size:    got.target.Size,
+		ID:      target.Version,
+		Version: target.Version,
+		URL:     target.URL,
+		SHA256:  target.SHA256,
+		Size:    target.Size,
 	}, nil
 }
 
-func (h *handler) loadServer(ctx context.Context, secret string) (model.Server, error) {
-	return infra.WithPGReadTimeout(ctx, func(ctx context.Context) (model.Server, error) {
-		return h.node.GetServerBySecret(ctx, secret)
+func (h *handler) saveMetrics(ctx context.Context, sample metricdata.MetricsSample) (bool, error) {
+	return infra.WithPGWriteTimeout(ctx, func(ctx context.Context) (bool, error) {
+		return h.metric.SaveMetrics(ctx, sample)
 	})
 }
 
-func (h *handler) saveMetrics(ctx context.Context, sample metricdata.MetricsSample) error {
-	_, err := infra.WithPGWriteTimeout(ctx, func(ctx context.Context) (struct{}, error) {
-		return struct{}{}, h.metric.SaveMetrics(ctx, sample)
-	})
-	return err
-}
-
-func (h *handler) refreshFrontSnapshot(ctx context.Context, server model.Server, report metrics.NodeReport) error {
-	_, err := contextutil.WithTimeout(ctx, config.RedisWriteTimeout, func(ctx context.Context) (struct{}, error) {
-		frontNode, err := metrics.BuildNodeView(server, report, h.staleAfterSec)
-		if err != nil {
-			return struct{}{}, err
-		}
-		return struct{}{}, h.front.PutNodeSnapshot(ctx, frontNode)
+func (h *handler) refreshFrontSnapshot(ctx context.Context, node metrics.NodeView, report metrics.NodeReport) error {
+	_, err := contextutil.WithTimeout(context.WithoutCancel(ctx), config.RedisWriteTimeout, func(ctx context.Context) (struct{}, error) {
+		return struct{}{}, h.front.PutNodeRuntime(ctx, node, report.Metrics.Memory.Total, report.Metrics.Memory.SwapTotal)
 	})
 	return err
 }
 
-func (h *handler) markAlertDirty(ctx context.Context, serverID int64) error {
-	_, err := contextutil.WithTimeout(ctx, config.RedisWriteTimeout, func(ctx context.Context) (struct{}, error) {
-		return struct{}{}, h.alert.MarkServerDirty(ctx, serverID)
+func (h *handler) clearFrontMeta(ctx context.Context) error {
+	_, err := contextutil.WithTimeout(context.WithoutCancel(ctx), config.RedisWriteTimeout, func(ctx context.Context) (struct{}, error) {
+		return struct{}{}, h.front.ClearFrontMeta(ctx)
 	})
 	return err
-}
-
-func (h *handler) buildRuntimeUpdates(ctx context.Context, serverID int64, receivedAt time.Time, r *http.Request) map[string]any {
-	updates := map[string]any{}
-
-	ip, ok := nodeClientIP(r)
-	if !ok {
-		return updates
-	}
-
-	ipStr := ip.String()
-
-	cached := h.getIP(ctx, serverID)
-	if cached == "" || cached != ipStr {
-		updates["ip"] = ipStr
-	}
-
-	if err := h.node.SetServerRuntime(ctx, serverID, ipStr, receivedAt); err != nil {
-		infra.WithModule("node").Warn("cache runtime write failed", err)
-	}
-
-	return updates
-}
-
-func (h *handler) getIP(ctx context.Context, serverID int64) string {
-	logger := infra.WithModule("node")
-
-	cached, hit, err := h.node.GetServerRuntimeIP(ctx, serverID)
-	if err != nil {
-		logger.Error("cache runtime ip read failed", err)
-	}
-	if hit {
-		return cached
-	}
-	return ""
 }

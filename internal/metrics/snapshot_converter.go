@@ -3,8 +3,8 @@ package metrics
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"strings"
-	"time"
 
 	"dash/internal/model"
 )
@@ -23,7 +23,10 @@ func ToSnapshot(m Metrics) (model.MetricsSnapshot, error) {
 		}
 	}
 
-	netInBytes, netOutBytes, netInBps, netOutBps := aggregateNetwork(m.Network)
+	netInBytes, netOutBytes, netInBps, netOutBps, err := aggregateNetwork(m.Network)
+	if err != nil {
+		return model.MetricsSnapshot{}, err
+	}
 	raidHealth := raidOverallHealth(m.Raid)
 
 	mem := m.Memory
@@ -41,24 +44,24 @@ func ToSnapshot(m Metrics) (model.MetricsSnapshot, error) {
 			CPUIowait:         m.CPU.Times.Iowait,
 			CPUSteal:          m.CPU.Times.Steal,
 			CPUTempC:          maxThermalTempC(m.Thermal, isCPUSensor),
-			MemTotal:          int64(mem.Total),
-			MemUsed:           int64(mem.Used),
-			MemAvailable:      int64(mem.Available),
-			MemBuffers:        int64(mem.Buffers),
-			MemCached:         int64(mem.Cached),
+			MemTotal:          mem.Total,
+			MemUsed:           mem.Used,
+			MemAvailable:      mem.Available,
+			MemBuffers:        mem.Buffers,
+			MemCached:         mem.Cached,
 			MemUsedRatio:      mem.UsedRatio,
-			SwapTotal:         int64(mem.SwapTotal),
-			SwapUsed:          int64(mem.SwapUsed),
-			SwapFree:          int64(mem.SwapFree),
+			SwapTotal:         mem.SwapTotal,
+			SwapUsed:          mem.SwapUsed,
+			SwapFree:          mem.SwapFree,
 			SwapUsedRatio:     mem.SwapUsedRatio,
-			NetInBytes:        int64(netInBytes),
-			NetOutBytes:       int64(netOutBytes),
+			NetInBytes:        netInBytes,
+			NetOutBytes:       netOutBytes,
 			NetInBps:          netInBps,
 			NetOutBps:         netOutBps,
-			ProcessCount:      int32(processes.ProcessCount),
-			TCPConn:           int32(conn.TCPCount),
-			UDPConn:           int32(conn.UDPCount),
-			UptimeSeconds:     int64(m.System.UptimeSeconds),
+			ProcessCount:      processes.ProcessCount,
+			TCPConn:           conn.TCPCount,
+			UDPConn:           conn.UDPCount,
+			UptimeSeconds:     m.System.UptimeSeconds,
 			RaidSupported:     m.Raid.Supported,
 			RaidAvailable:     m.Raid.Available,
 			RaidOverallHealth: raidHealth,
@@ -103,15 +106,15 @@ func metricsFromSnapshot(snap model.MetricsSnapshot) (Metrics, error) {
 			},
 		},
 		Memory: MemoryMetrics{
-			Total:         uint64(snap.MemTotal),
-			Used:          uint64(snap.MemUsed),
-			Available:     uint64(snap.MemAvailable),
-			Buffers:       uint64(snap.MemBuffers),
-			Cached:        uint64(snap.MemCached),
+			Total:         snap.MemTotal,
+			Used:          snap.MemUsed,
+			Available:     snap.MemAvailable,
+			Buffers:       snap.MemBuffers,
+			Cached:        snap.MemCached,
 			UsedRatio:     snap.MemUsedRatio,
-			SwapTotal:     uint64(snap.SwapTotal),
-			SwapUsed:      uint64(snap.SwapUsed),
-			SwapFree:      uint64(snap.SwapFree),
+			SwapTotal:     snap.SwapTotal,
+			SwapUsed:      snap.SwapUsed,
+			SwapFree:      snap.SwapFree,
 			SwapUsedRatio: snap.SwapUsedRatio,
 		},
 		Disk: DiskMetrics{
@@ -121,11 +124,11 @@ func metricsFromSnapshot(snap model.MetricsSnapshot) (Metrics, error) {
 		Network: nil,
 		System: SystemMetrics{
 			Alive:         true,
-			UptimeSeconds: uint64(snap.UptimeSeconds),
-			Uptime:        formatUptime(uint64(snap.UptimeSeconds)),
+			UptimeSeconds: snap.UptimeSeconds,
+			Uptime:        formatUptime(snap.UptimeSeconds),
 		},
-		Processes:   ProcessMetrics{ProcessCount: int(snap.ProcessCount)},
-		Connections: ConnectionMetrics{TCPCount: int(snap.TCPConn), UDPCount: int(snap.UDPConn)},
+		Processes:   ProcessMetrics{ProcessCount: snap.ProcessCount},
+		Connections: ConnectionMetrics{TCPCount: snap.TCPConn, UDPCount: snap.UDPConn},
 		Raid:        raid,
 		Thermal:     thermal,
 		Pressure:    pressureFromSnapshot(snap),
@@ -161,14 +164,23 @@ func BuildNodeReport(server model.Server, metric model.ServerCurrentMetric) (Nod
 	}, nil
 }
 
-func aggregateNetwork(interfaces []NetIOMetrics) (inBytes uint64, outBytes uint64, inBps float64, outBps float64) {
+func aggregateNetwork(interfaces []NetIOMetrics) (inBytes int64, outBytes int64, inBps float64, outBps float64, err error) {
 	for _, iface := range interfaces {
+		if iface.BytesRecv < 0 || iface.BytesSent < 0 {
+			return 0, 0, 0, 0, fmt.Errorf("invalid network counters")
+		}
+		if inBytes > math.MaxInt64-iface.BytesRecv || outBytes > math.MaxInt64-iface.BytesSent {
+			return 0, 0, 0, 0, fmt.Errorf("network counters overflow")
+		}
 		inBytes += iface.BytesRecv
 		outBytes += iface.BytesSent
 		inBps += iface.RecvRateBytesPerSec
 		outBps += iface.SentRateBytesPerSec
+		if math.IsInf(inBps, 0) || math.IsInf(outBps, 0) {
+			return 0, 0, 0, 0, fmt.Errorf("network rates overflow")
+		}
 	}
-	return
+	return inBytes, outBytes, inBps, outBps, nil
 }
 
 func maxThermalTempC(thermal *Thermal, match func(ThermalSensor) bool) *float64 {
@@ -202,26 +214,26 @@ func raidOverallHealth(raid RaidMetrics) string {
 	}
 	status := "healthy"
 	for _, array := range raid.Arrays {
-		if array.Health == "" {
+		health := strings.TrimSpace(array.Health)
+		if health == "" {
 			continue
 		}
-		if array.Health == "degraded" || array.Health == "syncing" {
-			return array.Health
+		if health == "degraded" || health == "syncing" {
+			return health
 		}
-		status = array.Health
+		status = health
 	}
 	return status
 }
 
-func formatUptime(seconds uint64) string {
+func formatUptime(seconds int64) string {
 	if seconds == 0 {
 		return ""
 	}
-	dur := time.Duration(seconds) * time.Second
-	days := dur / (24 * time.Hour)
-	dur -= days * 24 * time.Hour
-	hours := dur / time.Hour
-	dur -= hours * time.Hour
-	minutes := dur / time.Minute
+	days := seconds / (24 * 60 * 60)
+	seconds %= 24 * 60 * 60
+	hours := seconds / (60 * 60)
+	seconds %= 60 * 60
+	minutes := seconds / 60
 	return fmt.Sprintf("%dd %dh %dm", days, hours, minutes)
 }

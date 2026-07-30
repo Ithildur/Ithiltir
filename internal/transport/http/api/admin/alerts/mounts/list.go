@@ -51,7 +51,6 @@ func listRoute(r *routes.Blueprint, h *handler) {
 }
 
 func (h *handler) listHandler(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Cache-Control", "no-store")
 	out, err := loadMounts(r.Context(), h.alert, h.node)
 	if err != nil {
 		httperr.Write(w, http.StatusServiceUnavailable, "db_error", "failed to fetch alert mounts")

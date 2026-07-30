@@ -12,7 +12,7 @@ import (
 
 func Send(ctx context.Context, channel *model.NotifyChannel, msg Message) error {
 	if channel == nil {
-		return errors.New("channel is nil")
+		return blockedError("channel_missing", errors.New("channel is nil"))
 	}
 
 	cfg, err := DecodeConfig(channel.Type, json.RawMessage(channel.Config))
@@ -35,7 +35,7 @@ func Send(ctx context.Context, channel *model.NotifyChannel, msg Message) error 
 		action = "webhook"
 		err = sendWebhook(ctx, typed, msg)
 	default:
-		return fmt.Errorf("unsupported notify type: %s", channel.Type)
+		return blockedError("unsupported_channel_type", fmt.Errorf("unsupported notify type: %s", channel.Type))
 	}
 	if err != nil {
 		return fmt.Errorf("notify send channel=%d type=%s action=%s: %w", channel.ID, channel.Type, action, err)

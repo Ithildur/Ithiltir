@@ -52,13 +52,25 @@ func (s *Store) AgentPlatform(ctx context.Context, id int64) (AgentPlatform, err
 }
 
 func (s *Store) RequestAgentUpdate(id int64, target AgentUpdateTarget) {
+	if s == nil || s.mem == nil || id <= 0 {
+		return
+	}
 	target.Version = strings.TrimSpace(target.Version)
+	s.mem.authMu.RLock()
+	if _, active := s.mem.authByID[id]; !active {
+		s.mem.authMu.RUnlock()
+		return
+	}
 	s.mem.updateMu.Lock()
 	s.mem.updates[id] = agentUpdateState{target: target}
 	s.mem.updateMu.Unlock()
+	s.mem.authMu.RUnlock()
 }
 
-func (s *Store) ResolveAgentUpdate(_ context.Context, id int64, current string) (AgentUpdateTarget, bool, error) {
+func (s *Store) ResolveAgentUpdate(id int64, current string) (AgentUpdateTarget, bool, error) {
+	if s == nil || s.mem == nil || id <= 0 {
+		return AgentUpdateTarget{}, false, nil
+	}
 	s.mem.updateMu.RLock()
 	state, ok := s.mem.updates[id]
 	s.mem.updateMu.RUnlock()
@@ -79,7 +91,9 @@ func (s *Store) ResolveAgentUpdate(_ context.Context, id int64, current string) 
 	}
 
 	s.mem.updateMu.Lock()
-	delete(s.mem.updates, id)
+	if latest, exists := s.mem.updates[id]; exists && latest == state {
+		delete(s.mem.updates, id)
+	}
 	s.mem.updateMu.Unlock()
 	return AgentUpdateTarget{}, false, nil
 }
@@ -110,10 +124,7 @@ func (s *Store) grantDeployAccess(assetPath string, now time.Time, ttl time.Dura
 		if _, exists := s.mem.deployGrants[token]; exists {
 			continue
 		}
-		s.mem.deployGrants[token] = deployGrantState{
-			path:      assetPath,
-			expiresAt: now.Add(ttl),
-		}
+		s.mem.deployGrants[token] = deployGrantState{path: assetPath, expiresAt: now.Add(ttl)}
 		return token, nil
 	}
 	return "", fmt.Errorf("store: deploy grant token collision")
@@ -135,7 +146,6 @@ func (s *Store) validDeployGrant(token, assetPath string, now time.Time) bool {
 
 	s.mem.deployGrantMu.Lock()
 	defer s.mem.deployGrantMu.Unlock()
-
 	grant, ok := s.mem.deployGrants[token]
 	if !ok {
 		return false
@@ -165,7 +175,6 @@ func cleanDeployPath(raw string) string {
 	}
 	return path.Clean(raw)
 }
-
 func deref(v *string) string {
 	if v == nil {
 		return ""

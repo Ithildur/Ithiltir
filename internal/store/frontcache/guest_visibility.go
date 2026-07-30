@@ -17,16 +17,12 @@ var errMissingDB = errors.New("frontcache: db is nil")
 func (s *Store) loadGuestVisibleIDs(ctx context.Context, ids []int64) (map[int64]struct{}, bool, error) {
 	allowed, ok, err := s.backend.loadGuestVisibleIDs(ctx, ids)
 	if errors.Is(err, errCorruptGuestVisibility) {
-		if clearErr := s.backend.clearGuestVisibilityMeta(ctx); clearErr != nil {
+		if clearErr := s.ClearGuestVisibilityMeta(ctx); clearErr != nil {
 			return nil, false, errors.Join(err, clearErr)
 		}
 		return nil, false, nil
 	}
 	return allowed, ok, err
-}
-
-func (s *Store) replaceGuestVisibleIDs(ctx context.Context, allowed map[int64]struct{}) error {
-	return s.backend.replaceGuestVisibleIDs(ctx, allowed)
 }
 
 func (s *Store) EnsureGuestVisibleIDs(ctx context.Context, ids []int64, opts GuestVisibilityOptions) (map[int64]struct{}, error) {
@@ -71,21 +67,28 @@ func (s *Store) ClearGuestVisibilityMeta(ctx context.Context) error {
 }
 
 func (s *Store) rebuildGuestVisibility(ctx context.Context, dbTimeout, cacheTimeout time.Duration) (map[int64]struct{}, error) {
-	dbCtx, dbCancel := context.WithTimeout(ctx, dbTimeout)
-	defer dbCancel()
+	for range projectionBuildAttempts {
+		version := s.currentProjectionVersion()
+		dbCtx, dbCancel := context.WithTimeout(ctx, dbTimeout)
+		allowed, err := s.fetchGuestVisibleIDs(dbCtx)
+		dbCancel()
+		if err != nil {
+			return nil, fmt.Errorf("fetch guest visible ids: %w", err)
+		}
 
-	allowed, err := s.fetchGuestVisibleIDs(dbCtx)
-	if err != nil {
-		return nil, fmt.Errorf("fetch guest visible ids: %w", err)
+		cacheCtx, cacheCancel := context.WithTimeout(ctx, cacheTimeout)
+		published, err := s.publishProjectionIfCurrent(version, func() error {
+			return s.backend.replaceGuestVisibleIDs(cacheCtx, allowed)
+		})
+		cacheCancel()
+		if err != nil {
+			return nil, fmt.Errorf("publish guest visible ids: %w", err)
+		}
+		if published {
+			return allowed, nil
+		}
 	}
-
-	cacheCtx, cacheCancel := context.WithTimeout(ctx, cacheTimeout)
-	publishErr := s.replaceGuestVisibleIDs(cacheCtx, allowed)
-	cacheCancel()
-	if publishErr != nil {
-		return nil, fmt.Errorf("publish guest visible ids: %w", publishErr)
-	}
-	return allowed, nil
+	return nil, errProjectionChanged
 }
 
 func (s *Store) fetchGuestVisibleIDs(ctx context.Context) (map[int64]struct{}, error) {

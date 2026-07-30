@@ -1,8 +1,10 @@
 package traffic
 
 import (
+	"errors"
 	"net/http"
 
+	trafficstore "dash/internal/store/traffic"
 	"dash/internal/transport/http/httperr"
 	"dash/internal/transport/http/request"
 	"github.com/Ithildur/EiluneKit/http/middleware"
@@ -16,6 +18,7 @@ func (h *handler) settingsRoute(r *routes.Blueprint) {
 		"Get traffic settings",
 		routes.Func(h.settingsHandler),
 		routes.Auth(routes.AuthOptional),
+		routes.Use(h.optionalBearer),
 	)
 	r.Patch(
 		"/settings",
@@ -45,19 +48,22 @@ func (h *handler) patchSettingsHandler(w http.ResponseWriter, r *http.Request) {
 		httperr.Write(w, http.StatusBadRequest, "no_fields", "no fields to update")
 		return
 	}
-
-	// PATCH must preserve empty billing_timezone as app-timezone inheritance.
-	current, err := loadStoredSettings(r.Context(), h.traffic)
-	if err != nil {
-		httperr.Write(w, http.StatusServiceUnavailable, "db_error", "failed to fetch traffic settings")
+	if in.hasCycleFields() {
+		httperr.Write(
+			w,
+			http.StatusBadRequest,
+			"billing_cycle_is_per_node",
+			"billing cycles must be configured per node",
+		)
 		return
 	}
-	next, ok := in.apply(current)
-	if !ok {
+
+	err := patchSettings(r.Context(), h.traffic, in.patch())
+	if errors.Is(err, trafficstore.ErrInvalidSettingsPatch) {
 		httperr.Write(w, http.StatusBadRequest, "invalid_fields", "invalid traffic settings")
 		return
 	}
-	if err := saveSettings(r.Context(), h.traffic, next); err != nil {
+	if err != nil {
 		httperr.Write(w, http.StatusServiceUnavailable, "db_error", "failed to update traffic settings")
 		return
 	}

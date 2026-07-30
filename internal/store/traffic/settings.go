@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"dash/internal/model"
+
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
@@ -32,6 +33,8 @@ const (
 	CycleWHMCS         BillingCycleMode = "whmcs_compatible"
 	CycleClampMonthEnd BillingCycleMode = "clamp_to_month_end"
 
+	// ServerCycleDefault is an input-only compatibility alias. Normalization
+	// converts it to an explicit calendar-month cycle; it is never persisted.
 	ServerCycleDefault ServerCycleMode = "default"
 
 	ServerDirectionDefault ServerDirectionMode = "default"
@@ -47,6 +50,8 @@ var (
 	ErrInvalidServerCycleAnchorDate = errors.New("invalid server cycle billing anchor date")
 	ErrInvalidServerCycleTimezone   = errors.New("invalid server cycle billing timezone")
 	ErrInvalidServerDirectionMode   = errors.New("invalid server direction mode")
+	ErrInvalidSettings              = errors.New("invalid traffic settings")
+	ErrInvalidSettingsPatch         = errors.New("invalid traffic settings patch")
 )
 
 type Settings struct {
@@ -59,21 +64,17 @@ type Settings struct {
 	DirectionMode     DirectionMode    `json:"direction_mode"`
 }
 
+type SettingsPatch struct {
+	GuestAccessMode *GuestAccessMode
+	UsageMode       *UsageMode
+	DirectionMode   *DirectionMode
+}
+
 type ServerCycleSettings struct {
 	Mode              ServerCycleMode
 	BillingStartDay   int
 	BillingAnchorDate string
 	BillingTimezone   string
-}
-
-func DefaultSettings() Settings {
-	return Settings{
-		GuestAccessMode: GuestAccessDisabled,
-		UsageMode:       UsageLite,
-		CycleMode:       CycleCalendarMonth,
-		BillingStartDay: 1,
-		DirectionMode:   DirectionOut,
-	}
 }
 
 func NormalizeGuestAccessMode(mode GuestAccessMode) (GuestAccessMode, bool) {
@@ -89,7 +90,7 @@ func NormalizeGuestAccessMode(mode GuestAccessMode) (GuestAccessMode, bool) {
 
 func NormalizeUsageMode(mode UsageMode) (UsageMode, bool) {
 	switch mode {
-	case "", UsageLite:
+	case UsageLite:
 		return UsageLite, true
 	case UsageBilling:
 		return UsageBilling, true
@@ -113,7 +114,7 @@ func NormalizeCycleMode(mode BillingCycleMode) (BillingCycleMode, bool) {
 
 func NormalizeServerCycleMode(mode ServerCycleMode) (ServerCycleMode, bool) {
 	switch mode {
-	case "", ServerCycleDefault:
+	case ServerCycleDefault:
 		return ServerCycleDefault, true
 	case ServerCycleMode(CycleCalendarMonth):
 		return ServerCycleMode(CycleCalendarMonth), true
@@ -128,7 +129,7 @@ func NormalizeServerCycleMode(mode ServerCycleMode) (ServerCycleMode, bool) {
 
 func NormalizeServerDirectionMode(mode ServerDirectionMode) (ServerDirectionMode, bool) {
 	switch mode {
-	case "", ServerDirectionDefault:
+	case ServerDirectionDefault:
 		return ServerDirectionDefault, true
 	case ServerDirectionMode(DirectionOut):
 		return ServerDirectionMode(DirectionOut), true
@@ -144,13 +145,13 @@ func NormalizeServerDirectionMode(mode ServerDirectionMode) (ServerDirectionMode
 func NormalizeServerCycleSettings(cycle ServerCycleSettings) (ServerCycleSettings, error) {
 	mode, ok := NormalizeServerCycleMode(cycle.Mode)
 	if !ok {
-		return ServerCycleSettings{Mode: ServerCycleDefault}, ErrInvalidServerCycleMode
+		return ServerCycleSettings{}, ErrInvalidServerCycleMode
 	}
 
 	timezone := strings.TrimSpace(cycle.BillingTimezone)
 	if timezone != "" {
 		if _, err := time.LoadLocation(timezone); err != nil {
-			return ServerCycleSettings{Mode: ServerCycleDefault}, ErrInvalidServerCycleTimezone
+			return ServerCycleSettings{}, ErrInvalidServerCycleTimezone
 		}
 	}
 
@@ -159,21 +160,24 @@ func NormalizeServerCycleSettings(cycle ServerCycleSettings) (ServerCycleSetting
 	if mode == ServerCycleMode(CycleWHMCS) || anchor != "" {
 		anchorTime, valid := parseTrafficAnchorDate(anchor, time.Local)
 		if !valid {
-			return ServerCycleSettings{Mode: ServerCycleDefault}, ErrInvalidServerCycleAnchorDate
+			return ServerCycleSettings{}, ErrInvalidServerCycleAnchorDate
 		}
 		anchor = formatTrafficAnchorDate(anchorTime)
 		anchorDay = anchorTime.Day()
 	}
 
 	if mode == ServerCycleDefault {
-		return ServerCycleSettings{Mode: ServerCycleDefault, BillingStartDay: 1}, nil
+		return ServerCycleSettings{
+			Mode:            ServerCycleMode(CycleCalendarMonth),
+			BillingStartDay: 1,
+		}, nil
 	}
 
 	day := cycle.BillingStartDay
 	if mode == ServerCycleMode(CycleCalendarMonth) {
 		day = 1
 	} else if day < 1 || day > 31 {
-		return ServerCycleSettings{Mode: ServerCycleDefault}, ErrInvalidServerCycleStartDay
+		return ServerCycleSettings{}, ErrInvalidServerCycleStartDay
 	}
 
 	if mode == ServerCycleMode(CycleWHMCS) {
@@ -191,39 +195,27 @@ func NormalizeServerCycleSettings(cycle ServerCycleSettings) (ServerCycleSetting
 }
 
 func SettingsWithServerCycle(settings Settings, cycle ServerCycleSettings) (Settings, error) {
-	normalized, ok := NormalizeSettings(settings)
-	if !ok {
-		return Settings{}, fmt.Errorf("invalid traffic settings")
-	}
-	mode, ok := NormalizeServerCycleMode(cycle.Mode)
-	if !ok {
-		return Settings{}, ErrInvalidServerCycleMode
-	}
-	cycle.Mode = mode
-	cycle, err := NormalizeServerCycleSettings(cycle)
+	normalized, err := NormalizeSettings(settings)
 	if err != nil {
 		return Settings{}, err
 	}
-	if cycle.Mode == ServerCycleDefault {
-		return normalized, nil
+	cycle, err = NormalizeServerCycleSettings(cycle)
+	if err != nil {
+		return Settings{}, err
 	}
 	normalized.CycleMode = BillingCycleMode(cycle.Mode)
 	normalized.BillingStartDay = cycle.BillingStartDay
 	normalized.BillingAnchorDate = cycle.BillingAnchorDate
 	normalized.BillingTimezone = cycle.BillingTimezone
-	next, ok := NormalizeSettings(normalized)
-	if !ok {
-		return Settings{}, fmt.Errorf("invalid traffic settings")
-	}
-	return next, nil
+	return NormalizeSettings(normalized)
 }
 
 func SettingsWithServerDirection(settings Settings, mode ServerDirectionMode) (Settings, error) {
-	normalized, ok := NormalizeSettings(settings)
-	if !ok {
-		return Settings{}, fmt.Errorf("invalid traffic settings")
+	normalized, err := NormalizeSettings(settings)
+	if err != nil {
+		return Settings{}, err
 	}
-	mode, ok = NormalizeServerDirectionMode(mode)
+	mode, ok := NormalizeServerDirectionMode(mode)
 	if !ok {
 		return Settings{}, ErrInvalidServerDirectionMode
 	}
@@ -231,11 +223,7 @@ func SettingsWithServerDirection(settings Settings, mode ServerDirectionMode) (S
 		return normalized, nil
 	}
 	normalized.DirectionMode = DirectionMode(mode)
-	next, ok := NormalizeSettings(normalized)
-	if !ok {
-		return Settings{}, fmt.Errorf("invalid traffic settings")
-	}
-	return next, nil
+	return NormalizeSettings(normalized)
 }
 
 func NormalizeDirectionMode(mode DirectionMode) (DirectionMode, bool) {
@@ -251,42 +239,33 @@ func NormalizeDirectionMode(mode DirectionMode) (DirectionMode, bool) {
 	}
 }
 
-func NormalizeSettings(settings Settings) (Settings, bool) {
-	defaults := DefaultSettings()
-	ok := true
-
+func NormalizeSettings(settings Settings) (Settings, error) {
 	guest, valid := NormalizeGuestAccessMode(settings.GuestAccessMode)
 	if !valid {
-		guest = defaults.GuestAccessMode
-		ok = false
+		return Settings{}, fmt.Errorf("%w: guest access mode", ErrInvalidSettings)
 	}
 	usage, valid := NormalizeUsageMode(settings.UsageMode)
 	if !valid {
-		usage = defaults.UsageMode
-		ok = false
+		return Settings{}, fmt.Errorf("%w: usage mode", ErrInvalidSettings)
 	}
 	cycle, valid := NormalizeCycleMode(settings.CycleMode)
 	if !valid {
-		cycle = defaults.CycleMode
-		ok = false
+		return Settings{}, fmt.Errorf("%w: billing cycle mode", ErrInvalidSettings)
 	}
 	direction, valid := NormalizeDirectionMode(settings.DirectionMode)
 	if !valid {
-		direction = defaults.DirectionMode
-		ok = false
+		return Settings{}, fmt.Errorf("%w: direction mode", ErrInvalidSettings)
 	}
 	anchor := strings.TrimSpace(settings.BillingAnchorDate)
 	billingTimezone := strings.TrimSpace(settings.BillingTimezone)
 	if billingTimezone != "" {
 		if _, err := time.LoadLocation(billingTimezone); err != nil {
-			billingTimezone = ""
-			ok = false
+			return Settings{}, fmt.Errorf("%w: billing timezone", ErrInvalidSettings)
 		}
 	}
 	day := settings.BillingStartDay
 	if day < 1 || day > 31 {
-		day = defaults.BillingStartDay
-		ok = false
+		return Settings{}, fmt.Errorf("%w: billing start day", ErrInvalidSettings)
 	}
 	if cycle == CycleCalendarMonth {
 		day = 1
@@ -295,12 +274,10 @@ func NormalizeSettings(settings Settings) (Settings, bool) {
 	if cycle == CycleWHMCS {
 		anchorTime, valid := parseTrafficAnchorDate(anchor, time.Local)
 		if !valid {
-			anchor = ""
-			ok = false
-		} else {
-			anchor = formatTrafficAnchorDate(anchorTime)
-			day = anchorTime.Day()
+			return Settings{}, fmt.Errorf("%w: billing anchor date", ErrInvalidSettings)
 		}
+		anchor = formatTrafficAnchorDate(anchorTime)
+		day = anchorTime.Day()
 	} else if cycle != CycleWHMCS {
 		anchor = ""
 	}
@@ -313,33 +290,40 @@ func NormalizeSettings(settings Settings) (Settings, bool) {
 		BillingAnchorDate: anchor,
 		BillingTimezone:   billingTimezone,
 		DirectionMode:     direction,
-	}, ok
+	}, nil
 }
 
-func SettingsLocation(settings Settings, fallback *time.Location) *time.Location {
+func SettingsLocation(settings Settings, fallback *time.Location) (*time.Location, error) {
+	return billingLocation(settings.BillingTimezone, fallback)
+}
+
+func billingLocation(timezone string, fallback *time.Location) (*time.Location, error) {
 	if fallback == nil {
-		fallback = time.Local
+		return nil, fmt.Errorf("traffic settings location is nil")
 	}
-	if settings.BillingTimezone == "" {
-		return fallback
+	if timezone == "" {
+		return fallback, nil
 	}
-	loc, err := time.LoadLocation(settings.BillingTimezone)
+	loc, err := time.LoadLocation(timezone)
 	if err != nil {
-		return fallback
+		return nil, fmt.Errorf("load traffic billing timezone %q: %w", timezone, err)
 	}
-	return loc
+	return loc, nil
 }
 
-func SettingsWithTimezone(settings Settings, fallback *time.Location) Settings {
-	normalized, _ := NormalizeSettings(settings)
+func SettingsWithTimezone(settings Settings, fallback *time.Location) (Settings, error) {
+	normalized, err := NormalizeSettings(settings)
+	if err != nil {
+		return Settings{}, err
+	}
 	if normalized.BillingTimezone != "" {
-		return normalized
+		return normalized, nil
 	}
 	if fallback == nil {
-		fallback = time.Local
+		return Settings{}, fmt.Errorf("traffic settings location is nil")
 	}
 	normalized.BillingTimezone = fallback.String()
-	return normalized
+	return normalized, nil
 }
 
 func trafficSettingFromSettings(settings Settings) model.TrafficSetting {
@@ -367,42 +351,54 @@ func settingsFromTrafficSetting(item model.TrafficSetting) Settings {
 	}
 }
 
-func defaultTrafficSetting() model.TrafficSetting {
-	return trafficSettingFromSettings(DefaultSettings())
+func (patch SettingsPatch) apply(current Settings) (Settings, error) {
+	next := current
+	if patch.GuestAccessMode != nil {
+		next.GuestAccessMode = *patch.GuestAccessMode
+	}
+	if patch.UsageMode != nil {
+		next.UsageMode = *patch.UsageMode
+	}
+	if patch.DirectionMode != nil {
+		next.DirectionMode = *patch.DirectionMode
+	}
+	return NormalizeSettings(next)
 }
 
-func (s *Store) loadSettings(ctx context.Context) (model.TrafficSetting, error) {
+func loadTrafficSetting(db *gorm.DB) (model.TrafficSetting, error) {
 	var item model.TrafficSetting
-	err := s.db.WithContext(ctx).
+	err := db.
 		Where("id = ?", trafficSettingsID).
 		First(&item).Error
 	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return defaultTrafficSetting(), nil
-		}
 		return model.TrafficSetting{}, fmt.Errorf("load traffic settings: %w", err)
 	}
 	return item, nil
 }
 
-func (s *Store) saveSettings(ctx context.Context, item model.TrafficSetting) error {
+func (s *Store) loadSettings(ctx context.Context) (model.TrafficSetting, error) {
+	return loadTrafficSetting(s.db.WithContext(ctx))
+}
+
+func saveTrafficSetting(db *gorm.DB, item model.TrafficSetting) error {
 	item.ID = trafficSettingsID
-	err := s.db.WithContext(ctx).
-		Clauses(clause.OnConflict{
-			Columns: []clause.Column{{Name: "id"}},
-			DoUpdates: clause.AssignmentColumns([]string{
-				"guest_access_mode",
-				"usage_mode",
-				"cycle_mode",
-				"billing_start_day",
-				"billing_anchor_date",
-				"billing_timezone",
-				"direction_mode",
-			}),
-		}).
-		Create(&item).Error
-	if err != nil {
-		return fmt.Errorf("save traffic settings: %w", err)
+	result := db.
+		Model(&model.TrafficSetting{}).
+		Where("id = ?", trafficSettingsID).
+		Updates(map[string]any{
+			"guest_access_mode":   item.GuestAccessMode,
+			"usage_mode":          item.UsageMode,
+			"cycle_mode":          item.CycleMode,
+			"billing_start_day":   item.BillingStartDay,
+			"billing_anchor_date": item.BillingAnchorDate,
+			"billing_timezone":    item.BillingTimezone,
+			"direction_mode":      item.DirectionMode,
+		})
+	if result.Error != nil {
+		return fmt.Errorf("save traffic settings: %w", result.Error)
+	}
+	if result.RowsAffected != 1 {
+		return fmt.Errorf("save traffic settings: singleton row is missing")
 	}
 	return nil
 }
@@ -410,21 +406,186 @@ func (s *Store) saveSettings(ctx context.Context, item model.TrafficSetting) err
 func (s *Store) GetSettings(ctx context.Context) (Settings, error) {
 	item, err := s.loadSettings(ctx)
 	if err != nil {
-		return DefaultSettings(), err
+		return Settings{}, err
 	}
 
 	settings := settingsFromTrafficSetting(item)
-	normalized, _ := NormalizeSettings(settings)
-	if normalized != settings {
-		return DefaultSettings(), fmt.Errorf("invalid traffic settings")
+	normalized, err := NormalizeSettings(settings)
+	if err != nil {
+		return Settings{}, fmt.Errorf("stored traffic settings: %w", err)
 	}
 	return normalized, nil
 }
 
-func (s *Store) SetSettings(ctx context.Context, settings Settings) error {
-	normalized, ok := NormalizeSettings(settings)
-	if !ok {
-		return fmt.Errorf("invalid traffic settings")
+// PatchSettingsAt merges mutable global fields against a locked committed row.
+// Billing cycles are node-owned and are not part of this patch contract.
+func (s *Store) PatchSettingsAt(ctx context.Context, patch SettingsPatch, ref time.Time) (Settings, error) {
+	if s == nil || s.db == nil {
+		return Settings{}, fmt.Errorf("store: db is nil")
 	}
-	return s.saveSettings(ctx, trafficSettingFromSettings(normalized))
+	if ref.IsZero() {
+		ref = time.Now()
+	}
+
+	var committed Settings
+	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		item, err := loadTrafficSetting(tx.Clauses(clause.Locking{Strength: "UPDATE"}))
+		if err != nil {
+			return err
+		}
+		stored, err := NormalizeSettings(settingsFromTrafficSetting(item))
+		if err != nil {
+			return fmt.Errorf("stored traffic settings: %w", err)
+		}
+		next, err := patch.apply(stored)
+		if err != nil {
+			return fmt.Errorf("%w: %v", ErrInvalidSettingsPatch, err)
+		}
+		if err := resetFactsProgressForBilling(tx, stored.UsageMode, next.UsageMode, ref); err != nil {
+			return err
+		}
+		if err := saveTrafficSetting(tx, trafficSettingFromSettings(next)); err != nil {
+			return err
+		}
+		committed = next
+		return nil
+	})
+	if err != nil {
+		return Settings{}, err
+	}
+	return committed, nil
+}
+
+// PrepareServerCycleChange locks the current node cycle and invalidates only
+// derived data whose cycle may be reinterpreted by the immediate update. The
+// caller writes the normalized server fields in the same transaction.
+func PrepareServerCycleChange(tx *gorm.DB, serverID int64, next ServerCycleSettings, fallback *time.Location, ref time.Time) error {
+	if tx == nil {
+		return fmt.Errorf("prepare server traffic cycle: db is nil")
+	}
+	if serverID <= 0 {
+		return fmt.Errorf("prepare server traffic cycle: invalid server id")
+	}
+	if fallback == nil {
+		return fmt.Errorf("prepare server traffic cycle: location is nil")
+	}
+	if ref.IsZero() {
+		ref = time.Now()
+	}
+	next, err := NormalizeServerCycleSettings(next)
+	if err != nil {
+		return err
+	}
+
+	var row struct {
+		CycleMode         string `gorm:"column:traffic_cycle_mode"`
+		BillingStartDay   int16  `gorm:"column:traffic_billing_start_day"`
+		BillingAnchorDate string `gorm:"column:traffic_billing_anchor_date"`
+		BillingTimezone   string `gorm:"column:traffic_billing_timezone"`
+	}
+	if err := tx.
+		Clauses(clause.Locking{Strength: "UPDATE"}).
+		Model(&model.Server{}).
+		Select("traffic_cycle_mode", "traffic_billing_start_day", "traffic_billing_anchor_date", "traffic_billing_timezone").
+		Where("id = ? AND is_deleted = ?", serverID, false).
+		Take(&row).Error; err != nil {
+		return err
+	}
+	current, err := NormalizeServerCycleSettings(ServerCycleSettings{
+		Mode:              ServerCycleMode(row.CycleMode),
+		BillingStartDay:   int(row.BillingStartDay),
+		BillingAnchorDate: row.BillingAnchorDate,
+		BillingTimezone:   row.BillingTimezone,
+	})
+	if err != nil {
+		return fmt.Errorf("server %d traffic cycle settings: %w", serverID, err)
+	}
+	if sameServerCycle(current, next) {
+		return nil
+	}
+	from, err := cycleRebuildStart(current, next, fallback, ref)
+	if err != nil {
+		return err
+	}
+	return resetCycleDerived(tx, serverID, from)
+}
+
+func sameServerCycle(left, right ServerCycleSettings) bool {
+	return left.Mode == right.Mode &&
+		left.BillingStartDay == right.BillingStartDay &&
+		strings.TrimSpace(left.BillingAnchorDate) == strings.TrimSpace(right.BillingAnchorDate) &&
+		strings.TrimSpace(left.BillingTimezone) == strings.TrimSpace(right.BillingTimezone)
+}
+
+func cycleRebuildStart(current, next ServerCycleSettings, fallback *time.Location, ref time.Time) (time.Time, error) {
+	currentLoc, err := billingLocation(current.BillingTimezone, fallback)
+	if err != nil {
+		return time.Time{}, err
+	}
+	nextLoc, err := billingLocation(next.BillingTimezone, fallback)
+	if err != nil {
+		return time.Time{}, err
+	}
+	currentRule, err := newCycleRule(
+		BillingCycleMode(current.Mode),
+		current.BillingStartDay,
+		current.BillingAnchorDate,
+		currentLoc,
+	)
+	if err != nil {
+		return time.Time{}, err
+	}
+	nextRule, err := newCycleRule(
+		BillingCycleMode(next.Mode),
+		next.BillingStartDay,
+		next.BillingAnchorDate,
+		nextLoc,
+	)
+	if err != nil {
+		return time.Time{}, err
+	}
+	currentCycle, err := currentRule.at(ref)
+	if err != nil {
+		return time.Time{}, err
+	}
+	nextCycle, err := nextRule.at(ref)
+	if err != nil {
+		return time.Time{}, err
+	}
+	return minTime(currentCycle.Start, nextCycle.Start), nil
+}
+
+func resetCycleDerived(tx *gorm.DB, serverID int64, from time.Time) error {
+	if _, err := lockMaterializationProgress(tx, materializationUsage); err != nil {
+		return err
+	}
+	if err := tx.
+		Where("server_id = ? AND cycle_end > ?", serverID, from.UTC()).
+		Delete(&model.TrafficMonthUsage{}).Error; err != nil {
+		return fmt.Errorf("delete server traffic usage after cycle change: %w", err)
+	}
+	if err := tx.
+		Where("server_id = ? AND cycle_end > ?", serverID, from.UTC()).
+		Delete(&model.TrafficMonthly{}).Error; err != nil {
+		return fmt.Errorf("delete server traffic snapshots after cycle change: %w", err)
+	}
+	return enqueueTrafficUsageRepair(tx, serverID, from)
+}
+
+func enqueueTrafficUsageRepair(tx *gorm.DB, serverID int64, from time.Time) error {
+	err := tx.Clauses(clause.OnConflict{
+		Columns: []clause.Column{{Name: "server_id"}},
+		DoUpdates: clause.Assignments(map[string]any{
+			"scanned_until": gorm.Expr(
+				"LEAST(traffic_usage_repairs.scanned_until, EXCLUDED.scanned_until)",
+			),
+		}),
+	}).Create(&model.TrafficUsageRepair{
+		ServerID:     serverID,
+		ScannedUntil: from.UTC(),
+	}).Error
+	if err != nil {
+		return fmt.Errorf("enqueue server traffic usage repair: %w", err)
+	}
+	return nil
 }

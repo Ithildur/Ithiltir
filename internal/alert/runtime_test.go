@@ -10,7 +10,7 @@ import (
 
 func TestEvaluateServerLifecycle(t *testing.T) {
 	base := time.Date(2026, 4, 5, 12, 0, 0, 0, time.UTC)
-	compiled := CompileRules([]model.AlertRule{{
+	compiled := mustCompileRules(t, []model.AlertRule{{
 		ID:              1,
 		Name:            "cpu_load1_high",
 		Enabled:         true,
@@ -61,6 +61,27 @@ func TestEvaluateServerLifecycle(t *testing.T) {
 	}
 }
 
+func TestEvaluateServerRejectsNonFiniteEffectiveThreshold(t *testing.T) {
+	now := time.Date(2026, 4, 5, 12, 0, 0, 0, time.UTC)
+	compiled := mustCompileRules(t, []model.AlertRule{{
+		ID:              1,
+		Name:            "overflow",
+		Enabled:         true,
+		Generation:      1,
+		Metric:          "cpu.load1",
+		Operator:        "<=",
+		Threshold:       1e308,
+		ThresholdMode:   "core_plus",
+		ThresholdOffset: 1e308,
+		UpdatedAt:       now,
+	}}, now)
+
+	result := EvaluateServer(42, testSnapshot(now, now, 10, 1), compiled, nil, now)
+	if len(result.Next) != 0 || len(result.OpenTransitions) != 0 {
+		t.Fatalf("non-finite threshold produced runtime state: %+v", result)
+	}
+}
+
 func TestEvaluateServerClosesOnStaleSnapshot(t *testing.T) {
 	now := time.Date(2026, 4, 5, 12, 5, 0, 0, time.UTC)
 	current := map[string]RuntimeState{
@@ -72,7 +93,7 @@ func TestEvaluateServerClosesOnStaleSnapshot(t *testing.T) {
 		},
 	}
 	snapshot := testSnapshot(now.Add(-60*time.Second), now.Add(-20*time.Second), 10, 8)
-	result := EvaluateServer(42, snapshot, emptyRules(now), current, now)
+	result := EvaluateServer(42, snapshot, mustCompileRules(t, nil, now), current, now)
 	if len(result.CloseTransitions) != 1 {
 		t.Fatalf("expected one close transition, got %d", len(result.CloseTransitions))
 	}
@@ -87,7 +108,7 @@ func TestEvaluateServerClosesOnStaleSnapshot(t *testing.T) {
 func TestEvaluateServerOpensOfflineBuiltinOnStaleSnapshot(t *testing.T) {
 	base := time.Date(2026, 4, 5, 12, 0, 0, 0, time.UTC)
 	snapshot := testSnapshot(base, base, 10, 0)
-	result := EvaluateServer(42, snapshot, CompileRules(nil, base), nil, base.Add(11*time.Second))
+	result := EvaluateServer(42, snapshot, mustCompileRules(t, nil, base), nil, base.Add(11*time.Second))
 	if len(result.OpenTransitions) != 1 || result.OpenTransitions[0].Rule.Metric != "node.offline" {
 		t.Fatalf("expected node.offline transition, got %+v", result.OpenTransitions)
 	}
@@ -95,7 +116,7 @@ func TestEvaluateServerOpensOfflineBuiltinOnStaleSnapshot(t *testing.T) {
 
 func TestEvaluateServerDurationUsesObservedAtNotWorkerDelay(t *testing.T) {
 	base := time.Date(2026, 4, 5, 12, 0, 0, 0, time.UTC)
-	compiled := CompileRules([]model.AlertRule{{
+	compiled := mustCompileRules(t, []model.AlertRule{{
 		ID:            11,
 		Name:          "cpu_load1_high",
 		Enabled:       true,
@@ -119,7 +140,7 @@ func TestEvaluateServerDurationUsesObservedAtNotWorkerDelay(t *testing.T) {
 
 func TestEvaluateServerImmediateDurationOpensOnFirstObservation(t *testing.T) {
 	base := time.Date(2026, 4, 5, 12, 0, 0, 0, time.UTC)
-	compiled := CompileRules([]model.AlertRule{{
+	compiled := mustCompileRules(t, []model.AlertRule{{
 		ID:            12,
 		Name:          "cpu_high",
 		Enabled:       true,
@@ -141,7 +162,7 @@ func TestEvaluateServerImmediateDurationOpensOnFirstObservation(t *testing.T) {
 
 func TestEvaluateServerSuppressesOpenDuringCooldown(t *testing.T) {
 	base := time.Date(2026, 4, 5, 12, 0, 0, 0, time.UTC)
-	compiled := CompileRules([]model.AlertRule{{
+	compiled := mustCompileRules(t, []model.AlertRule{{
 		ID:            13,
 		Name:          "cpu_high",
 		Enabled:       true,

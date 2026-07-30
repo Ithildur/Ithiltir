@@ -7,6 +7,8 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 
 	"dash/internal/infra"
 	"dash/internal/nodetags"
@@ -106,13 +108,7 @@ func (h *handler) updateHandler(w http.ResponseWriter, r *http.Request, rawID st
 	if _, err := infra.WithPGWriteTimeout(r.Context(), func(c context.Context) (struct{}, error) {
 		return struct{}{}, h.store.UpdateNode(c, id, upd)
 	}); err != nil {
-		if errors.Is(err, nodestore.ErrServerMetaCacheUpdate) {
-			infra.WithModule("admin.nodes").Error("server cache sync failed after update", err,
-				slog.Int64("node_id", id),
-			)
-			httperr.Write(w, http.StatusServiceUnavailable, "redis_cache_error", "sync failed")
-			return
-		} else if errors.Is(err, nodestore.ErrFrontCacheUpdate) {
+		if errors.Is(err, nodestore.ErrFrontCacheUpdate) {
 			infra.WithModule("admin.nodes").Warn("front cache sync failed after node update", err,
 				slog.Int64("node_id", id),
 			)
@@ -138,7 +134,7 @@ func (h *handler) updateHandler(w http.ResponseWriter, r *http.Request, rawID st
 }
 
 var (
-	errInvalidNodeName                = errors.New("name cannot be empty")
+	errInvalidNodeName                = errors.New("name must contain 1 to 64 characters and no control characters")
 	errInvalidDisplayOrder            = errors.New("display_order must be positive")
 	errInvalidTrafficCycleMode        = errors.New("traffic_cycle_mode is invalid")
 	errIncompleteTrafficCycleSettings = errors.New("traffic cycle fields do not match mode")
@@ -154,7 +150,7 @@ func normalizeUpdate(in *updateInput) error {
 	}
 	if in.Name != nil {
 		name := strings.TrimSpace(*in.Name)
-		if name == "" {
+		if name == "" || utf8.RuneCountInString(name) > 64 || containsControl(name) {
 			return errInvalidNodeName
 		}
 		in.Name = &name
@@ -180,6 +176,15 @@ func normalizeUpdate(in *updateInput) error {
 		in.Tags = json.RawMessage(tags)
 	}
 	return nil
+}
+
+func containsControl(value string) bool {
+	for _, r := range value {
+		if unicode.IsControl(r) {
+			return true
+		}
+	}
+	return false
 }
 
 func normalizeCycleUpdate(in *updateInput) error {

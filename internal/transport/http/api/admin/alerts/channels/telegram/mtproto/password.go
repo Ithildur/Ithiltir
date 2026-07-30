@@ -11,7 +11,6 @@ import (
 	"github.com/Ithildur/EiluneKit/http/routes"
 
 	"github.com/gotd/td/telegram/auth"
-	"gorm.io/gorm"
 )
 
 type passwordInput struct {
@@ -34,7 +33,6 @@ func (h *handler) passwordHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	in.LoginID = strings.TrimSpace(in.LoginID)
-	in.Password = strings.TrimSpace(in.Password)
 	if in.LoginID == "" || in.Password == "" {
 		httperr.Write(w, http.StatusBadRequest, "invalid_fields", "login_id and password are required")
 		return
@@ -46,11 +44,11 @@ func (h *handler) passwordHandler(w http.ResponseWriter, r *http.Request) {
 			httperr.Write(w, http.StatusNotFound, "not_found", "login_id not found")
 			return
 		}
-		httperr.Write(w, http.StatusServiceUnavailable, "redis_error", "state unavailable")
+		httperr.Write(w, http.StatusServiceUnavailable, "login_state_error", "login state unavailable")
 		return
 	}
 
-	sessionText, err := notify.SubmitPassword(r.Context(), state, in.Password)
+	sessionText, err := notify.SubmitPassword(r.Context(), state.Auth, in.Password)
 	if err != nil {
 		if errors.Is(err, auth.ErrPasswordInvalid) {
 			httperr.Write(w, http.StatusBadRequest, "invalid_fields", "password is invalid")
@@ -60,18 +58,10 @@ func (h *handler) passwordHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := updateSession(r.Context(), h.alert, state.ChannelID, sessionText); err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			httperr.Write(w, http.StatusNotFound, "not_found", "channel not found")
-			return
-		}
-		if errors.Is(err, errInvalidChannel) {
-			httperr.Write(w, http.StatusBadRequest, "invalid_fields", "invalid mtproto channel")
-			return
-		}
-		httperr.Write(w, http.StatusServiceUnavailable, "db_error", "failed to save session")
+	if err := updateSession(r.Context(), h.alert, state.ChannelID, state.ChannelRevision, sessionText); err != nil {
+		writeSessionUpdateError(w, err)
 		return
 	}
-	deleteLoginState(r.Context(), h.login, in.LoginID)
+	h.clearLoginState(r.Context(), in.LoginID)
 	w.WriteHeader(http.StatusNoContent)
 }

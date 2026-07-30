@@ -1,18 +1,22 @@
 package cachekeys
 
+const redisKeyPrefix = "ithiltir:dash:"
+
 const (
 	// RedisKeyFrontNodeIDs stores node identifiers with cached frontend metrics.
-	RedisKeyFrontNodeIDs = "front:v1:node:ids"
-	// RedisKeyFrontNodeSnapshotPrefix prefixes per-node latest frontend snapshots.
-	RedisKeyFrontNodeSnapshotPrefix = "front:v1:node:snapshot:"
+	RedisKeyFrontNodeIDs = redisKeyPrefix + "front:v2:node:ids"
+	// RedisKeyFrontNodeSnapshotPrefix prefixes per-node latest runtime snapshots.
+	RedisKeyFrontNodeSnapshotPrefix = redisKeyPrefix + "front:v2:node:runtime:"
+	// RedisKeyFrontNodeMetadataPrefix prefixes PostgreSQL-derived frontend metadata.
+	RedisKeyFrontNodeMetadataPrefix = redisKeyPrefix + "front:v2:node:meta:"
 	// RedisKeyFrontNodeSmartPrefix prefixes per-node latest SMART runtime details.
-	RedisKeyFrontNodeSmartPrefix = "front:v1:node:smart:"
+	RedisKeyFrontNodeSmartPrefix = redisKeyPrefix + "front:v2:node:smart:"
 	// RedisKeyFrontNodeThermalPrefix prefixes per-node latest thermal runtime details.
-	RedisKeyFrontNodeThermalPrefix = "front:v1:node:thermal:"
-	// RedisKeyFrontMeta marks a complete published frontend snapshot index.
-	RedisKeyFrontMeta = "front:v1:meta"
+	RedisKeyFrontNodeThermalPrefix = redisKeyPrefix + "front:v2:node:thermal:"
+	// RedisKeyFrontMeta marks a complete published frontend node catalog.
+	RedisKeyFrontMeta = redisKeyPrefix + "front:v2:node:catalog"
 	// RedisKeyGuestVisibleIDs stores all guest-visible active server identifiers.
-	RedisKeyGuestVisibleIDs = "server:v1:guest_visible:ids"
+	RedisKeyGuestVisibleIDs = redisKeyPrefix + "front:v2:guest:ids"
 	// RedisKeyGuestVisibilityMeta marks a complete published guest visibility index.
-	RedisKeyGuestVisibilityMeta = "server:v1:guest_visible:meta"
+	RedisKeyGuestVisibilityMeta = redisKeyPrefix + "front:v2:guest:catalog"
 )

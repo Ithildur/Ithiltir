@@ -2,12 +2,9 @@ package metricdata
 
 import (
 	"context"
-	"errors"
 	"fmt"
 
 	"dash/internal/model"
-	"gorm.io/gorm"
-	"gorm.io/gorm/clause"
 )
 
 const metricSettingsID int16 = 1
@@ -30,37 +27,27 @@ func NormalizeHistoryGuestAccessMode(mode HistoryGuestAccessMode) (HistoryGuestA
 	}
 }
 
-func defaultMetricSetting() model.MetricSetting {
-	return model.MetricSetting{
-		ID:                     metricSettingsID,
-		HistoryGuestAccessMode: string(HistoryGuestAccessDisabled),
-	}
-}
-
 func (s *Store) loadSettings(ctx context.Context) (model.MetricSetting, error) {
 	var item model.MetricSetting
 	err := s.db.WithContext(ctx).
 		Where("id = ?", metricSettingsID).
 		First(&item).Error
 	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return defaultMetricSetting(), nil
-		}
 		return model.MetricSetting{}, fmt.Errorf("load metric settings: %w", err)
 	}
 	return item, nil
 }
 
-func (s *Store) saveSettings(ctx context.Context, item model.MetricSetting) error {
-	item.ID = metricSettingsID
-	err := s.db.WithContext(ctx).
-		Clauses(clause.OnConflict{
-			Columns:   []clause.Column{{Name: "id"}},
-			DoUpdates: clause.AssignmentColumns([]string{"history_guest_access_mode"}),
-		}).
-		Create(&item).Error
-	if err != nil {
-		return fmt.Errorf("save metric settings: %w", err)
+func (s *Store) saveSettings(ctx context.Context, mode HistoryGuestAccessMode) error {
+	result := s.db.WithContext(ctx).
+		Model(&model.MetricSetting{}).
+		Where("id = ?", metricSettingsID).
+		Update("history_guest_access_mode", string(mode))
+	if result.Error != nil {
+		return fmt.Errorf("save metric settings: %w", result.Error)
+	}
+	if result.RowsAffected != 1 {
+		return fmt.Errorf("save metric settings: singleton row is missing")
 	}
 	return nil
 }
@@ -72,8 +59,8 @@ func (s *Store) GetHistoryGuestAccessMode(ctx context.Context) (HistoryGuestAcce
 	}
 
 	mode := HistoryGuestAccessMode(item.HistoryGuestAccessMode)
-	normalized, _ := NormalizeHistoryGuestAccessMode(mode)
-	if normalized != mode {
+	normalized, ok := NormalizeHistoryGuestAccessMode(mode)
+	if !ok {
 		return HistoryGuestAccessDisabled, fmt.Errorf("invalid history guest access mode: %s", mode)
 	}
 	return normalized, nil
@@ -84,7 +71,5 @@ func (s *Store) SetHistoryGuestAccessMode(ctx context.Context, mode HistoryGuest
 	if !ok {
 		return fmt.Errorf("invalid history guest access mode: %s", mode)
 	}
-	return s.saveSettings(ctx, model.MetricSetting{
-		HistoryGuestAccessMode: string(normalized),
-	})
+	return s.saveSettings(ctx, normalized)
 }

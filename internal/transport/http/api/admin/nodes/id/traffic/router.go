@@ -49,6 +49,10 @@ func (h *handler) rebuildHandler(w http.ResponseWriter, r *http.Request, rawID s
 		httperr.Write(w, http.StatusConflict, "traffic_rebuild_running", "traffic rebuild is already running")
 		return
 	}
+	if errors.Is(err, trafficjob.ErrRebuildRequiresBilling) {
+		httperr.Write(w, http.StatusConflict, "traffic_rebuild_requires_billing", "traffic rebuild requires billing mode")
+		return
+	}
 	if err != nil {
 		httperr.Write(w, http.StatusServiceUnavailable, "traffic_rebuild_unavailable", "traffic rebuild is unavailable")
 		return

@@ -3,6 +3,7 @@ package traffic
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -11,6 +12,8 @@ import (
 
 	"gorm.io/gorm"
 )
+
+var ErrTrafficFactsDisabled = errors.New("traffic facts are disabled")
 
 type ServerTrafficSource struct {
 	Start  time.Time
@@ -86,6 +89,13 @@ func (s *Store) RebuildTraffic5mChunk(ctx context.Context, serverID int64, iface
 		return fmt.Errorf("traffic rebuild ifaces is empty")
 	}
 	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		enabled, err := lockFactsEnabled(tx)
+		if err != nil {
+			return err
+		}
+		if !enabled {
+			return ErrTrafficFactsDisabled
+		}
 		rows, err := loadRebuildNICRows(tx, serverID, ifaces, start, end)
 		if err != nil {
 			return fmt.Errorf("load server traffic nic rows: %w", err)
@@ -95,11 +105,13 @@ func (s *Store) RebuildTraffic5mChunk(ctx context.Context, serverID int64, iface
 		if err := deleteTraffic5mRange(tx, serverID, ifaces, start, end); err != nil {
 			return fmt.Errorf("delete server traffic 5m rows: %w", err)
 		}
-		if len(items) == 0 {
-			return nil
+		if len(items) > 0 {
+			if err := tx.CreateInBatches(items, 500).Error; err != nil {
+				return fmt.Errorf("insert server traffic 5m rows: %w", err)
+			}
 		}
-		if err := tx.CreateInBatches(items, 500).Error; err != nil {
-			return fmt.Errorf("insert server traffic 5m rows: %w", err)
+		if err := deleteTrafficMonthlySnapshots(tx, serverID, start, end); err != nil {
+			return fmt.Errorf("delete server traffic monthly snapshots: %w", err)
 		}
 		return nil
 	})
@@ -196,14 +208,8 @@ func deleteTraffic5mRange(tx *gorm.DB, serverID int64, ifaces []string, start, e
 		Delete(&model.Traffic5m{}).Error
 }
 
-func (s *Store) DeleteTrafficMonthlySnapshots(ctx context.Context, serverID int64, start, end time.Time) error {
-	if s == nil || s.db == nil {
-		return fmt.Errorf("store: db is nil")
-	}
-	if serverID <= 0 {
-		return fmt.Errorf("invalid server id")
-	}
-	return s.db.WithContext(ctx).
+func deleteTrafficMonthlySnapshots(tx *gorm.DB, serverID int64, start, end time.Time) error {
+	return tx.
 		Where("server_id = ? AND cycle_end > ? AND cycle_start < ?", serverID, start, end).
 		Delete(&model.TrafficMonthly{}).Error
 }

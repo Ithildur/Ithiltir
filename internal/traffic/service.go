@@ -6,23 +6,29 @@ import (
 	"fmt"
 	"time"
 
-	"dash/internal/config"
 	"dash/internal/infra"
 	trafficstore "dash/internal/store/traffic"
 	kitlog "github.com/Ithildur/EiluneKit/logging"
 )
 
 const (
-	materializeInterval = 5 * time.Minute
-	snapshotInterval    = time.Hour
+	materializeInterval    = 5 * time.Minute
+	snapshotInterval       = time.Hour
+	materializeSettle      = 30 * time.Second
+	materializeStepTimeout = 30 * time.Second
+	materializeMaxSteps    = 12
+
+	usageRepairMaxSteps = 120
+	usageRepairBudget   = 30 * time.Second
 )
 
 type Service struct {
-	store     *trafficstore.Store
-	location  *time.Location
-	retention time.Duration
-	gate      *writeGate
-	logger    *kitlog.Helper
+	store            *trafficstore.Store
+	location         *time.Location
+	sourceRetention  time.Duration
+	trafficRetention time.Duration
+	gate             *writeGate
+	logger           *kitlog.Helper
 }
 
 type Runtime struct {
@@ -30,25 +36,43 @@ type Runtime struct {
 	rebuild *RebuildRunner
 }
 
-func NewRuntime(ctx context.Context, st *trafficstore.Store, loc *time.Location, retentionDays int) *Runtime {
-	gate := newWriteGate()
-	retention := trafficRetention(retentionDays)
-	return &Runtime{
-		service: newService(st, loc, retention, gate),
-		rebuild: newRebuildRunner(ctx, st, gate, retention),
+func NewRuntime(ctx context.Context, st *trafficstore.Store, loc *time.Location, sourceRetentionDays, trafficRetentionDays int) (*Runtime, error) {
+	if ctx == nil {
+		return nil, fmt.Errorf("traffic runtime context is nil")
 	}
+	if st == nil {
+		return nil, fmt.Errorf("traffic store is nil")
+	}
+	if loc == nil {
+		return nil, fmt.Errorf("traffic location is nil")
+	}
+	if sourceRetentionDays <= 0 {
+		return nil, fmt.Errorf("traffic source retention days must be positive")
+	}
+	if trafficRetentionDays <= 0 {
+		return nil, fmt.Errorf("traffic retention days must be positive")
+	}
+
+	gate := newWriteGate()
+	sourceRetention := trafficRetention(sourceRetentionDays)
+	trafficRetention := trafficRetention(trafficRetentionDays)
+	runtime := &Runtime{
+		service: newService(st, loc, sourceRetention, trafficRetention, gate),
+		rebuild: newRebuildRunner(ctx, st, gate, minDuration(sourceRetention, trafficRetention)),
+	}
+	return runtime, nil
 }
 
 func (r *Runtime) RebuildRunner() *RebuildRunner {
-	if r == nil {
-		return nil
-	}
 	return r.rebuild
 }
 
 func (r *Runtime) Run(ctx context.Context) error {
 	if r == nil || r.service == nil {
 		return fmt.Errorf("traffic runtime is not initialized")
+	}
+	if ctx == nil {
+		return fmt.Errorf("traffic runtime context is nil")
 	}
 	return r.service.Run(ctx)
 }
@@ -61,25 +85,17 @@ func (r *Runtime) Stop() {
 }
 
 func trafficRetention(days int) time.Duration {
-	if days <= 0 {
-		days = config.DefaultTrafficRetentionDays
-	}
 	return time.Duration(days) * 24 * time.Hour
 }
 
-func newService(st *trafficstore.Store, loc *time.Location, retention time.Duration, gate *writeGate) *Service {
-	if loc == nil {
-		loc = time.Local
-	}
-	if retention <= 0 {
-		retention = trafficRetention(config.DefaultTrafficRetentionDays)
-	}
+func newService(st *trafficstore.Store, loc *time.Location, sourceRetention, trafficRetention time.Duration, gate *writeGate) *Service {
 	return &Service{
-		store:     st,
-		location:  loc,
-		retention: retention,
-		gate:      writeGateOrNew(gate),
-		logger:    infra.WithModule("traffic"),
+		store:            st,
+		location:         loc,
+		sourceRetention:  sourceRetention,
+		trafficRetention: trafficRetention,
+		gate:             gate,
+		logger:           infra.WithModule("traffic"),
 	}
 }
 
@@ -108,7 +124,7 @@ func (s *Service) Run(ctx context.Context) error {
 }
 
 func (s *Service) materialize(ctx context.Context) {
-	if err := s.gate.with(ctx, s.materializeOnce); err != nil {
+	if err := s.materializeOnce(ctx); err != nil {
 		s.logger.Warn("materialize traffic failed", err)
 	}
 }
@@ -121,23 +137,102 @@ func (s *Service) materializeOnce(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	settings = trafficstore.SettingsWithTimezone(settings, s.location)
+	target := now.Add(-materializeSettle)
+	usageFloor := target.Add(-s.sourceRetention)
 
 	var errs error
+	if err := s.materializeUsage(ctx, target, usageFloor); err != nil {
+		errs = errors.Join(errs, fmt.Errorf("materialize traffic usage: %w", err))
+	}
+	if err := s.materializeUsageRepairs(ctx, target, usageFloor); err != nil {
+		errs = errors.Join(errs, fmt.Errorf("repair traffic usage: %w", err))
+	}
 	if settings.UsageMode == trafficstore.UsageBilling {
-		if err := s.withWriteTimeout(ctx, func(c context.Context) error {
-			return s.store.BackfillTraffic5m(c, time.Time{}, now)
-		}); err != nil {
-			errs = errors.Join(errs, fmt.Errorf("backfill traffic 5m: %w", err))
+		factsFloor := target.Add(-minDuration(s.sourceRetention, s.trafficRetention))
+		if err := s.materializeFacts(ctx, target, factsFloor); err != nil {
+			errs = errors.Join(errs, fmt.Errorf("materialize traffic facts: %w", err))
 		}
 	}
-
-	if err := s.withWriteTimeout(ctx, func(c context.Context) error {
-		return s.store.BackfillTrafficMonthUsage(c, settings, s.location, time.Time{}, now)
-	}); err != nil {
-		errs = errors.Join(errs, fmt.Errorf("backfill traffic month usage: %w", err))
-	}
 	return errs
+}
+
+func (s *Service) materializeUsage(ctx context.Context, target, sourceFloor time.Time) error {
+	for range materializeMaxSteps {
+		hasMore, err := s.usageStep(ctx, target, sourceFloor)
+		if err != nil {
+			return err
+		}
+		if !hasMore {
+			return nil
+		}
+	}
+	return nil
+}
+
+func (s *Service) materializeUsageRepairs(ctx context.Context, target, sourceFloor time.Time) error {
+	repairCtx, cancel := context.WithTimeout(ctx, usageRepairBudget)
+	defer cancel()
+
+	for range usageRepairMaxSteps {
+		if repairCtx.Err() != nil {
+			return nil
+		}
+		hasMore, err := s.usageRepairStep(repairCtx, target, sourceFloor)
+		if err != nil {
+			return err
+		}
+		if !hasMore {
+			return nil
+		}
+	}
+	return nil
+}
+
+func (s *Service) materializeFacts(ctx context.Context, target, sourceFloor time.Time) error {
+	for range materializeMaxSteps {
+		hasMore, err := s.factsStep(ctx, target, sourceFloor)
+		if err != nil {
+			return err
+		}
+		if !hasMore {
+			return nil
+		}
+	}
+	return nil
+}
+
+func (s *Service) usageStep(ctx context.Context, target, sourceFloor time.Time) (bool, error) {
+	var hasMore bool
+	err := s.gate.with(ctx, func(c context.Context) error {
+		var err error
+		hasMore, err = withMaterializeStepTimeout(c, func(writeCtx context.Context) (bool, error) {
+			return s.store.MaterializeTrafficMonthUsage(writeCtx, s.location, target, sourceFloor)
+		})
+		return err
+	})
+	return hasMore, err
+}
+
+func (s *Service) usageRepairStep(ctx context.Context, target, sourceFloor time.Time) (bool, error) {
+	var hasMore bool
+	err := s.gate.with(ctx, func(c context.Context) error {
+		var err error
+		hasMore, err = s.store.MaterializeTrafficMonthUsageRepair(c, s.location, target, sourceFloor)
+		return err
+	})
+	return hasMore, err
+}
+
+func (s *Service) factsStep(ctx context.Context, target, sourceFloor time.Time) (bool, error) {
+	var hasMore bool
+	err := s.gate.with(ctx, func(c context.Context) error {
+		var err error
+		hasMore, err = withMaterializeStepTimeout(c, func(writeCtx context.Context) (bool, error) {
+			return s.store.MaterializeTraffic5m(writeCtx, target, sourceFloor)
+		})
+		return err
+	})
+	return hasMore, err
 }
 
 func (s *Service) snapshot(ctx context.Context) {
@@ -153,15 +248,24 @@ func (s *Service) snapshotOnce(ctx context.Context) error {
 		if err != nil {
 			return struct{}{}, err
 		}
-		settings = trafficstore.SettingsWithTimezone(settings, s.location)
-		return struct{}{}, s.store.RefreshTrafficMonthlySnapshots(c, settings, s.location, now, s.retention)
+		settings, err = trafficstore.SettingsWithTimezone(settings, s.location)
+		if err != nil {
+			return struct{}{}, err
+		}
+		return struct{}{}, s.store.RefreshTrafficMonthlySnapshots(c, settings, s.location, now, s.trafficRetention)
 	})
 	return err
 }
 
-func (s *Service) withWriteTimeout(ctx context.Context, fn func(context.Context) error) error {
-	_, err := infra.WithPGWriteTimeout(ctx, func(c context.Context) (struct{}, error) {
-		return struct{}{}, fn(c)
-	})
-	return err
+func minDuration(a, b time.Duration) time.Duration {
+	if a < b {
+		return a
+	}
+	return b
+}
+
+func withMaterializeStepTimeout(ctx context.Context, fn func(context.Context) (bool, error)) (bool, error) {
+	stepCtx, cancel := context.WithTimeout(ctx, materializeStepTimeout)
+	defer cancel()
+	return fn(stepCtx)
 }

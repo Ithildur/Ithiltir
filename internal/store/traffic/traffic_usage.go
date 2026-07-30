@@ -35,6 +35,7 @@ type trafficUsageFetch struct {
 	SampleCount         int       `gorm:"column:sample_count"`
 	GapCount            int       `gorm:"column:gap_count"`
 	ResetCount          int       `gorm:"column:reset_count"`
+	CoveredFrom         time.Time `gorm:"column:covered_from"`
 	CoveredUntil        time.Time `gorm:"column:covered_until"`
 }
 
@@ -50,73 +51,180 @@ type trafficUsageNICRow struct {
 	BytesSent         int64     `gorm:"column:bytes_sent"`
 }
 
-func (s *Store) BackfillTrafficMonthUsage(ctx context.Context, settings Settings, loc *time.Location, start, end time.Time) error {
+func (s *Store) MaterializeTrafficMonthUsage(ctx context.Context, loc *time.Location, target, sourceFloor time.Time) (bool, error) {
 	if s == nil || s.db == nil {
-		return fmt.Errorf("store: db is nil")
-	}
-	var ok bool
-	settings, ok = NormalizeSettings(settings)
-	if !ok {
-		return fmt.Errorf("invalid traffic settings")
+		return false, fmt.Errorf("store: db is nil")
 	}
 	if loc == nil {
-		loc = time.Local
-	}
-	if end.IsZero() {
-		end = time.Now().UTC()
-	}
-	end = trafficBucketStart(end)
-	if start.IsZero() {
-		start = end.Add(-trafficBackfillWindow)
-	}
-	start = trafficBucketStart(start)
-	if !end.After(start) {
-		return nil
+		return false, fmt.Errorf("traffic usage location is nil")
 	}
 
-	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		rows, err := loadTrafficUsageRows(tx, start, end)
+	var hasMore bool
+	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		item, err := loadTrafficSetting(tx.Clauses(clause.Locking{Strength: "SHARE"}))
 		if err != nil {
 			return err
 		}
-		if len(rows) == 0 {
+		settings, err := NormalizeSettings(settingsFromTrafficSetting(item))
+		if err != nil {
+			return fmt.Errorf("stored traffic settings: %w", err)
+		}
+		progress, err := lockMaterializationProgress(tx, materializationUsage)
+		if err != nil {
+			return err
+		}
+		start, end, advanced := nextMaterializationRange(progress, target, sourceFloor, trafficMaterializationOverlap)
+		hasMore = advanced && end.Before(trafficBucketStart(target))
+		if !advanced {
+			if end.After(progress.ScannedUntil) {
+				return setMaterializationProgress(tx, materializationUsage, end)
+			}
 			return nil
 		}
-		progress, err := loadTrafficUsageProgress(tx, start, end, rows)
-		if err != nil {
-			return err
+		if end.After(start) {
+			if err := materializeTrafficMonthUsageRange(tx, settings, loc, start, end, nil); err != nil {
+				return err
+			}
 		}
-		items, err := buildTrafficMonthUsageRows(rows, settings, loc, start, end, progress)
-		if err != nil {
-			return err
-		}
-		if len(items) == 0 {
-			return nil
-		}
-		return upsertTrafficMonthUsage(tx, items)
+		return setMaterializationProgress(tx, materializationUsage, end)
 	})
+	return hasMore, err
 }
 
-func loadTrafficUsageRows(tx *gorm.DB, start, end time.Time) ([]trafficUsageNICRow, error) {
+// MaterializeTrafficMonthUsageRepair advances one node-local Usage repair
+// without moving the live Usage high-water mark.
+func (s *Store) MaterializeTrafficMonthUsageRepair(ctx context.Context, loc *time.Location, target, sourceFloor time.Time) (bool, error) {
+	if s == nil || s.db == nil {
+		return false, fmt.Errorf("store: db is nil")
+	}
+	if loc == nil {
+		return false, fmt.Errorf("traffic usage location is nil")
+	}
+
+	target = trafficBucketStart(target)
+	sourceFloor = trafficBucketStart(sourceFloor)
+	var hasMore bool
+	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		item, err := loadTrafficSetting(tx.Clauses(clause.Locking{Strength: "SHARE"}))
+		if err != nil {
+			return err
+		}
+		settings, err := NormalizeSettings(settingsFromTrafficSetting(item))
+		if err != nil {
+			return fmt.Errorf("stored traffic settings: %w", err)
+		}
+		// The Usage progress row is also the database serialization point for
+		// live scans, repairs, and cycle changes.
+		if _, err := lockMaterializationProgress(tx, materializationUsage); err != nil {
+			return err
+		}
+		repair, err := lockNextTrafficUsageRepair(tx)
+		if err != nil {
+			return err
+		}
+		if repair == nil {
+			hasMore = false
+			return nil
+		}
+
+		start := trafficBucketStart(repair.ScannedUntil)
+		if start.Before(sourceFloor) {
+			start = sourceFloor
+		}
+		serverIDs := []int64{repair.ServerID}
+		if !target.After(start) {
+			if err := deleteTrafficUsageRepair(tx, repair.ServerID); err != nil {
+				return err
+			}
+			hasMore, err = trafficUsageRepairsRemain(tx)
+			return err
+		}
+
+		end := start.Add(trafficUsageRepairChunk)
+		if end.After(target) {
+			end = target
+		}
+		if err := materializeTrafficMonthUsageRange(tx, settings, loc, start, end, serverIDs); err != nil {
+			return err
+		}
+		if end.Equal(target) {
+			if err := deleteTrafficUsageRepair(tx, repair.ServerID); err != nil {
+				return err
+			}
+		} else if err := advanceTrafficUsageRepair(tx, repair.ServerID, end); err != nil {
+			return err
+		}
+		hasMore, err = trafficUsageRepairsRemain(tx)
+		return err
+	})
+	return hasMore, err
+}
+
+func materializeTrafficMonthUsageRange(tx *gorm.DB, settings Settings, loc *time.Location, start, end time.Time, serverIDs []int64) error {
+	rows, err := loadTrafficUsageRows(tx, start, end, serverIDs)
+	if err != nil {
+		return err
+	}
+	if len(rows) == 0 {
+		return nil
+	}
+	progress, err := loadTrafficUsageProgress(tx, start, end, rows)
+	if err != nil {
+		return err
+	}
+	items, err := buildTrafficMonthUsageRows(rows, settings, loc, start, end, progress)
+	if err != nil {
+		return err
+	}
+	if len(items) == 0 {
+		return nil
+	}
+	return upsertTrafficMonthUsage(tx, items)
+}
+
+func loadTrafficUsageRows(tx *gorm.DB, start, end time.Time, serverIDs []int64) ([]trafficUsageNICRow, error) {
+	serverScope := `s.is_deleted = FALSE
+			AND NOT EXISTS (
+				SELECT 1
+				FROM traffic_usage_repairs r
+				WHERE r.server_id = s.id
+			)`
+	args := make([]any, 0, 7)
+	if len(serverIDs) > 0 {
+		serverScope = "s.is_deleted = FALSE AND s.id IN ?"
+		args = append(args, serverIDs)
+	}
+	args = append(args, start, end, start, end, start, end)
+
 	var rows []trafficUsageNICRow
-	err := tx.Raw(`
-	WITH current_rows AS (
+	query := fmt.Sprintf(`
+	WITH active_servers AS (
+		SELECT
+			s.id,
+			COALESCE(NULLIF(s.traffic_cycle_mode, ''), 'calendar_month') AS traffic_cycle_mode,
+			COALESCE(s.traffic_billing_start_day, 1) AS traffic_billing_start_day,
+			COALESCE(s.traffic_billing_anchor_date, '') AS traffic_billing_anchor_date,
+			COALESCE(s.traffic_billing_timezone, '') AS traffic_billing_timezone
+		FROM servers s
+		WHERE %s
+	),
+	current_rows AS (
 		SELECT
 			n.server_id,
 			n.iface,
-			COALESCE(NULLIF(s.traffic_cycle_mode, ''), 'default') AS traffic_cycle_mode,
-			COALESCE(s.traffic_billing_start_day, 1) AS traffic_billing_start_day,
-			COALESCE(s.traffic_billing_anchor_date, '') AS traffic_billing_anchor_date,
-			COALESCE(s.traffic_billing_timezone, '') AS traffic_billing_timezone,
+			s.traffic_cycle_mode,
+			s.traffic_billing_start_day,
+			s.traffic_billing_anchor_date,
+			s.traffic_billing_timezone,
 			n.collected_at,
 			n.bytes_recv,
 			n.bytes_sent
 		FROM nic_metrics n
-		JOIN servers s ON s.id = n.server_id AND s.is_deleted = FALSE
-		WHERE n.collected_at >= ? AND n.collected_at <= ?
+		JOIN active_servers s ON s.id = n.server_id
+		WHERE n.collected_at >= ? AND n.collected_at < ?
 	),
 	scoped_pairs AS (
-		SELECT DISTINCT
+		SELECT
 			server_id,
 			iface,
 			traffic_cycle_mode,
@@ -124,6 +232,27 @@ func loadTrafficUsageRows(tx *gorm.DB, start, end time.Time) ([]trafficUsageNICR
 			traffic_billing_anchor_date,
 			traffic_billing_timezone
 		FROM current_rows
+		UNION
+		SELECT
+			n.server_id,
+			n.iface,
+			s.traffic_cycle_mode,
+			s.traffic_billing_start_day,
+			s.traffic_billing_anchor_date,
+			s.traffic_billing_timezone
+		FROM server_current_nic_metrics n
+		JOIN active_servers s ON s.id = n.server_id
+		UNION
+		SELECT
+			u.server_id,
+			u.iface,
+			s.traffic_cycle_mode,
+			s.traffic_billing_start_day,
+			s.traffic_billing_anchor_date,
+			s.traffic_billing_timezone
+		FROM traffic_month_usage u
+		JOIN active_servers s ON s.id = u.server_id
+		WHERE u.cycle_end > ? AND u.cycle_start < ?
 	),
 	prev_rows AS (
 		SELECT
@@ -170,7 +299,7 @@ func loadTrafficUsageRows(tx *gorm.DB, start, end time.Time) ([]trafficUsageNICR
 			FROM nic_metrics n
 			WHERE n.server_id = s.server_id
 				AND n.iface = s.iface
-				AND n.collected_at > ?
+				AND n.collected_at >= ?
 			ORDER BY n.collected_at ASC
 			LIMIT 1
 		) p ON true
@@ -181,8 +310,63 @@ func loadTrafficUsageRows(tx *gorm.DB, start, end time.Time) ([]trafficUsageNICR
 	UNION ALL
 	SELECT server_id, iface, traffic_cycle_mode, traffic_billing_start_day, traffic_billing_anchor_date, traffic_billing_timezone, collected_at, bytes_recv, bytes_sent FROM next_rows
 	ORDER BY server_id, iface, collected_at
-	`, start, end, start, end).Scan(&rows).Error
+	`, serverScope)
+	err := tx.Raw(query, args...).Scan(&rows).Error
 	return rows, err
+}
+
+func lockNextTrafficUsageRepair(tx *gorm.DB) (*model.TrafficUsageRepair, error) {
+	var repair model.TrafficUsageRepair
+	err := tx.
+		Clauses(clause.Locking{Strength: "UPDATE"}).
+		Order("scanned_until ASC, server_id ASC").
+		Take(&repair).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("lock traffic usage repair: %w", err)
+	}
+	return &repair, nil
+}
+
+func advanceTrafficUsageRepair(tx *gorm.DB, serverID int64, end time.Time) error {
+	result := tx.
+		Model(&model.TrafficUsageRepair{}).
+		Where("server_id = ?", serverID).
+		Update("scanned_until", end.UTC())
+	if result.Error != nil {
+		return fmt.Errorf("advance traffic usage repair: %w", result.Error)
+	}
+	if result.RowsAffected != 1 {
+		return fmt.Errorf("advance traffic usage repair: repair changed")
+	}
+	return nil
+}
+
+func deleteTrafficUsageRepair(tx *gorm.DB, serverID int64) error {
+	result := tx.
+		Where("server_id = ?", serverID).
+		Delete(&model.TrafficUsageRepair{})
+	if result.Error != nil {
+		return fmt.Errorf("complete traffic usage repair: %w", result.Error)
+	}
+	if result.RowsAffected != 1 {
+		return fmt.Errorf("complete traffic usage repair: repair changed")
+	}
+	return nil
+}
+
+func trafficUsageRepairsRemain(tx *gorm.DB) (bool, error) {
+	var repair model.TrafficUsageRepair
+	err := tx.Select("server_id").Take(&repair).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("check traffic usage repairs: %w", err)
+	}
+	return true, nil
 }
 
 func loadTrafficUsageProgress(tx *gorm.DB, start, end time.Time, samples []trafficUsageNICRow) (map[trafficUsageKey]time.Time, error) {
@@ -225,17 +409,41 @@ func trafficUsageServerIDs(rows []trafficUsageNICRow) []int64 {
 func buildTrafficMonthUsageRows(rows []trafficUsageNICRow, settings Settings, loc *time.Location, start, end time.Time, progress map[trafficUsageKey]time.Time) ([]model.TrafficMonthUsage, error) {
 	usage := make(map[trafficUsageKey]*trafficUsageAccumulator)
 	var prev trafficUsageNICRow
+	var rule cycleRule
+	var ruleServerID int64
 	hasPrev := false
+	hasRule := false
 
 	for _, row := range rows {
+		if !hasRule || row.ServerID != ruleServerID {
+			effective, err := SettingsWithServerCycle(settings, serverCycleSettingsFromRow(row))
+			if err != nil {
+				return nil, fmt.Errorf("server %d traffic cycle settings: %w", row.ServerID, err)
+			}
+			cycleLoc, err := SettingsLocation(effective, loc)
+			if err != nil {
+				return nil, fmt.Errorf("server %d traffic cycle location: %w", row.ServerID, err)
+			}
+			rule, err = newCycleRule(
+				effective.CycleMode,
+				effective.BillingStartDay,
+				effective.BillingAnchorDate,
+				cycleLoc,
+			)
+			if err != nil {
+				return nil, fmt.Errorf("server %d traffic cycle rule: %w", row.ServerID, err)
+			}
+			ruleServerID = row.ServerID
+			hasRule = true
+		}
 		if !hasPrev || prev.ServerID != row.ServerID || prev.Iface != row.Iface {
 			prev = row
 			hasPrev = true
 			continue
 		}
 		if row.CollectedAt.After(prev.CollectedAt) {
-			if err := mergeTrafficUsagePair(usage, progress, settings, loc, start, end, prev, row); err != nil {
-				return nil, err
+			if err := mergeTrafficUsagePair(usage, progress, rule, start, end, prev, row); err != nil {
+				return nil, fmt.Errorf("server %d interface %q traffic usage: %w", row.ServerID, row.Iface, err)
 			}
 		}
 		prev = row
@@ -248,17 +456,11 @@ func buildTrafficMonthUsageRows(rows []trafficUsageNICRow, settings Settings, lo
 	return out, nil
 }
 
-func mergeTrafficUsagePair(usage map[trafficUsageKey]*trafficUsageAccumulator, progress map[trafficUsageKey]time.Time, settings Settings, loc *time.Location, start, end time.Time, prev, current trafficUsageNICRow) error {
+func mergeTrafficUsagePair(usage map[trafficUsageKey]*trafficUsageAccumulator, progress map[trafficUsageKey]time.Time, rule cycleRule, start, end time.Time, prev, current trafficUsageNICRow) error {
 	inDelta := current.BytesRecv - prev.BytesRecv
 	outDelta := current.BytesSent - prev.BytesSent
-	effective, err := SettingsWithServerCycle(settings, serverCycleSettingsFromRow(current))
-	if err != nil {
-		return fmt.Errorf("server %d traffic cycle settings: %w", current.ServerID, err)
-	}
-	cycleLoc := SettingsLocation(effective, loc)
 	if inDelta < 0 || outDelta < 0 {
-		mergeTrafficUsageReset(usage, progress, effective, cycleLoc, start, end, current)
-		return nil
+		return mergeTrafficUsageReset(usage, progress, rule, start, end, current)
 	}
 	if inDelta == 0 && outDelta == 0 {
 		return nil
@@ -279,15 +481,19 @@ func mergeTrafficUsagePair(usage map[trafficUsageKey]*trafficUsageAccumulator, p
 	gap := totalSec > trafficMaxBillingGap.Seconds()
 
 	for cursor := maxTime(pairStart, start); cursor.Before(pairEnd) && cursor.Before(end); {
-		cycle := currentTrafficCycleAnchored(effective.CycleMode, effective.BillingStartDay, effective.BillingAnchorDate, cycleLoc, cursor)
+		cycle, err := rule.at(cursor)
+		if err != nil {
+			return err
+		}
 		segEnd := minTime(minTime(pairEnd, cycle.End), end)
 		if !segEnd.After(cursor) {
-			break
+			return fmt.Errorf("traffic cycle does not advance after %s", cursor.Format(time.RFC3339))
 		}
 
 		key := trafficUsageKeyFromCycle(current.ServerID, current.Iface, cycle)
 		from := cursor
-		if last := progress[key]; last.After(from) {
+		last := progress[key]
+		if last.After(from) {
 			from = last
 		}
 		if from.Before(start) {
@@ -296,9 +502,11 @@ func mergeTrafficUsagePair(usage map[trafficUsageKey]*trafficUsageAccumulator, p
 		if segEnd.After(from) && segEnd.After(cycle.Start) && from.Before(cycle.End) {
 			fromSec := from.Sub(pairStart).Seconds()
 			toSec := segEnd.Sub(pairStart).Seconds()
-			inBytes := int64(math.Round(float64(inDelta)*toSec/totalSec)) - int64(math.Round(float64(inDelta)*fromSec/totalSec))
-			outBytes := int64(math.Round(float64(outDelta)*toSec/totalSec)) - int64(math.Round(float64(outDelta)*fromSec/totalSec))
-			mergeTrafficUsageSample(trafficUsageAccumulatorFor(usage, key, cycle), inBytes, outBytes, inRate, outRate, gap, segEnd)
+			inBytes := trafficBytesAt(inDelta, toSec, totalSec) - trafficBytesAt(inDelta, fromSec, totalSec)
+			outBytes := trafficBytesAt(outDelta, toSec, totalSec) - trafficBytesAt(outDelta, fromSec, totalSec)
+			gapStart := maxTime(pairStart, cycle.Start)
+			markGap := gap && !last.After(gapStart)
+			mergeTrafficUsageSample(trafficUsageAccumulatorFor(usage, key, cycle), inBytes, outBytes, inRate, outRate, markGap, from, segEnd)
 			progress[key] = maxTime(progress[key], segEnd)
 		}
 		cursor = segEnd
@@ -306,35 +514,59 @@ func mergeTrafficUsagePair(usage map[trafficUsageKey]*trafficUsageAccumulator, p
 	return nil
 }
 
-func mergeTrafficUsageReset(usage map[trafficUsageKey]*trafficUsageAccumulator, progress map[trafficUsageKey]time.Time, settings Settings, loc *time.Location, start, end time.Time, row trafficUsageNICRow) {
+func mergeTrafficUsageReset(usage map[trafficUsageKey]*trafficUsageAccumulator, progress map[trafficUsageKey]time.Time, rule cycleRule, start, end time.Time, row trafficUsageNICRow) error {
 	at := row.CollectedAt.UTC()
 	if at.Before(start) || !at.Before(end) {
-		return
+		return nil
 	}
-	cycle := currentTrafficCycleAnchored(settings.CycleMode, settings.BillingStartDay, settings.BillingAnchorDate, loc, at)
+	cycle, err := rule.at(at)
+	if err != nil {
+		return err
+	}
 	key := trafficUsageKeyFromCycle(row.ServerID, row.Iface, cycle)
 	if !at.After(progress[key]) {
-		return
+		return nil
 	}
 	acc := trafficUsageAccumulatorFor(usage, key, cycle)
 	acc.row.ResetCount++
+	if acc.row.CoveredFrom.IsZero() || at.Before(acc.row.CoveredFrom) {
+		acc.row.CoveredFrom = at
+	}
 	acc.row.LastCollectedAt = maxTime(acc.row.LastCollectedAt, at)
 	acc.row.CoveredUntil = maxTime(acc.row.CoveredUntil, at)
 	progress[key] = at
+	return nil
 }
 
 func serverCycleSettingsFromRow(row trafficUsageNICRow) ServerCycleSettings {
+	mode := ServerCycleMode(row.ServerCycleMode)
+	day := row.BillingStartDay
+	if mode == "" {
+		mode = ServerCycleMode(CycleCalendarMonth)
+	}
+	if day == 0 {
+		day = 1
+	}
 	return ServerCycleSettings{
-		Mode:              ServerCycleMode(row.ServerCycleMode),
-		BillingStartDay:   row.BillingStartDay,
+		Mode:              mode,
+		BillingStartDay:   day,
 		BillingAnchorDate: row.BillingAnchorDate,
 		BillingTimezone:   row.BillingTimezone,
 	}
 }
 
-func mergeTrafficUsageSample(acc *trafficUsageAccumulator, inBytes, outBytes int64, inRate, outRate float64, gap bool, coveredUntil time.Time) {
-	acc.row.InBytes += inBytes
-	acc.row.OutBytes += outBytes
+func mergeTrafficUsageSample(acc *trafficUsageAccumulator, inBytes, outBytes int64, inRate, outRate float64, gap bool, coveredFrom, coveredUntil time.Time) {
+	nextIn, inOK := addTrafficBytes(acc.row.InBytes, inBytes)
+	nextOut, outOK := addTrafficBytes(acc.row.OutBytes, outBytes)
+	if inOK && outOK {
+		acc.row.InBytes = nextIn
+		acc.row.OutBytes = nextOut
+	} else {
+		gap = true
+	}
+	if acc.row.CoveredFrom.IsZero() || coveredFrom.Before(acc.row.CoveredFrom) {
+		acc.row.CoveredFrom = coveredFrom
+	}
 	acc.row.CoveredUntil = maxTime(acc.row.CoveredUntil, coveredUntil)
 	acc.row.LastCollectedAt = maxTime(acc.row.LastCollectedAt, coveredUntil)
 	if gap {
@@ -370,6 +602,7 @@ func trafficUsageAccumulatorFor(usage map[trafficUsageKey]*trafficUsageAccumulat
 }
 
 func upsertTrafficMonthUsage(tx *gorm.DB, items []model.TrafficMonthUsage) error {
+	maxBytes := int64(math.MaxInt64)
 	return tx.Clauses(clause.OnConflict{
 		Columns: []clause.Column{
 			{Name: "server_id"},
@@ -380,15 +613,16 @@ func upsertTrafficMonthUsage(tx *gorm.DB, items []model.TrafficMonthUsage) error
 			{Name: "cycle_end"},
 		},
 		DoUpdates: clause.Assignments(map[string]any{
+			"covered_from":            gorm.Expr("LEAST(traffic_month_usage.covered_from, EXCLUDED.covered_from)"),
 			"covered_until":           gorm.Expr("GREATEST(traffic_month_usage.covered_until, EXCLUDED.covered_until)"),
 			"last_collected_at":       gorm.Expr("GREATEST(traffic_month_usage.last_collected_at, EXCLUDED.last_collected_at)"),
-			"in_bytes":                gorm.Expr("traffic_month_usage.in_bytes + EXCLUDED.in_bytes"),
-			"out_bytes":               gorm.Expr("traffic_month_usage.out_bytes + EXCLUDED.out_bytes"),
+			"in_bytes":                gorm.Expr("CASE WHEN traffic_month_usage.in_bytes > ? - EXCLUDED.in_bytes THEN traffic_month_usage.in_bytes ELSE traffic_month_usage.in_bytes + EXCLUDED.in_bytes END", maxBytes),
+			"out_bytes":               gorm.Expr("CASE WHEN traffic_month_usage.out_bytes > ? - EXCLUDED.out_bytes THEN traffic_month_usage.out_bytes ELSE traffic_month_usage.out_bytes + EXCLUDED.out_bytes END", maxBytes),
 			"in_peak_bytes_per_sec":   gorm.Expr("GREATEST(traffic_month_usage.in_peak_bytes_per_sec, EXCLUDED.in_peak_bytes_per_sec)"),
 			"out_peak_bytes_per_sec":  gorm.Expr("GREATEST(traffic_month_usage.out_peak_bytes_per_sec, EXCLUDED.out_peak_bytes_per_sec)"),
 			"both_peak_bytes_per_sec": gorm.Expr("GREATEST(traffic_month_usage.both_peak_bytes_per_sec, EXCLUDED.both_peak_bytes_per_sec)"),
 			"sample_count":            gorm.Expr("traffic_month_usage.sample_count + EXCLUDED.sample_count"),
-			"gap_count":               gorm.Expr("traffic_month_usage.gap_count + EXCLUDED.gap_count"),
+			"gap_count":               gorm.Expr("traffic_month_usage.gap_count + EXCLUDED.gap_count + CASE WHEN traffic_month_usage.in_bytes > ? - EXCLUDED.in_bytes OR traffic_month_usage.out_bytes > ? - EXCLUDED.out_bytes THEN 1 ELSE 0 END", maxBytes, maxBytes),
 			"reset_count":             gorm.Expr("traffic_month_usage.reset_count + EXCLUDED.reset_count"),
 		}),
 	}).CreateInBatches(items, 500).Error
@@ -413,10 +647,17 @@ func (s *Store) trafficUsageSummaryForCycle(ctx context.Context, q TrafficQuery,
 		}, ErrNoTrafficData
 	}
 
+	coveredFrom := row.CoveredFrom
+	if coveredFrom.IsZero() {
+		coveredFrom = cycle.Start
+	}
 	coveredUntil := row.CoveredUntil
 	if coveredUntil.IsZero() {
 		coveredUntil = statEnd
 	}
+	dataComplete := trafficUsageDataComplete(row.GapCount, row.ResetCount) &&
+		!coveredFrom.After(cycle.Start) &&
+		(!cycleComplete || !coveredUntil.Before(cycle.End))
 	stat := TrafficStat{
 		InBytes:             row.InBytes,
 		OutBytes:            row.OutBytes,
@@ -425,19 +666,20 @@ func (s *Store) trafficUsageSummaryForCycle(ctx context.Context, q TrafficQuery,
 		BothPeakBytesPerSec: row.BothPeakBytesPerSec,
 		SampleCount:         row.SampleCount,
 		ExpectedSampleCount: 0,
-		EffectiveStart:      cycle.Start,
+		EffectiveStart:      coveredFrom,
 		EffectiveEnd:        statEnd,
-		CoverageRatio:       trafficUsageCoverage(row.GapCount, row.ResetCount),
+		CoverageRatio:       trafficUsageCoverage(cycle.Start, statEnd, coveredFrom, coveredUntil, row.GapCount, row.ResetCount),
 		CoveredUntil:        coveredUntil,
 		GapCount:            row.GapCount,
 		ResetCount:          row.ResetCount,
 		CycleComplete:       cycleComplete,
-		DataComplete:        trafficUsageDataComplete(row.GapCount, row.ResetCount),
+		DataComplete:        dataComplete,
 		Status:              status,
-		Partial:             !trafficUsageDataComplete(row.GapCount, row.ResetCount),
 	}
 	applyP95Status(&stat, q.UsageMode, false)
-	applyTrafficSelection(&stat, q.DirectionMode)
+	if err := applyTrafficSelection(&stat, q.DirectionMode); err != nil {
+		return TrafficSummary{}, err
+	}
 	return TrafficSummary{
 		ServerID:  q.ServerID,
 		Iface:     normalizeTrafficIface(q.Iface),
@@ -471,6 +713,7 @@ func (s *Store) fetchTrafficUsageIface(ctx context.Context, q TrafficQuery, cycl
 		SampleCount         int       `gorm:"column:sample_count"`
 		GapCount            int       `gorm:"column:gap_count"`
 		ResetCount          int       `gorm:"column:reset_count"`
+		CoveredFrom         time.Time `gorm:"column:covered_from"`
 		CoveredUntil        time.Time `gorm:"column:covered_until"`
 	}
 	err := db.
@@ -483,6 +726,7 @@ func (s *Store) fetchTrafficUsageIface(ctx context.Context, q TrafficQuery, cycl
 			"sample_count",
 			"gap_count",
 			"reset_count",
+			"covered_from",
 			"covered_until",
 		}).
 		Take(&row).
@@ -502,6 +746,7 @@ func (s *Store) fetchTrafficUsageIface(ctx context.Context, q TrafficQuery, cycl
 		SampleCount:         row.SampleCount,
 		GapCount:            row.GapCount,
 		ResetCount:          row.ResetCount,
+		CoveredFrom:         row.CoveredFrom,
 		CoveredUntil:        row.CoveredUntil,
 	}, true, nil
 }
@@ -512,8 +757,8 @@ func trafficUsageKeyFromCycle(serverID int64, iface string, cycle TrafficCycle) 
 		iface:           iface,
 		cycleMode:       string(cycle.Mode),
 		billingStartDay: int16(cycle.BillingStartDay),
-		cycleStart:      cycle.Start,
-		cycleEnd:        cycle.End,
+		cycleStart:      cycle.Start.UTC(),
+		cycleEnd:        cycle.End.UTC(),
 	}
 }
 
@@ -523,8 +768,8 @@ func trafficUsageKeyFromUsage(row model.TrafficMonthUsage) trafficUsageKey {
 		iface:           row.Iface,
 		cycleMode:       row.CycleMode,
 		billingStartDay: row.BillingStartDay,
-		cycleStart:      row.CycleStart,
-		cycleEnd:        row.CycleEnd,
+		cycleStart:      row.CycleStart.UTC(),
+		cycleEnd:        row.CycleEnd.UTC(),
 	}
 }
 
@@ -532,18 +777,24 @@ func trafficUsageDataComplete(gaps, resets int) bool {
 	return gaps == 0 && resets == 0
 }
 
-func trafficUsageCoverage(gaps, resets int) float64 {
-	if trafficUsageDataComplete(gaps, resets) {
+func trafficUsageCoverage(start, end, coveredFrom, coveredUntil time.Time, gaps, resets int) float64 {
+	if !trafficUsageDataComplete(gaps, resets) {
+		return 0
+	}
+	total := end.Sub(start)
+	if total <= 0 {
 		return 1
 	}
-	return 0
-}
-
-func maxInt(a, b int) int {
-	if a > b {
-		return a
+	coveredStart := maxTime(start, coveredFrom)
+	coveredEnd := minTime(end, coveredUntil)
+	if !coveredEnd.After(coveredStart) {
+		return 0
 	}
-	return b
+	ratio := float64(coveredEnd.Sub(coveredStart)) / float64(total)
+	if ratio > 1 {
+		return 1
+	}
+	return ratio
 }
 
 func maxTime(a, b time.Time) time.Time {

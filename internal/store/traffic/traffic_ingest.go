@@ -21,45 +21,72 @@ type trafficNICRow struct {
 	BytesSent   int64     `gorm:"column:bytes_sent"`
 }
 
-func (s *Store) BackfillTraffic5m(ctx context.Context, start, end time.Time) error {
+func (s *Store) MaterializeTraffic5m(ctx context.Context, target, sourceFloor time.Time) (bool, error) {
 	if s == nil || s.db == nil {
-		return fmt.Errorf("store: db is nil")
+		return false, fmt.Errorf("store: db is nil")
 	}
-	if end.IsZero() {
-		end = time.Now().UTC()
-	}
-	end = trafficBucketStart(end)
-	if start.IsZero() {
-		start = end.Add(-trafficBackfillWindow)
-	}
-	start = trafficBucketStart(start)
-	if !end.After(start) {
-		return nil
-	}
-
-	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		rows, err := loadTrafficSampleRows(tx, start, end)
+	var hasMore bool
+	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		enabled, err := lockFactsEnabled(tx)
+		if err != nil || !enabled {
+			return err
+		}
+		progress, err := lockMaterializationProgress(tx, materializationFacts)
 		if err != nil {
-			return fmt.Errorf("load traffic nic rows: %w", err)
+			return err
 		}
-		if len(rows) == 0 {
+		start, end, advanced := nextMaterializationRange(progress, target, sourceFloor, trafficMaterializationOverlap)
+		hasMore = advanced && end.Before(trafficBucketStart(target))
+		if !advanced {
+			if end.After(progress.ScannedUntil) {
+				return setMaterializationProgress(tx, materializationFacts, end)
+			}
 			return nil
 		}
-		items := buildTraffic5mRows(rows, start, end)
-		if len(items) == 0 {
-			return nil
+		if err := materializeTraffic5mRange(tx, start, end); err != nil {
+			return err
 		}
-		if err := upsertTraffic5mRows(tx, items); err != nil {
-			return fmt.Errorf("upsert traffic 5m rows: %w", err)
-		}
-		return nil
+		return setMaterializationProgress(tx, materializationFacts, end)
 	})
+	return hasMore, err
+}
+
+func lockFactsEnabled(tx *gorm.DB) (bool, error) {
+	var settings model.TrafficSetting
+	if err := tx.
+		Clauses(clause.Locking{Strength: "SHARE"}).
+		Select("usage_mode").
+		Where("id = ?", trafficSettingsID).
+		Take(&settings).Error; err != nil {
+		return false, fmt.Errorf("lock traffic usage mode: %w", err)
+	}
+	return UsageMode(settings.UsageMode) == UsageBilling, nil
+}
+
+func materializeTraffic5mRange(tx *gorm.DB, start, end time.Time) error {
+	rows, err := loadTrafficSampleRows(tx, start, end)
+	if err != nil {
+		return fmt.Errorf("load traffic nic rows: %w", err)
+	}
+	items := buildTraffic5mRows(rows, start, end)
+	if len(items) == 0 {
+		return nil
+	}
+	if err := upsertTraffic5mRows(tx, items); err != nil {
+		return fmt.Errorf("upsert traffic 5m rows: %w", err)
+	}
+	return nil
 }
 
 func loadTrafficSampleRows(tx *gorm.DB, start, end time.Time) ([]trafficNICRow, error) {
 	var rows []trafficNICRow
 	err := tx.Raw(`
-	WITH current_rows AS (
+	WITH active_servers AS (
+		SELECT id
+		FROM servers
+		WHERE is_deleted = FALSE
+	),
+	current_rows AS (
 		SELECT
 			n.server_id,
 			n.iface,
@@ -67,14 +94,27 @@ func loadTrafficSampleRows(tx *gorm.DB, start, end time.Time) ([]trafficNICRow, 
 			n.bytes_recv,
 			n.bytes_sent
 		FROM nic_metrics n
-		JOIN servers s ON s.id = n.server_id AND s.is_deleted = FALSE
-		WHERE n.collected_at >= ? AND n.collected_at <= ?
+		JOIN active_servers s ON s.id = n.server_id
+		WHERE n.collected_at >= ? AND n.collected_at < ?
 	),
 	scoped_pairs AS (
-		SELECT DISTINCT
+		SELECT
 			server_id,
 			iface
 		FROM current_rows
+		UNION
+		SELECT
+			n.server_id,
+			n.iface
+		FROM server_current_nic_metrics n
+		JOIN active_servers s ON s.id = n.server_id
+		UNION
+		SELECT
+			u.server_id,
+			u.iface
+		FROM traffic_month_usage u
+		JOIN active_servers s ON s.id = u.server_id
+		WHERE u.cycle_end > ? AND u.cycle_start < ?
 	),
 	prev_rows AS (
 		SELECT
@@ -113,7 +153,7 @@ func loadTrafficSampleRows(tx *gorm.DB, start, end time.Time) ([]trafficNICRow, 
 			FROM nic_metrics n
 			WHERE n.server_id = s.server_id
 				AND n.iface = s.iface
-				AND n.collected_at > ?
+				AND n.collected_at >= ?
 			ORDER BY n.collected_at ASC
 			LIMIT 1
 		) p ON true
@@ -124,7 +164,7 @@ func loadTrafficSampleRows(tx *gorm.DB, start, end time.Time) ([]trafficNICRow, 
 	UNION ALL
 	SELECT server_id, iface, collected_at, bytes_recv, bytes_sent FROM next_rows
 	ORDER BY server_id, iface, collected_at
-	`, start, end, start, end).Scan(&rows).Error
+	`, start, end, start, end, start, end).Scan(&rows).Error
 	return rows, err
 }
 
@@ -251,9 +291,16 @@ func traffic5mAccumulatorFor(buckets map[traffic5mKey]*traffic5mAccumulator, ser
 }
 
 func mergeTrafficSample(acc *traffic5mAccumulator, sample trafficSample) {
-	acc.row.InBytes += sample.InBytes
-	acc.row.OutBytes += sample.OutBytes
+	nextIn, inOK := addTrafficBytes(acc.row.InBytes, sample.InBytes)
+	nextOut, outOK := addTrafficBytes(acc.row.OutBytes, sample.OutBytes)
 	acc.row.CoveredSec += sample.Seconds
+	if !inOK || !outOK {
+		acc.row.GapCount++
+		acc.invalid = true
+		return
+	}
+	acc.row.InBytes = nextIn
+	acc.row.OutBytes = nextOut
 	acc.row.GapCount += int32(sample.Gap)
 	if sample.Gap > 0 || !sample.Valid {
 		acc.invalid = true
@@ -279,10 +326,6 @@ type trafficSample struct {
 	OutRate  float64
 	Gap      int
 	Valid    bool
-}
-
-func splitTrafficSamples(serverID int64, iface string, start, end time.Time, inDelta, outDelta int64) []trafficSample {
-	return splitTrafficSamplesWindow(serverID, iface, start, end, start, end, inDelta, outDelta)
 }
 
 func splitTrafficSamplesWindow(serverID int64, iface string, pairStart, pairEnd, windowStart, windowEnd time.Time, inDelta, outDelta int64) []trafficSample {
@@ -334,8 +377,8 @@ func splitTrafficSamplesWindow(serverID int64, iface string, pairStart, pairEnd,
 	for _, seg := range segments {
 		segStart := seg.start.Sub(pairStart).Seconds()
 		segEnd := seg.end.Sub(pairStart).Seconds()
-		inBytes := int64(math.Round(float64(inDelta)*segEnd/seconds)) - int64(math.Round(float64(inDelta)*segStart/seconds))
-		outBytes := int64(math.Round(float64(outDelta)*segEnd/seconds)) - int64(math.Round(float64(outDelta)*segStart/seconds))
+		inBytes := trafficBytesAt(inDelta, segEnd, seconds) - trafficBytesAt(inDelta, segStart, seconds)
+		outBytes := trafficBytesAt(outDelta, segEnd, seconds) - trafficBytesAt(outDelta, segStart, seconds)
 
 		segGap := 0
 		if gap && seg.start.Equal(pairStart) {
@@ -361,6 +404,26 @@ func splitTrafficSamplesWindow(serverID int64, iface string, pairStart, pairEnd,
 		})
 	}
 	return out
+}
+
+func trafficBytesAt(total int64, elapsed, duration float64) int64 {
+	if total <= 0 || elapsed <= 0 || duration <= 0 {
+		return 0
+	}
+	if elapsed >= duration {
+		return total
+	}
+	value := math.Round(float64(total) * elapsed / duration)
+	if value <= 0 {
+		return 0
+	}
+	// float64(math.MaxInt64) rounds to 1<<63. Check against the rounded
+	// endpoint before converting so a valid non-negative counter cannot wrap
+	// to math.MinInt64 at the integer boundary.
+	if value >= float64(total) {
+		return total
+	}
+	return int64(value)
 }
 
 func minTime(a, b time.Time) time.Time {

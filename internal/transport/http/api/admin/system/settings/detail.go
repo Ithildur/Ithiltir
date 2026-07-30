@@ -17,7 +17,6 @@ func detailRoute(r *routes.Blueprint, h *handler) {
 }
 
 func (h *handler) detailHandler(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Cache-Control", "no-store")
 
 	out, err := loadSettings(r.Context(), h.metric, h.system)
 	if err != nil {

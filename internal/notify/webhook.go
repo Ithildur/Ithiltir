@@ -7,7 +7,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"time"
 )
@@ -51,12 +50,12 @@ func sendWebhook(ctx context.Context, cfg WebhookConfig, msg Message) error {
 
 	resp, err := defaultHTTPClient.Do(req)
 	if err != nil {
-		return err
+		return requestError(err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("webhook status: %s", resp.Status)
+		return responseStatusError("webhook_http", resp, "")
 	}
 	return nil
 }

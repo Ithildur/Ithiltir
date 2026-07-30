@@ -57,7 +57,6 @@ func listRoute(r *routes.Blueprint, h *handler) {
 }
 
 func (h *handler) listHandler(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Cache-Control", "no-store")
 
 	query, err := parseListQuery(r.URL.Query())
 	if err != nil {

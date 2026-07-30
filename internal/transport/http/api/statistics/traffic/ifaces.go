@@ -21,6 +21,7 @@ func (h *handler) ifacesRoute(r *routes.Blueprint) {
 		"List traffic interfaces",
 		routes.Func(h.ifacesHandler),
 		routes.Auth(routes.AuthOptional),
+		routes.Use(h.optionalBearer),
 	)
 }
 
@@ -32,7 +33,7 @@ func (h *handler) ifacesHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	allowed, err := h.canReadTraffic(r.Context(), r, serverID)
 	if err != nil {
-		httperr.TryWrite(w, httperr.ServiceUnavailable(err))
+		writeTrafficAccessError(w, err)
 		return
 	}
 	if !allowed {

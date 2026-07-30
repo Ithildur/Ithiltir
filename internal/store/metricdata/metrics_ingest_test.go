@@ -60,35 +60,68 @@ func TestIntegrationSaveMetricsCurrentProjection(t *testing.T) {
 	newerAt := time.Now().UTC().Add(-time.Hour).Truncate(time.Microsecond)
 	olderAt := newerAt.Add(-time.Minute)
 	diskTemp := 41.0
-	if err := st.SaveMetrics(ctx, MetricsSample{
+	diskName := strings.Repeat("d", 255)
+	diskRef := "disk:" + strings.Repeat("r", 315)
+	diskPath := "/" + strings.Repeat("device/", 45)
+	mountpoint := "/" + strings.Repeat("mount/", 45)
+	updated, err := st.SaveMetrics(ctx, MetricsSample{
 		ServerID: srv.ID,
 		Metric:   testServerMetric(srv.ID, newerAt, 0.8),
 		Runtime:  testMetricRuntime(),
-		DiskIO:   []metrics.DiskBaseIOMetrics{{Name: "sda", Role: "primary", ReadBytes: 100}},
+		Updates:  map[string]any{"ip": "203.0.113.2"},
+		DiskIO: []metrics.DiskBaseIOMetrics{{
+			Kind:       "disk",
+			Name:       diskName,
+			Ref:        diskRef,
+			DevicePath: diskPath,
+			Role:       "primary",
+			ReadBytes:  100,
+		}},
 		DiskSmart: &metrics.DiskSmart{Devices: []metrics.DiskSmartDevice{
-			{Name: "sda", DeviceType: "sat", Protocol: "ATA", TempC: &diskTemp},
+			{Name: diskName, Ref: diskRef, DevicePath: diskPath, DeviceType: "sat", Protocol: "ATA", TempC: &diskTemp},
 			{Name: "vda", DevicePath: "/dev/vda", DeviceType: "scsi", Protocol: "SCSI", Serial: "virt", TempC: &diskTemp},
 			{Name: "md1", DevicePath: "/dev/md1", DeviceType: "sat", Protocol: "ATA", TempC: &diskTemp},
 		}},
 		DiskUsage: []metrics.DiskLogicalMetrics{{
-			Name:  "root",
-			Total: 1000,
-			Used:  400,
-			Free:  600,
+			Kind:        "disk",
+			Name:        diskName,
+			Ref:         diskRef,
+			DevicePath:  diskPath,
+			Mountpoint:  mountpoint,
+			Mountpoints: map[string]metrics.DiskMountpointMetrics{mountpoint: {FSType: "xfs"}},
+			Total:       1000,
+			Used:        400,
+			Free:        600,
 		}},
 		Network: []metrics.NetIOMetrics{{Name: "eth0", BytesRecv: 100, RecvRateBytesPerSec: 10}},
-	}); err != nil {
+	})
+	if err != nil {
 		t.Fatalf("SaveMetrics(newer) error = %v", err)
 	}
-	if err := st.SaveMetrics(ctx, MetricsSample{
+	if !updated {
+		t.Fatal("SaveMetrics(newer) did not update current projection")
+	}
+	updated, err = st.SaveMetrics(ctx, MetricsSample{
 		ServerID:  srv.ID,
 		Metric:    testServerMetric(srv.ID, olderAt, 0.2),
 		Runtime:   testMetricRuntime(),
+		Updates:   map[string]any{"ip": "198.51.100.2"},
 		DiskIO:    []metrics.DiskBaseIOMetrics{{Name: "sdb", Role: "primary", ReadBytes: 20}},
 		DiskUsage: []metrics.DiskLogicalMetrics{{Name: "old-root", Total: 1000, Used: 200, Free: 800}},
 		Network:   []metrics.NetIOMetrics{{Name: "eth1", BytesRecv: 20, RecvRateBytesPerSec: 2}},
-	}); err != nil {
+	})
+	if err != nil {
 		t.Fatalf("SaveMetrics(older) error = %v", err)
+	}
+	if updated {
+		t.Fatal("SaveMetrics(older) unexpectedly updated current projection")
+	}
+	var gotServer model.Server
+	if err := st.db.WithContext(ctx).First(&gotServer, srv.ID).Error; err != nil {
+		t.Fatalf("First(Server) error = %v", err)
+	}
+	if gotServer.IP == nil || *gotServer.IP != "203.0.113.2" {
+		t.Fatalf("server IP = %v, want newer observation", gotServer.IP)
 	}
 
 	var current model.ServerCurrentMetric
@@ -127,11 +160,25 @@ func TestIntegrationSaveMetricsCurrentProjection(t *testing.T) {
 	}
 
 	var physical model.DiskPhysicalMetric
-	if err := st.db.WithContext(ctx).First(&physical, "server_id = ? AND name = ?", srv.ID, "sda").Error; err != nil {
+	if err := st.db.WithContext(ctx).First(&physical, "server_id = ? AND name = ?", srv.ID, diskName).Error; err != nil {
 		t.Fatalf("First(DiskPhysicalMetric) error = %v", err)
 	}
-	if physical.TempC != diskTemp {
-		t.Fatalf("disk temp = %.1f, want %.1f", physical.TempC, diskTemp)
+	if physical.Ref != diskRef || physical.Path != diskPath || physical.TempC != diskTemp {
+		t.Fatalf("physical disk = %+v, want expanded identity and temp %.1f", physical, diskTemp)
+	}
+	var currentDisk model.ServerCurrentDiskMetric
+	if err := st.db.WithContext(ctx).First(&currentDisk, "server_id = ? AND name = ?", srv.ID, diskName).Error; err != nil {
+		t.Fatalf("First(ServerCurrentDiskMetric) error = %v", err)
+	}
+	if currentDisk.Ref != diskRef || currentDisk.Path != diskPath {
+		t.Fatalf("current disk identity = ref %q path %q", currentDisk.Ref, currentDisk.Path)
+	}
+	var currentUsage model.ServerCurrentDiskUsageMetric
+	if err := st.db.WithContext(ctx).First(&currentUsage, "server_id = ? AND name = ?", srv.ID, diskName).Error; err != nil {
+		t.Fatalf("First(ServerCurrentDiskUsageMetric) error = %v", err)
+	}
+	if currentUsage.Ref != diskRef || currentUsage.Path != diskPath || currentUsage.Mountpoint != mountpoint {
+		t.Fatalf("current disk usage identity = ref %q path %q mountpoint %q", currentUsage.Ref, currentUsage.Path, currentUsage.Mountpoint)
 	}
 	var physicalCount int64
 	if err := st.db.WithContext(ctx).Model(&model.DiskPhysicalMetric{}).Where("server_id = ?", srv.ID).Count(&physicalCount).Error; err != nil {

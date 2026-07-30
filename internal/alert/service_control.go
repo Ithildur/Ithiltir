@@ -3,12 +3,16 @@ package alert
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"time"
 
 	"dash/internal/model"
 	alertstore "dash/internal/store/alert"
 	kitlog "github.com/Ithildur/EiluneKit/logging"
 )
+
+var errInvalidControlTask = errors.New("invalid alert control task")
 
 func (s *Service) runControlLoop(ctx context.Context) error {
 	ticker := time.NewTicker(controlPollInterval)
@@ -18,8 +22,8 @@ func (s *Service) runControlLoop(ctx context.Context) error {
 		processed, err := s.processControlTasks(ctx)
 		if err != nil {
 			s.logger.Warn("process control task failed", err)
-		}
-		if processed {
+			ticker.Reset(controlPollInterval)
+		} else if processed {
 			continue
 		}
 		select {
@@ -34,7 +38,7 @@ func (s *Service) processControlTasks(ctx context.Context) (bool, error) {
 	processed := false
 	for {
 		now := time.Now().UTC()
-		task, err := s.store.LeaseNextControlTask(ctx, now, now.Add(controlTaskLeaseTTL))
+		task, err := s.store.TakeNextControlTask(ctx, now)
 		if err != nil {
 			return processed, err
 		}
@@ -44,23 +48,30 @@ func (s *Service) processControlTasks(ctx context.Context) (bool, error) {
 		processed = true
 
 		if err := s.controlTask(ctx, task); err != nil {
+			if errors.Is(err, errInvalidControlTask) {
+				if failErr := s.store.FailControlTask(ctx, task.ID, err.Error()); failErr != nil {
+					return processed, fmt.Errorf("fail invalid control task %d: %w", task.ID, failErr)
+				}
+				s.logger.Warn("control task permanently failed", err, kitlog.Int64("task_id", task.ID), kitlog.String("task_type", task.TaskType))
+				continue
+			}
 			next := now.Add(controlTaskRetryDelay(task.AttemptCount))
 			retryErr := s.store.RetryControlTask(ctx, task.ID, next, err.Error())
 			if retryErr != nil {
-				s.logger.Warn("retry control task failed", retryErr, kitlog.Int64("task_id", task.ID))
+				return processed, fmt.Errorf("retry control task %d: %w", task.ID, retryErr)
 			}
 			s.logger.Warn("control task failed", err, kitlog.Int64("task_id", task.ID), kitlog.String("task_type", task.TaskType))
 			continue
 		}
 		if err := s.store.CompleteControlTask(ctx, task.ID); err != nil {
-			s.logger.Warn("complete control task failed", err, kitlog.Int64("task_id", task.ID))
+			return processed, fmt.Errorf("complete control task %d: %w", task.ID, err)
 		}
 	}
 }
 
 func (s *Service) controlTask(ctx context.Context, task *model.AlertControlTask) error {
 	if task == nil {
-		return nil
+		return fmt.Errorf("%w: nil task", errInvalidControlTask)
 	}
 	compiled, err := s.cache.Refresh(ctx, true)
 	if err != nil {
@@ -72,8 +83,10 @@ func (s *Service) controlTask(ctx context.Context, task *model.AlertControlTask)
 	case alertstore.ControlTaskRuleChange:
 		var payload alertstore.RuleChangePayload
 		if err := json.Unmarshal(task.Payload, &payload); err != nil {
-			s.logger.Warn("invalid rule_change payload", err, kitlog.Int64("task_id", task.ID))
-			return nil
+			return fmt.Errorf("%w: decode rule_change payload: %w", errInvalidControlTask, err)
+		}
+		if payload.RuleID == 0 {
+			return fmt.Errorf("%w: rule_change rule_id is required", errInvalidControlTask)
 		}
 		if payload.OldGeneration > 0 && payload.CloseReason != "" {
 			closed, err := s.closeGeneration(ctx, payload.RuleID, payload.OldGeneration, payload.CloseReason)
@@ -87,9 +100,7 @@ func (s *Service) controlTask(ctx context.Context, task *model.AlertControlTask)
 			return err
 		}
 		mergeServerIDSet(affected, closed)
-		if err := s.markServersDirty(ctx, affected); err != nil {
-			return err
-		}
+		s.markServersDirty(affected)
 		return s.enqueueTargets(ctx, false)
 	case alertstore.ControlTaskFullReconcile:
 		closed, err := s.closeInvalid(ctx, compiled.Invalid)
@@ -105,13 +116,10 @@ func (s *Service) controlTask(ctx context.Context, task *model.AlertControlTask)
 		if err := s.restoreOpenRuntime(ctx); err != nil {
 			return err
 		}
-		if err := s.markServersDirty(ctx, affected); err != nil {
-			return err
-		}
+		s.markServersDirty(affected)
 		return s.enqueueTargets(ctx, true)
 	default:
-		s.logger.Warn("unknown control task type", nil, kitlog.String("task_type", task.TaskType))
-		return nil
+		return fmt.Errorf("%w: unknown task type %q", errInvalidControlTask, task.TaskType)
 	}
 }
 
@@ -205,7 +213,7 @@ func (s *Service) dropRuntimeKeys(ctx context.Context, drops map[int64]map[strin
 		if serverID <= 0 || len(keys) == 0 {
 			continue
 		}
-		current, err := loadRuntimeState(ctx, s.store, serverID)
+		current, err := s.loadRuntimeState(ctx, serverID)
 		if err != nil {
 			return err
 		}
@@ -231,11 +239,11 @@ func (s *Service) dropRuntimeKeys(ctx context.Context, drops map[int64]map[strin
 func (s *Service) enqueueTargets(ctx context.Context, includeOpenEvents bool) error {
 	targets := make(map[int64]struct{})
 
-	frontIDs, err := s.front.ListFrontSnapshotIDs(ctx)
+	currentIDs, err := s.front.ListCurrentNodeIDs(ctx)
 	if err != nil {
 		return err
 	}
-	for _, id := range frontIDs {
+	for _, id := range currentIDs {
 		targets[id] = struct{}{}
 	}
 
@@ -262,21 +270,13 @@ func (s *Service) enqueueTargets(ctx context.Context, includeOpenEvents bool) er
 	}
 
 	for serverID := range targets {
-		if err := s.store.MarkServerDirty(ctx, serverID); err != nil {
-			return err
-		}
+		s.store.MarkServerDirty(serverID)
 	}
 	return nil
 }
 
-func (s *Service) markServersDirty(ctx context.Context, ids map[int64]struct{}) error {
+func (s *Service) markServersDirty(ids map[int64]struct{}) {
 	for serverID := range ids {
-		if serverID <= 0 {
-			continue
-		}
-		if err := s.store.MarkServerDirty(ctx, serverID); err != nil {
-			return err
-		}
+		s.store.MarkServerDirty(serverID)
 	}
-	return nil
 }

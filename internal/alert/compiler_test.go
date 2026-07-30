@@ -1,6 +1,7 @@
 package alert
 
 import (
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -9,9 +10,18 @@ import (
 	"dash/internal/model"
 )
 
+func mustCompileRules(t testing.TB, items []model.AlertRule, refreshedAt time.Time) *CompiledRules {
+	t.Helper()
+	compiled, err := CompileRules(items, refreshedAt)
+	if err != nil {
+		t.Fatalf("CompileRules() error = %v", err)
+	}
+	return compiled
+}
+
 func TestCompileRulesRejectsInvalidCorePlusMetric(t *testing.T) {
 	now := time.Date(2026, 4, 5, 12, 0, 0, 0, time.UTC)
-	compiled := CompileRules([]model.AlertRule{{
+	compiled := mustCompileRules(t, []model.AlertRule{{
 		ID:            7,
 		Name:          "invalid",
 		Enabled:       true,
@@ -34,7 +44,7 @@ func TestCompileRulesRejectsInvalidCorePlusMetric(t *testing.T) {
 
 func TestCompiledRulesForMountsUsesBuiltinDefault(t *testing.T) {
 	now := time.Date(2026, 4, 5, 12, 0, 0, 0, time.UTC)
-	compiled := CompileRules([]model.AlertRule{{
+	compiled := mustCompileRules(t, []model.AlertRule{{
 		ID:            9,
 		Name:          "cpu_high",
 		Enabled:       true,
@@ -59,6 +69,17 @@ func TestCompiledRulesForMountsUsesBuiltinDefault(t *testing.T) {
 		!hasRule(mounted.Rules, alertspec.BuiltinSmartCriticalID) ||
 		!hasRule(mounted.Rules, 9) {
 		t.Fatalf("expected default builtin and explicit user rule to be mounted")
+	}
+	raw, err := compiled.ByStateKey[ruleStateKey(9, 1)].snapshotJSON()
+	if err != nil {
+		t.Fatalf("snapshotJSON() error = %v", err)
+	}
+	var snapshot RuleSnapshot
+	if err := json.Unmarshal(raw, &snapshot); err != nil {
+		t.Fatalf("decode compiled rule snapshot: %v", err)
+	}
+	if snapshot.RuleID != 9 || snapshot.Generation != 1 || snapshot.Name != "cpu_high" {
+		t.Fatalf("compiled rule snapshot = %+v", snapshot)
 	}
 }
 

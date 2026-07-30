@@ -48,15 +48,15 @@ type CPUTimes struct {
 
 // MemoryMetrics describes memory and swap usage.
 type MemoryMetrics struct {
-	Total         uint64  `json:"total,omitempty"`
-	Used          uint64  `json:"used"`
-	Available     uint64  `json:"available"`
-	Buffers       uint64  `json:"buffers"`
-	Cached        uint64  `json:"cached"`
+	Total         int64   `json:"total,omitempty"`
+	Used          int64   `json:"used"`
+	Available     int64   `json:"available"`
+	Buffers       int64   `json:"buffers"`
+	Cached        int64   `json:"cached"`
 	UsedRatio     float64 `json:"used_ratio"`
-	SwapTotal     uint64  `json:"swap_total,omitempty"`
-	SwapUsed      uint64  `json:"swap_used"`
-	SwapFree      uint64  `json:"swap_free"`
+	SwapTotal     int64   `json:"swap_total,omitempty"`
+	SwapUsed      int64   `json:"swap_used"`
+	SwapFree      int64   `json:"swap_free"`
 	SwapUsedRatio float64 `json:"swap_used_ratio"`
 }
 
@@ -108,8 +108,8 @@ type DiskPhysicalMetrics struct {
 	Name                 string  `json:"name"`
 	DevicePath           string  `json:"device_path,omitempty"`
 	Ref                  string  `json:"ref,omitempty"`
-	ReadBytes            uint64  `json:"read_bytes"`
-	WriteBytes           uint64  `json:"write_bytes"`
+	ReadBytes            int64   `json:"read_bytes"`
+	WriteBytes           int64   `json:"write_bytes"`
 	ReadRateBytesPerSec  float64 `json:"read_rate_bytes_per_sec"`
 	WriteRateBytesPerSec float64 `json:"write_rate_bytes_per_sec"`
 	IOPS                 float64 `json:"iops"`
@@ -127,9 +127,9 @@ type DiskLogicalMetrics struct {
 	Name        string                           `json:"name"`
 	DevicePath  string                           `json:"device_path,omitempty"`
 	Ref         string                           `json:"ref,omitempty"`
-	Total       uint64                           `json:"total,omitempty"`
-	Used        uint64                           `json:"used"`
-	Free        uint64                           `json:"free"`
+	Total       int64                            `json:"total,omitempty"`
+	Used        int64                            `json:"used"`
+	Free        int64                            `json:"free"`
 	UsedRatio   float64                          `json:"used_ratio"`
 	Health      string                           `json:"health,omitempty"`
 	Level       string                           `json:"level,omitempty"`
@@ -143,14 +143,14 @@ type DiskFilesystemMetrics struct {
 	Path            string  `json:"path"`
 	Device          string  `json:"device,omitempty"`
 	Mountpoint      string  `json:"mountpoint,omitempty"`
-	Total           uint64  `json:"total,omitempty"`
-	Used            uint64  `json:"used"`
-	Free            uint64  `json:"free"`
+	Total           int64   `json:"total,omitempty"`
+	Used            int64   `json:"used"`
+	Free            int64   `json:"free"`
 	UsedRatio       float64 `json:"used_ratio"`
 	FSType          string  `json:"fs_type,omitempty"`
-	InodesTotal     uint64  `json:"inodes_total,omitempty"`
-	InodesUsed      uint64  `json:"inodes_used"`
-	InodesFree      uint64  `json:"inodes_free"`
+	InodesTotal     int64   `json:"inodes_total,omitempty"`
+	InodesUsed      int64   `json:"inodes_used"`
+	InodesFree      int64   `json:"inodes_free"`
 	InodesUsedRatio float64 `json:"inodes_used_ratio"`
 }
 
@@ -161,8 +161,8 @@ type DiskBaseIOMetrics struct {
 	DevicePath           string  `json:"device_path,omitempty"`
 	Ref                  string  `json:"ref,omitempty"`
 	Role                 string  `json:"role,omitempty"`
-	ReadBytes            uint64  `json:"read_bytes,omitempty"`
-	WriteBytes           uint64  `json:"write_bytes,omitempty"`
+	ReadBytes            int64   `json:"read_bytes,omitempty"`
+	WriteBytes           int64   `json:"write_bytes,omitempty"`
 	ReadRateBytesPerSec  float64 `json:"read_rate_bytes_per_sec"`
 	WriteRateBytesPerSec float64 `json:"write_rate_bytes_per_sec"`
 	ReadIOPS             float64 `json:"read_iops"`
@@ -176,44 +176,44 @@ type DiskBaseIOMetrics struct {
 
 type DiskMountpointMetrics struct {
 	FSType          string  `json:"fs_type,omitempty"`
-	InodesTotal     uint64  `json:"inodes_total,omitempty"`
-	InodesUsed      uint64  `json:"inodes_used,omitempty"`
-	InodesFree      uint64  `json:"inodes_free,omitempty"`
+	InodesTotal     int64   `json:"inodes_total,omitempty"`
+	InodesUsed      int64   `json:"inodes_used,omitempty"`
+	InodesFree      int64   `json:"inodes_free,omitempty"`
 	InodesUsedRatio float64 `json:"inodes_used_ratio,omitempty"`
 }
 
 // NetIOMetrics is per-interface IO.
 type NetIOMetrics struct {
 	Name                  string  `json:"name"`
-	BytesRecv             uint64  `json:"bytes_recv"`
-	BytesSent             uint64  `json:"bytes_sent"`
+	BytesRecv             int64   `json:"bytes_recv"`
+	BytesSent             int64   `json:"bytes_sent"`
 	RecvRateBytesPerSec   float64 `json:"recv_rate_bytes_per_sec"`
 	SentRateBytesPerSec   float64 `json:"sent_rate_bytes_per_sec"`
-	PacketsRecv           uint64  `json:"packets_recv"`
-	PacketsSent           uint64  `json:"packets_sent"`
+	PacketsRecv           int64   `json:"packets_recv"`
+	PacketsSent           int64   `json:"packets_sent"`
 	RecvRatePacketsPerSec float64 `json:"recv_rate_packets_per_sec"`
 	SentRatePacketsPerSec float64 `json:"sent_rate_packets_per_sec"`
-	ErrIn                 uint64  `json:"err_in"`
-	ErrOut                uint64  `json:"err_out"`
-	DropIn                uint64  `json:"drop_in"`
-	DropOut               uint64  `json:"drop_out"`
+	ErrIn                 int64   `json:"err_in"`
+	ErrOut                int64   `json:"err_out"`
+	DropIn                int64   `json:"drop_in"`
+	DropOut               int64   `json:"drop_out"`
 }
 
 // SystemMetrics is uptime status info.
 type SystemMetrics struct {
 	Alive         bool   `json:"alive"`
-	UptimeSeconds uint64 `json:"uptime_seconds"`
+	UptimeSeconds int64  `json:"uptime_seconds"`
 	Uptime        string `json:"uptime"`
 }
 
 type ProcessMetrics struct {
-	ProcessCount int `json:"process_count"`
+	ProcessCount int32 `json:"process_count"`
 }
 
 // ConnectionMetrics describes TCP/UDP counts.
 type ConnectionMetrics struct {
-	TCPCount int `json:"tcp_count"`
-	UDPCount int `json:"udp_count"`
+	TCPCount int32 `json:"tcp_count"`
+	UDPCount int32 `json:"udp_count"`
 }
 
 // RaidMetrics describes RAID status.
@@ -274,5 +274,5 @@ type PressureStats struct {
 	Avg10  float64 `json:"avg10"`
 	Avg60  float64 `json:"avg60"`
 	Avg300 float64 `json:"avg300"`
-	Total  uint64  `json:"total"`
+	Total  int64   `json:"total"`
 }

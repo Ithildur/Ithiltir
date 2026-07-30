@@ -14,21 +14,21 @@ import (
 	metricspkg "dash/internal/metrics"
 	"dash/internal/store/frontcache"
 	"dash/internal/store/metricdata"
+	nodestore "dash/internal/store/node"
 	"dash/internal/transport/http/httperr"
-	"dash/internal/transport/http/request"
-	authjwt "github.com/Ithildur/EiluneKit/auth/jwt"
 	"github.com/Ithildur/EiluneKit/http/response"
 	"github.com/Ithildur/EiluneKit/http/routes"
 )
 
 type handler struct {
-	metric *metricdata.Store
-	front  *frontcache.Store
-	auth   *authjwt.Manager
+	metric         *metricdata.Store
+	front          *frontcache.Store
+	node           *nodestore.Store
+	optionalBearer routes.Middleware
 }
 
-func newHandler(metric *metricdata.Store, front *frontcache.Store, auth *authjwt.Manager) *handler {
-	return &handler{metric: metric, front: front, auth: auth}
+func newHandler(metric *metricdata.Store, front *frontcache.Store, node *nodestore.Store, optionalBearer routes.Middleware) *handler {
+	return &handler{metric: metric, front: front, node: node, optionalBearer: optionalBearer}
 }
 
 type historyInput struct {
@@ -68,6 +68,7 @@ func (h *handler) historyRoute(r *routes.Blueprint) {
 		routes.Func(h.historyHandler),
 		routes.Tags("metrics"),
 		routes.Auth(routes.AuthOptional),
+		routes.Use(h.optionalBearer),
 	)
 }
 
@@ -79,6 +80,10 @@ func (h *handler) historyHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	allowed, err := h.canReadHistory(r.Context(), r, in.ServerID)
 	if err != nil {
+		if errors.Is(err, metricdata.ErrServerNotFound) {
+			httperr.TryWrite(w, httperr.NotFound(err))
+			return
+		}
 		httperr.TryWrite(w, httperr.ServiceUnavailable(err))
 		return
 	}
@@ -128,13 +133,27 @@ var errHistoryGuestForbidden = errors.New("history guest access denied")
 
 func (h *handler) canReadHistory(ctx context.Context, r *http.Request, serverID int64) (bool, error) {
 	if h.isAuthorized(r) {
+		if h.node == nil {
+			return false, errors.New("node store is unavailable")
+		}
+		exists, err := infra.WithPGReadTimeout(ctx, func(c context.Context) (bool, error) {
+			return h.node.NodeExists(c, serverID)
+		})
+		if err != nil {
+			return false, err
+		}
+		if !exists {
+			return false, metricdata.ErrServerNotFound
+		}
 		return true, nil
 	}
 	if h.metric == nil {
 		return false, nil
 	}
 
-	mode, err := h.metric.GetHistoryGuestAccessMode(ctx)
+	mode, err := infra.WithPGReadTimeout(ctx, func(c context.Context) (metricdata.HistoryGuestAccessMode, error) {
+		return h.metric.GetHistoryGuestAccessMode(c)
+	})
 	if err != nil {
 		return false, err
 	}
@@ -145,7 +164,7 @@ func (h *handler) canReadHistory(ctx context.Context, r *http.Request, serverID 
 }
 
 func (h *handler) isAuthorized(r *http.Request) bool {
-	return request.HasValidBearer(r, h.auth)
+	return r != nil && routes.Authenticated(r.Context())
 }
 
 func (h *handler) isGuestVisible(ctx context.Context, serverID int64) (bool, error) {

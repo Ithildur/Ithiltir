@@ -33,8 +33,8 @@ func (h *handler) deleteHandler(w http.ResponseWriter, r *http.Request, rawID st
 	if _, err := infra.WithPGWriteTimeout(r.Context(), func(c context.Context) (struct{}, error) {
 		return struct{}{}, h.store.DeleteNode(c, id)
 	}); err != nil {
-		if errors.Is(err, nodestore.ErrServerMetaCacheUpdate) || errors.Is(err, nodestore.ErrFrontCacheUpdate) {
-			infra.WithModule("admin.nodes").Error("cache sync failed after delete", err,
+		if errors.Is(err, nodestore.ErrFrontCacheUpdate) {
+			infra.WithModule("admin.nodes").Error("front cache sync failed after delete", err,
 				slog.Int64("node_id", id),
 			)
 			httperr.Write(w, http.StatusServiceUnavailable, "redis_cache_error", "sync failed")

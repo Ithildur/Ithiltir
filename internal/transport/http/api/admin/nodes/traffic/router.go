@@ -29,6 +29,5 @@ func rebuildRoute(r *routes.Blueprint, h *handler) {
 }
 
 func (h *handler) rebuildStatusHandler(w http.ResponseWriter, _ *http.Request) {
-	w.Header().Set("Cache-Control", "no-store")
 	response.WriteJSON(w, http.StatusOK, h.runner.Current())
 }

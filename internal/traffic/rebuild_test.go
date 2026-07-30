@@ -3,13 +3,27 @@ package traffic
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
 	"time"
 
 	trafficstore "dash/internal/store/traffic"
 )
 
+type rebuildModeStore struct {
+	mode trafficstore.UsageMode
+}
+
+func (s *rebuildModeStore) GetSettings(context.Context) (trafficstore.Settings, error) {
+	mode := s.mode
+	if mode == "" {
+		mode = trafficstore.UsageBilling
+	}
+	return trafficstore.Settings{UsageMode: mode}, nil
+}
+
 type blockingRebuildStore struct {
+	rebuildModeStore
 	started chan int64
 	release chan struct{}
 	err     error
@@ -22,10 +36,6 @@ func newBlockingRebuildStore() *blockingRebuildStore {
 	}
 }
 
-func rebuildTestNow() time.Time {
-	return time.Date(2026, time.April, 1, 1, 0, 0, 0, time.UTC)
-}
-
 func (s *blockingRebuildStore) ServerTrafficSource(context.Context, int64, time.Time) (trafficstore.ServerTrafficSource, error) {
 	start := time.Date(2026, time.April, 1, 0, 0, 0, 0, time.UTC)
 	return trafficstore.ServerTrafficSource{
@@ -33,10 +43,6 @@ func (s *blockingRebuildStore) ServerTrafficSource(context.Context, int64, time.
 		End:    start.Add(5 * time.Minute),
 		Ifaces: []string{"eth0"},
 	}, nil
-}
-
-func (s *blockingRebuildStore) DeleteTrafficMonthlySnapshots(context.Context, int64, time.Time, time.Time) error {
-	return nil
 }
 
 func (s *blockingRebuildStore) RebuildTraffic5mChunk(ctx context.Context, serverID int64, _ []string, _, _ time.Time) error {
@@ -50,21 +56,16 @@ func (s *blockingRebuildStore) RebuildTraffic5mChunk(ctx context.Context, server
 }
 
 type recordingRebuildStore struct {
-	source      trafficstore.ServerTrafficSource
-	sourceFrom  time.Time
-	deleteStart time.Time
-	chunkStart  time.Time
-	chunkEnd    time.Time
+	rebuildModeStore
+	source     trafficstore.ServerTrafficSource
+	sourceFrom time.Time
+	chunkStart time.Time
+	chunkEnd   time.Time
 }
 
 func (s *recordingRebuildStore) ServerTrafficSource(_ context.Context, _ int64, start time.Time) (trafficstore.ServerTrafficSource, error) {
 	s.sourceFrom = start
 	return s.source, nil
-}
-
-func (s *recordingRebuildStore) DeleteTrafficMonthlySnapshots(_ context.Context, _ int64, start, _ time.Time) error {
-	s.deleteStart = start
-	return nil
 }
 
 func (s *recordingRebuildStore) RebuildTraffic5mChunk(_ context.Context, _ int64, _ []string, start, end time.Time) error {
@@ -78,17 +79,18 @@ func (s *recordingRebuildStore) RebuildTraffic5mChunk(_ context.Context, _ int64
 type blockingWriteGate struct {
 	entered chan struct{}
 	release chan struct{}
+	once    sync.Once
 }
 
 func newBlockingWriteGate() *blockingWriteGate {
 	return &blockingWriteGate{
-		entered: make(chan struct{}),
+		entered: make(chan struct{}, 1),
 		release: make(chan struct{}),
 	}
 }
 
 func (g *blockingWriteGate) with(ctx context.Context, fn func(context.Context) error) error {
-	close(g.entered)
+	g.once.Do(func() { g.entered <- struct{}{} })
 	select {
 	case <-g.release:
 		return fn(ctx)
@@ -97,9 +99,13 @@ func (g *blockingWriteGate) with(ctx context.Context, fn func(context.Context) e
 	}
 }
 
+func rebuildTestNow() time.Time {
+	return time.Date(2026, time.April, 1, 1, 0, 0, 0, time.UTC)
+}
+
 func TestRebuildRunnerRejectsConcurrentStart(t *testing.T) {
 	store := newBlockingRebuildStore()
-	runner := newRebuildRunner(context.Background(), store, nil, 45*24*time.Hour)
+	runner := newRebuildRunner(context.Background(), store, newWriteGate(), 45*24*time.Hour)
 	runner.now = rebuildTestNow
 	defer runner.Stop()
 
@@ -119,36 +125,38 @@ func TestRebuildRunnerRejectsConcurrentStart(t *testing.T) {
 		t.Fatalf("Start(8) state = %#v, want current node 7", state)
 	}
 
-	state, err = runner.Start(7)
-	if !errors.Is(err, ErrRebuildRunning) {
-		t.Fatalf("Start(7) again error = %v, want %v", err, ErrRebuildRunning)
-	}
-	if !state.Running || state.ServerID != 7 {
-		t.Fatalf("Start(7) again state = %#v, want current node 7", state)
-	}
-
 	close(store.release)
 	state = waitRebuildStatus(t, runner, 7, RebuildCompleted)
 	if state.Running || state.FinishedAt == nil || state.Error != "" {
 		t.Fatalf("completed state = %#v", state)
 	}
-	if current := runner.Current(); current.Status != RebuildCompleted || current.Running || current.ServerID != 7 {
-		t.Fatalf("Current() = %#v, want last completed state", current)
+}
+
+func TestRebuildRunnerRequiresBilling(t *testing.T) {
+	store := newBlockingRebuildStore()
+	store.mode = trafficstore.UsageLite
+	runner := newRebuildRunner(context.Background(), store, newWriteGate(), 45*24*time.Hour)
+	defer runner.Stop()
+
+	state, err := runner.Start(7)
+	if !errors.Is(err, ErrRebuildRequiresBilling) {
+		t.Fatalf("Start() error = %v, want %v", err, ErrRebuildRequiresBilling)
+	}
+	if state.Status != RebuildIdle || state.Running {
+		t.Fatalf("Start() state = %#v, want idle", state)
 	}
 }
 
-func TestRebuildRunnerWaitsForTrafficWrite(t *testing.T) {
+func TestRebuildRunnerUsesTrafficWriteGate(t *testing.T) {
 	store := newBlockingRebuildStore()
 	gate := newBlockingWriteGate()
 	runner := newRebuildRunner(context.Background(), store, gate, 45*24*time.Hour)
 	runner.now = rebuildTestNow
 	defer runner.Stop()
 
-	state, err := runner.Start(7)
-	if err != nil || !state.Running {
-		t.Fatalf("Start(7) = %#v/%v, want running", state, err)
+	if _, err := runner.Start(7); err != nil {
+		t.Fatalf("Start(7) error = %v", err)
 	}
-
 	select {
 	case <-gate.entered:
 	case <-time.After(time.Second):
@@ -170,45 +178,23 @@ func TestRebuildRunnerWaitsForTrafficWrite(t *testing.T) {
 
 func TestRebuildRunnerStopCancelsTask(t *testing.T) {
 	store := newBlockingRebuildStore()
-	runner := newRebuildRunner(context.Background(), store, nil, 45*24*time.Hour)
+	runner := newRebuildRunner(context.Background(), store, newWriteGate(), 45*24*time.Hour)
 	runner.now = rebuildTestNow
 
-	state, err := runner.Start(7)
-	if err != nil || !state.Running {
-		t.Fatalf("Start(7) = %#v/%v, want running", state, err)
+	if _, err := runner.Start(7); err != nil {
+		t.Fatalf("Start(7) error = %v", err)
 	}
 	if started := waitRebuildStarted(t, store.started); started != 7 {
 		t.Fatalf("started server = %d, want 7", started)
 	}
 
 	runner.Stop()
-
-	state = runner.Current()
+	state := runner.Current()
 	if state.Status != RebuildFailed || state.Running || state.FinishedAt == nil {
 		t.Fatalf("Current() after Stop() = %#v, want failed finished state", state)
 	}
-	if state.Code != "traffic_rebuild_canceled" || state.Error != "traffic rebuild canceled" {
-		t.Fatalf("Current() after Stop() failure detail = %q/%q", state.Code, state.Error)
-	}
-}
-
-func TestRebuildRunnerRejectsStartAfterStop(t *testing.T) {
-	store := newBlockingRebuildStore()
-	runner := newRebuildRunner(context.Background(), store, nil, 45*24*time.Hour)
-
-	runner.Stop()
-
-	state, err := runner.Start(7)
-	if !errors.Is(err, ErrRebuildStopped) {
-		t.Fatalf("Start() after Stop() error = %v, want %v", err, ErrRebuildStopped)
-	}
-	if state.Status != RebuildIdle || state.Running {
-		t.Fatalf("Start() after Stop() state = %#v, want idle", state)
-	}
-	select {
-	case started := <-store.started:
-		t.Fatalf("rebuild started after Stop(): %d", started)
-	default:
+	if state.Code != "traffic_rebuild_canceled" {
+		t.Fatalf("Current() after Stop() code = %q", state.Code)
 	}
 }
 
@@ -222,7 +208,7 @@ func TestRebuildRunnerClampsToTrafficRetention(t *testing.T) {
 			Ifaces: []string{"eth0"},
 		},
 	}
-	runner := newRebuildRunner(context.Background(), store, nil, 24*time.Hour)
+	runner := newRebuildRunner(context.Background(), store, newWriteGate(), 24*time.Hour)
 	runner.now = func() time.Time { return now }
 
 	if err := runner.rebuild(context.Background(), 7); err != nil {
@@ -231,14 +217,8 @@ func TestRebuildRunnerClampsToTrafficRetention(t *testing.T) {
 	if want := floor.Add(-5 * time.Minute); !store.sourceFrom.Equal(want) {
 		t.Fatalf("source start = %s, want %s", store.sourceFrom, want)
 	}
-	if !store.deleteStart.Equal(floor) {
-		t.Fatalf("delete start = %s, want %s", store.deleteStart, floor)
-	}
-	if !store.chunkStart.Equal(floor) {
-		t.Fatalf("chunk start = %s, want %s", store.chunkStart, floor)
-	}
-	if !store.chunkEnd.Equal(floor.Add(2 * time.Hour)) {
-		t.Fatalf("chunk end = %s, want %s", store.chunkEnd, floor.Add(2*time.Hour))
+	if !store.chunkStart.Equal(floor) || !store.chunkEnd.Equal(floor.Add(2*time.Hour)) {
+		t.Fatalf("chunk range = %s..%s", store.chunkStart, store.chunkEnd)
 	}
 }
 

@@ -4,13 +4,12 @@ import (
 	"time"
 
 	"dash/internal/store"
-	authjwt "github.com/Ithildur/EiluneKit/auth/jwt"
 	"github.com/Ithildur/EiluneKit/http/routes"
 )
 
 // Router returns front routes.
-func Router(st *store.Stores, offlineThreshold time.Duration, auth *authjwt.Manager) *routes.Blueprint {
-	h := newHandler(st.Front, st.Node, st.System, offlineThreshold, auth)
+func Router(st *store.Stores, offlineThreshold time.Duration, optionalBearer routes.Middleware) *routes.Blueprint {
+	h := newHandler(st.Front, st.Node, st.System, offlineThreshold, optionalBearer)
 	r := routes.NewBlueprint()
 	h.brandRoute(r)
 	h.metricsRoute(r)

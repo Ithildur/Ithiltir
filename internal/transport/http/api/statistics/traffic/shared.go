@@ -8,15 +8,19 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"dash/internal/config"
 	"dash/internal/infra"
 	"dash/internal/store/frontcache"
 	trafficstore "dash/internal/store/traffic"
-	"dash/internal/transport/http/request"
+	"dash/internal/transport/http/httperr"
+	"github.com/Ithildur/EiluneKit/http/routes"
 )
 
 var errTrafficGuestForbidden = errors.New("traffic guest access denied")
+var errTrafficServerNotFound = errors.New("traffic server not found")
 
 type trafficSettingsView struct {
 	GuestAccessMode   trafficstore.GuestAccessMode  `json:"guest_access_mode"`
@@ -52,14 +56,26 @@ type trafficQueryInput struct {
 }
 
 func (h *handler) isAuthorized(r *http.Request) bool {
-	return request.HasValidBearer(r, h.auth)
+	return r != nil && routes.Authenticated(r.Context())
 }
 
 func (h *handler) canReadTraffic(ctx context.Context, r *http.Request, serverID int64) (bool, error) {
 	if h.isAuthorized(r) {
+		if h.node == nil {
+			return false, errors.New("node store is unavailable")
+		}
+		exists, err := infra.WithPGReadTimeout(ctx, func(c context.Context) (bool, error) {
+			return h.node.NodeExists(c, serverID)
+		})
+		if err != nil {
+			return false, err
+		}
+		if !exists {
+			return false, errTrafficServerNotFound
+		}
 		return true, nil
 	}
-	settings, err := h.traffic.GetSettings(ctx)
+	settings, err := loadStoredSettings(ctx, h.traffic)
 	if err != nil {
 		return false, err
 	}
@@ -67,6 +83,14 @@ func (h *handler) canReadTraffic(ctx context.Context, r *http.Request, serverID 
 		return false, nil
 	}
 	return h.isGuestVisible(ctx, serverID)
+}
+
+func writeTrafficAccessError(w http.ResponseWriter, err error) {
+	if errors.Is(err, errTrafficServerNotFound) {
+		httperr.TryWrite(w, httperr.NotFound(err))
+		return
+	}
+	httperr.TryWrite(w, httperr.ServiceUnavailable(err))
 }
 
 func (h *handler) isGuestVisible(ctx context.Context, serverID int64) (bool, error) {
@@ -83,9 +107,9 @@ func loadSettings(ctx context.Context, st *trafficstore.Store, loc *time.Locatio
 	return infra.WithPGReadTimeout(ctx, func(c context.Context) (trafficstore.Settings, error) {
 		settings, err := st.GetSettings(c)
 		if err != nil {
-			return settings, err
+			return trafficstore.Settings{}, err
 		}
-		return trafficstore.SettingsWithTimezone(settings, loc), nil
+		return trafficstore.SettingsWithTimezone(settings, loc)
 	})
 }
 
@@ -101,29 +125,28 @@ func loadP95Enabled(ctx context.Context, st *trafficstore.Store, serverID int64)
 	})
 }
 
-func loadEffectiveSettings(ctx context.Context, st *trafficstore.Store, serverID int64, defaults trafficstore.Settings) (trafficstore.Settings, error) {
+func loadEffectiveSettings(ctx context.Context, st *trafficstore.Store, serverID int64, defaults trafficstore.Settings, loc *time.Location) (trafficstore.Settings, error) {
 	return infra.WithPGReadTimeout(ctx, func(c context.Context) (trafficstore.Settings, error) {
 		return st.EffectiveServerSettings(c, serverID, defaults)
 	})
 }
 
-func saveSettings(ctx context.Context, st *trafficstore.Store, settings trafficstore.Settings) error {
-	_, err := infra.WithPGWriteTimeout(ctx, func(c context.Context) (struct{}, error) {
-		return struct{}{}, st.SetSettings(c, settings)
+func patchSettings(ctx context.Context, st *trafficstore.Store, patch trafficstore.SettingsPatch) error {
+	_, err := infra.WithPGWriteTimeout(ctx, func(c context.Context) (trafficstore.Settings, error) {
+		return st.PatchSettingsAt(c, patch, time.Now())
 	})
 	return err
 }
 
 func settingsViewFrom(settings trafficstore.Settings) trafficSettingsView {
-	normalized, _ := trafficstore.NormalizeSettings(settings)
 	return trafficSettingsView{
-		GuestAccessMode:   normalized.GuestAccessMode,
-		UsageMode:         normalized.UsageMode,
-		CycleMode:         normalized.CycleMode,
-		BillingStartDay:   normalized.BillingStartDay,
-		BillingAnchorDate: normalized.BillingAnchorDate,
-		BillingTimezone:   normalized.BillingTimezone,
-		DirectionMode:     normalized.DirectionMode,
+		GuestAccessMode:   settings.GuestAccessMode,
+		UsageMode:         settings.UsageMode,
+		CycleMode:         settings.CycleMode,
+		BillingStartDay:   settings.BillingStartDay,
+		BillingAnchorDate: settings.BillingAnchorDate,
+		BillingTimezone:   settings.BillingTimezone,
+		DirectionMode:     settings.DirectionMode,
 	}
 }
 
@@ -137,30 +160,19 @@ func (in trafficSettingsInput) hasFields() bool {
 		in.DirectionMode != nil
 }
 
-func (in trafficSettingsInput) apply(current trafficstore.Settings) (trafficstore.Settings, bool) {
-	next := current
-	if in.GuestAccessMode != nil {
-		next.GuestAccessMode = *in.GuestAccessMode
+func (in trafficSettingsInput) hasCycleFields() bool {
+	return in.CycleMode != nil ||
+		in.BillingStartDay != nil ||
+		in.BillingAnchorDate != nil ||
+		in.BillingTimezone != nil
+}
+
+func (in trafficSettingsInput) patch() trafficstore.SettingsPatch {
+	return trafficstore.SettingsPatch{
+		GuestAccessMode: in.GuestAccessMode,
+		UsageMode:       in.UsageMode,
+		DirectionMode:   in.DirectionMode,
 	}
-	if in.UsageMode != nil {
-		next.UsageMode = *in.UsageMode
-	}
-	if in.CycleMode != nil {
-		next.CycleMode = *in.CycleMode
-	}
-	if in.BillingStartDay != nil {
-		next.BillingStartDay = *in.BillingStartDay
-	}
-	if in.BillingAnchorDate != nil {
-		next.BillingAnchorDate = strings.TrimSpace(*in.BillingAnchorDate)
-	}
-	if in.BillingTimezone != nil {
-		next.BillingTimezone = strings.TrimSpace(*in.BillingTimezone)
-	}
-	if in.DirectionMode != nil {
-		next.DirectionMode = *in.DirectionMode
-	}
-	return trafficstore.NormalizeSettings(next)
 }
 
 func parseTrafficQuery(q url.Values, defaults trafficstore.Settings) (trafficQueryInput, error) {
@@ -176,7 +188,7 @@ func parseTrafficQuery(q url.Values, defaults trafficstore.Settings) (trafficQue
 			return trafficQueryInput{}, errors.New("invalid months")
 		}
 		if n > 24 {
-			n = 24
+			return trafficQueryInput{}, errors.New("months must be between 1 and 24")
 		}
 		months = n
 	}
@@ -195,6 +207,7 @@ func parseTrafficQuery(q url.Values, defaults trafficstore.Settings) (trafficQue
 		BillingTimezone:   defaults.BillingTimezone,
 		DirectionMode:     defaults.DirectionMode,
 		Months:            months,
+		Period:            trafficstore.TrafficPeriodCurrent,
 	}, nil
 }
 
@@ -227,6 +240,14 @@ func parseIface(raw string) (string, error) {
 	if strings.EqualFold(iface, "all") {
 		return "", errors.New("invalid iface")
 	}
+	if utf8.RuneCountInString(iface) > 64 {
+		return "", errors.New("iface exceeds 64 characters")
+	}
+	for _, r := range iface {
+		if unicode.IsControl(r) {
+			return "", errors.New("iface contains control characters")
+		}
+	}
 	return iface, nil
 }
 
@@ -248,7 +269,11 @@ func formatTime(t time.Time) string {
 	return t.Format(time.RFC3339)
 }
 
-func queryFromInput(in trafficQueryInput, loc *time.Location) trafficstore.TrafficQuery {
+func queryFromInput(in trafficQueryInput, loc *time.Location) (trafficstore.TrafficQuery, error) {
+	cycleLoc, err := trafficstore.SettingsLocation(trafficstore.Settings{BillingTimezone: in.BillingTimezone}, loc)
+	if err != nil {
+		return trafficstore.TrafficQuery{}, err
+	}
 	return trafficstore.TrafficQuery{
 		ServerID:          in.ServerID,
 		Iface:             in.Iface,
@@ -257,8 +282,8 @@ func queryFromInput(in trafficQueryInput, loc *time.Location) trafficstore.Traff
 		BillingStartDay:   in.BillingStartDay,
 		BillingAnchorDate: in.BillingAnchorDate,
 		DirectionMode:     in.DirectionMode,
-		Location:          trafficstore.SettingsLocation(trafficstore.Settings{BillingTimezone: in.BillingTimezone}, loc),
+		Location:          cycleLoc,
 		Ref:               time.Now(),
 		Period:            in.Period,
-	}
+	}, nil
 }

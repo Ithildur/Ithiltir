@@ -4,9 +4,11 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"math"
+	"net/mail"
 	"strconv"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 
 	"dash/internal/model"
 )
@@ -69,6 +71,21 @@ type WebhookView struct {
 }
 
 type rawConfig map[string]json.RawMessage
+
+const (
+	maxNotifyConfigBytes  = 2 << 20
+	maxBotTokenBytes      = 256
+	maxChatIDBytes        = 256
+	maxAPIHashBytes       = 256
+	maxPhoneBytes         = 64
+	maxSessionBytes       = 1 << 20
+	maxUsernameBytes      = 1024
+	maxPasswordBytes      = 8192
+	maxMailAddressBytes   = 1024
+	maxMailRecipients     = 100
+	maxWebhookURLBytes    = 4096
+	maxWebhookSecretBytes = 8192
+)
 
 func DecodeConfig(typ model.NotifyType, raw json.RawMessage) (any, error) {
 	switch typ {
@@ -136,7 +153,7 @@ func NormalizeConfigForUpdate(typ model.NotifyType, raw json.RawMessage, prevTyp
 
 	previous, err := DecodeConfig(prevType, prevRaw)
 	if err != nil {
-		return NormalizeConfig(typ, raw)
+		return nil, fmt.Errorf("%w: decode previous config: %w", ErrStoredConfig, err)
 	}
 
 	fields, err := decodeObject(raw)
@@ -149,11 +166,11 @@ func NormalizeConfigForUpdate(typ model.NotifyType, raw json.RawMessage, prevTyp
 		return normalizeTelegramForUpdate(fields, previous)
 	case model.NotifyTypeEmail:
 		if cfg, ok := previous.(EmailConfig); ok {
-			inheritStringIfBlank(fields, "password", cfg.Password)
+			inheritStringIfEmpty(fields, "password", cfg.Password)
 		}
 	case model.NotifyTypeWebhook:
 		if cfg, ok := previous.(WebhookConfig); ok {
-			inheritStringIfBlank(fields, "secret", cfg.Secret)
+			inheritStringIfEmpty(fields, "secret", cfg.Secret)
 		}
 	default:
 		return NormalizeConfig(typ, raw)
@@ -179,7 +196,7 @@ func normalizeTelegramForUpdate(fields rawConfig, previous any) (json.RawMessage
 	switch mode {
 	case TelegramModeBot:
 		if cfg, ok := previous.(TelegramBotConfig); ok {
-			inheritStringIfBlank(fields, "bot_token", cfg.BotToken)
+			inheritStringIfEmpty(fields, "bot_token", cfg.BotToken)
 		}
 		return normalizeFields(model.NotifyTypeTelegram, fields)
 	case TelegramModeMTProto:
@@ -188,7 +205,7 @@ func normalizeTelegramForUpdate(fields rawConfig, previous any) (json.RawMessage
 			return normalizeFields(model.NotifyTypeTelegram, fields)
 		}
 
-		inheritStringIfBlank(fields, "api_hash", previousCfg.APIHash)
+		inheritStringIfEmpty(fields, "api_hash", previousCfg.APIHash)
 		nextRaw, err := marshalRawConfig(fields)
 		if err != nil {
 			return nil, err
@@ -235,8 +252,8 @@ func sameMTProtoLogin(a, b TelegramMTProtoConfig) bool {
 	return a.APIID == b.APIID && a.APIHash == b.APIHash && a.Phone == b.Phone
 }
 
-func inheritStringIfBlank(fields rawConfig, key, value string) {
-	if value == "" || !blankStringField(fields, key) {
+func inheritStringIfEmpty(fields rawConfig, key, value string) {
+	if value == "" || !emptyStringField(fields, key) {
 		return
 	}
 	raw, err := json.Marshal(value)
@@ -245,12 +262,12 @@ func inheritStringIfBlank(fields rawConfig, key, value string) {
 	}
 }
 
-func blankStringField(fields rawConfig, key string) bool {
+func emptyStringField(fields rawConfig, key string) bool {
 	raw, ok := fields[key]
 	if !ok {
 		return true
 	}
-	value, ok, err := readTrimmedString(raw, key)
+	value, ok, err := readRawString(raw, key)
 	return err == nil && ok && value == ""
 }
 
@@ -266,12 +283,21 @@ func decodeTelegram(raw json.RawMessage) (any, error) {
 
 	switch mode {
 	case TelegramModeBot:
-		botToken, err := readString(fields, "bot_token")
+		if err := rejectUnknownFields(fields, "mode", "bot_token", "chat_id"); err != nil {
+			return nil, err
+		}
+		botToken, err := readRawStringNonEmpty(fields, "bot_token")
 		if err != nil {
+			return nil, err
+		}
+		if err := validateText("bot_token", botToken, maxBotTokenBytes); err != nil {
 			return nil, err
 		}
 		chatID, err := readStringOrInt(fields, "chat_id")
 		if err != nil {
+			return nil, err
+		}
+		if err := validateText("chat_id", chatID, maxChatIDBytes); err != nil {
 			return nil, err
 		}
 		return TelegramBotConfig{
@@ -280,11 +306,14 @@ func decodeTelegram(raw json.RawMessage) (any, error) {
 			ChatID:   chatID,
 		}, nil
 	case TelegramModeMTProto:
+		if err := rejectUnknownFields(fields, "mode", "api_id", "api_hash", "phone", "chat_id", "session", "username"); err != nil {
+			return nil, err
+		}
 		apiID, err := readPositiveInt(fields, "api_id")
 		if err != nil {
 			return nil, err
 		}
-		apiHash, err := readString(fields, "api_hash")
+		apiHash, err := readRawStringNonEmpty(fields, "api_hash")
 		if err != nil {
 			return nil, err
 		}
@@ -296,13 +325,28 @@ func decodeTelegram(raw json.RawMessage) (any, error) {
 		if err != nil {
 			return nil, err
 		}
-		session, err := readOptionalString(fields, "session")
+		session, err := readOptionalRawString(fields, "session")
 		if err != nil {
 			return nil, err
 		}
 		username, err := readOptionalString(fields, "username")
 		if err != nil {
 			return nil, err
+		}
+		for _, field := range []struct {
+			name  string
+			value string
+			limit int
+		}{
+			{"api_hash", apiHash, maxAPIHashBytes},
+			{"phone", phone, maxPhoneBytes},
+			{"chat_id", chatID, maxChatIDBytes},
+			{"session", session, maxSessionBytes},
+			{"username", username, maxUsernameBytes},
+		} {
+			if err := validateText(field.name, field.value, field.limit); err != nil {
+				return nil, err
+			}
 		}
 		return TelegramMTProtoConfig{
 			Mode:     TelegramModeMTProto,
@@ -323,6 +367,9 @@ func decodeEmail(raw json.RawMessage) (EmailConfig, error) {
 	if err != nil {
 		return EmailConfig{}, err
 	}
+	if err := rejectUnknownFields(fields, "smtp_host", "smtp_port", "username", "password", "from", "to", "use_tls"); err != nil {
+		return EmailConfig{}, err
+	}
 	smtpHost, err := readString(fields, "smtp_host")
 	if err != nil {
 		return EmailConfig{}, err
@@ -335,7 +382,7 @@ func decodeEmail(raw json.RawMessage) (EmailConfig, error) {
 	if err != nil {
 		return EmailConfig{}, err
 	}
-	password, err := readStringAllowEmpty(fields, "password")
+	password, err := readRawStringRequired(fields, "password")
 	if err != nil {
 		return EmailConfig{}, err
 	}
@@ -350,6 +397,35 @@ func decodeEmail(raw json.RawMessage) (EmailConfig, error) {
 	useTLS, err := readBool(fields, "use_tls")
 	if err != nil {
 		return EmailConfig{}, err
+	}
+	for _, field := range []struct {
+		name         string
+		value        string
+		limit        int
+		allowControl bool
+	}{
+		{"smtp_host", smtpHost, 253, false},
+		{"username", username, maxUsernameBytes, false},
+		{"password", password, maxPasswordBytes, true},
+		{"from", from, maxMailAddressBytes, false},
+	} {
+		if err := validateString(field.name, field.value, field.limit, field.allowControl); err != nil {
+			return EmailConfig{}, err
+		}
+	}
+	if len(to) > maxMailRecipients {
+		return EmailConfig{}, fmt.Errorf("to must contain at most %d values", maxMailRecipients)
+	}
+	for _, address := range to {
+		if err := validateText("to", address, maxMailAddressBytes); err != nil {
+			return EmailConfig{}, err
+		}
+	}
+	if _, _, err := parseMailList(to); err != nil {
+		return EmailConfig{}, err
+	}
+	if _, err := mail.ParseAddress(from); err != nil {
+		return EmailConfig{}, fmt.Errorf("from is invalid")
 	}
 	return EmailConfig{
 		SMTPHost: smtpHost,
@@ -367,6 +443,9 @@ func decodeWebhook(raw json.RawMessage) (WebhookConfig, error) {
 	if err != nil {
 		return WebhookConfig{}, err
 	}
+	if err := rejectUnknownFields(fields, "url", "secret"); err != nil {
+		return WebhookConfig{}, err
+	}
 	url, err := readString(fields, "url")
 	if err != nil {
 		return WebhookConfig{}, err
@@ -374,8 +453,14 @@ func decodeWebhook(raw json.RawMessage) (WebhookConfig, error) {
 	if _, err := parseWebhookURL(url); err != nil {
 		return WebhookConfig{}, err
 	}
-	secret, err := readOptionalString(fields, "secret")
+	secret, err := readOptionalRawString(fields, "secret")
 	if err != nil {
+		return WebhookConfig{}, err
+	}
+	if err := validateText("url", url, maxWebhookURLBytes); err != nil {
+		return WebhookConfig{}, err
+	}
+	if err := validateString("secret", secret, maxWebhookSecretBytes, true); err != nil {
 		return WebhookConfig{}, err
 	}
 	return WebhookConfig{
@@ -387,6 +472,12 @@ func decodeWebhook(raw json.RawMessage) (WebhookConfig, error) {
 func decodeObject(raw json.RawMessage) (rawConfig, error) {
 	if len(bytes.TrimSpace(raw)) == 0 {
 		return nil, fmt.Errorf("config is required")
+	}
+	if len(raw) > maxNotifyConfigBytes {
+		return nil, fmt.Errorf("config is too large")
+	}
+	if !utf8.Valid(raw) {
+		return nil, fmt.Errorf("config must be valid UTF-8")
 	}
 	var fields rawConfig
 	if err := json.Unmarshal(raw, &fields); err != nil || fields == nil {
@@ -438,8 +529,43 @@ func readStringAllowEmpty(fields rawConfig, key string) (string, error) {
 	return value, nil
 }
 
+func readRawStringRequired(fields rawConfig, key string) (string, error) {
+	raw, ok := fields[key]
+	if !ok {
+		return "", fmt.Errorf("%s is required", key)
+	}
+	value, ok, err := readRawString(raw, key)
+	if err != nil {
+		return "", err
+	}
+	if !ok {
+		return "", fmt.Errorf("%s must be string", key)
+	}
+	return value, nil
+}
+
+func readRawStringNonEmpty(fields rawConfig, key string) (string, error) {
+	value, err := readRawStringRequired(fields, key)
+	if err != nil {
+		return "", err
+	}
+	if value == "" {
+		return "", fmt.Errorf("%s cannot be empty", key)
+	}
+	return value, nil
+}
+
 func readOptionalString(fields rawConfig, key string) (string, error) {
 	value, _, err := readStringField(fields, key)
+	return value, err
+}
+
+func readOptionalRawString(fields rawConfig, key string) (string, error) {
+	raw, ok := fields[key]
+	if !ok {
+		return "", nil
+	}
+	value, _, err := readRawString(raw, key)
 	return value, err
 }
 
@@ -494,6 +620,9 @@ func readPositiveInt(fields rawConfig, key string) (int, error) {
 	if value <= 0 {
 		return 0, fmt.Errorf("%s must be positive", key)
 	}
+	if value > int64(^uint(0)>>1) {
+		return 0, fmt.Errorf("%s is out of range", key)
+	}
 	return int(value), nil
 }
 
@@ -512,6 +641,9 @@ func readBool(fields rawConfig, key string) (bool, error) {
 	raw, ok := fields[key]
 	if !ok {
 		return false, fmt.Errorf("%s is required", key)
+	}
+	if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+		return false, fmt.Errorf("%s must be boolean", key)
 	}
 	var value bool
 	if err := json.Unmarshal(raw, &value); err != nil {
@@ -561,6 +693,9 @@ func readTrimmedString(raw json.RawMessage, _ string) (string, bool, error) {
 }
 
 func unmarshalString(raw json.RawMessage, key string) (string, error) {
+	if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+		return "", fmt.Errorf("%s must be string", key)
+	}
 	var value string
 	if err := json.Unmarshal(raw, &value); err != nil {
 		return "", fmt.Errorf("%s must be string", key)
@@ -569,33 +704,60 @@ func unmarshalString(raw json.RawMessage, key string) (string, error) {
 }
 
 func readInteger(raw json.RawMessage, key string) (int64, bool, error) {
-	if value, ok, err := readTrimmedString(raw, key); err != nil {
-		return 0, false, err
-	} else if ok {
-		if value == "" {
-			return 0, true, fmt.Errorf("%s is required", key)
-		}
-		n, err := strconv.ParseInt(value, 10, 64)
-		if err != nil {
-			return 0, true, fmt.Errorf("%s must be integer", key)
-		}
-		return n, true, nil
-	}
-
 	var number json.Number
 	decoder := json.NewDecoder(bytes.NewReader(raw))
 	decoder.UseNumber()
 	if err := decoder.Decode(&number); err != nil {
 		return 0, false, nil
 	}
-	if n, err := number.Int64(); err == nil {
-		return n, true, nil
-	}
-	floatValue, err := number.Float64()
-	if err != nil || math.Trunc(floatValue) != floatValue {
+	n, err := number.Int64()
+	if err != nil {
 		return 0, true, fmt.Errorf("%s must be integer", key)
 	}
-	return int64(floatValue), true, nil
+	return n, true, nil
+}
+
+func readRawString(raw json.RawMessage, key string) (string, bool, error) {
+	if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+		return "", false, fmt.Errorf("%s must be string", key)
+	}
+	var value string
+	if err := json.Unmarshal(raw, &value); err != nil {
+		return "", false, fmt.Errorf("%s must be string", key)
+	}
+	return value, true, nil
+}
+
+func rejectUnknownFields(fields rawConfig, allowed ...string) error {
+	known := make(map[string]struct{}, len(allowed))
+	for _, key := range allowed {
+		known[key] = struct{}{}
+	}
+	for key := range fields {
+		if _, ok := known[key]; !ok {
+			return fmt.Errorf("config contains unknown field %q", key)
+		}
+	}
+	return nil
+}
+
+func validateText(name, value string, limit int) error {
+	return validateString(name, value, limit, false)
+}
+
+func validateString(name, value string, limit int, allowControl bool) error {
+	if len(value) > limit {
+		return fmt.Errorf("%s is too long", name)
+	}
+	if allowControl {
+		return nil
+	}
+	for _, r := range value {
+		if unicode.IsControl(r) {
+			return fmt.Errorf("%s contains control characters", name)
+		}
+	}
+	return nil
 }
 
 func unsupportedTypeError(typ model.NotifyType) error {

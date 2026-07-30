@@ -5,9 +5,9 @@ import "time"
 type StaticCPUInfo struct {
 	ModelName     string  `json:"model_name"`
 	VendorID      string  `json:"vendor_id"`
-	Sockets       int     `json:"sockets"`
-	CoresPhysical int     `json:"cores_physical"`
-	CoresLogical  int     `json:"cores_logical"`
+	Sockets       int16   `json:"sockets"`
+	CoresPhysical int16   `json:"cores_physical"`
+	CoresLogical  int16   `json:"cores_logical"`
 	FrequencyMhz  float64 `json:"frequency_mhz"`
 }
 
@@ -16,8 +16,8 @@ type StaticCPU struct {
 }
 
 type StaticMemory struct {
-	Total     uint64 `json:"total"`
-	SwapTotal uint64 `json:"swap_total"`
+	Total     int64  `json:"total"`
+	SwapTotal *int64 `json:"swap_total"`
 }
 
 type StaticDiskPhysical struct {
@@ -31,9 +31,9 @@ type StaticDiskLogical struct {
 	Name        string                          `json:"name"`
 	DevicePath  string                          `json:"device_path,omitempty"`
 	Ref         string                          `json:"ref,omitempty"`
-	Total       uint64                          `json:"total"`
-	Used        uint64                          `json:"used,omitempty"`
-	Free        uint64                          `json:"free,omitempty"`
+	Total       int64                           `json:"total"`
+	Used        int64                           `json:"used,omitempty"`
+	Free        int64                           `json:"free,omitempty"`
 	UsedRatio   float64                         `json:"used_ratio,omitempty"`
 	Health      string                          `json:"health,omitempty"`
 	Level       string                          `json:"level,omitempty"`
@@ -46,9 +46,9 @@ type StaticDiskFilesystem struct {
 	Path        string `json:"path"`
 	Device      string `json:"device,omitempty"`
 	Mountpoint  string `json:"mountpoint,omitempty"`
-	Total       uint64 `json:"total"`
+	Total       int64  `json:"total"`
 	FsType      string `json:"fs_type"`
-	InodesTotal uint64 `json:"inodes_total"`
+	InodesTotal int64  `json:"inodes_total"`
 }
 
 type StaticDiskBaseIO struct {
@@ -68,9 +68,9 @@ type StaticDisk struct {
 
 type StaticDiskMountpoint struct {
 	FSType          string  `json:"fs_type,omitempty"`
-	InodesTotal     uint64  `json:"inodes_total,omitempty"`
-	InodesUsed      uint64  `json:"inodes_used,omitempty"`
-	InodesFree      uint64  `json:"inodes_free,omitempty"`
+	InodesTotal     int64   `json:"inodes_total,omitempty"`
+	InodesUsed      int64   `json:"inodes_used,omitempty"`
+	InodesFree      int64   `json:"inodes_free,omitempty"`
 	InodesUsedRatio float64 `json:"inodes_used_ratio,omitempty"`
 }
 
@@ -103,7 +103,7 @@ type StaticRaid struct {
 type StaticMetrics struct {
 	Version               string       `json:"version"`
 	Timestamp             time.Time    `json:"timestamp"`
-	ReportIntervalSeconds int          `json:"report_interval_seconds"`
+	ReportIntervalSeconds int32        `json:"report_interval_seconds"`
 	CPU                   StaticCPU    `json:"cpu"`
 	Memory                StaticMemory `json:"memory"`
 	Disk                  StaticDisk   `json:"disk"`

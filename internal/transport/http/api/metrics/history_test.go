@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"dash/internal/model"
 	"dash/internal/store"
@@ -17,12 +18,12 @@ func newHistoryTestStore(t *testing.T) (*store.Stores, *gorm.DB) {
 	t.Helper()
 
 	db := pgtest.NewDB(t)
-	return store.New(db, nil), db
+	return store.New(db, nil, time.Local), db
 }
 
 func TestIntegrationHistoryGuestAccessDisabledByDefault(t *testing.T) {
 	st, _ := newHistoryTestStore(t)
-	h := newHandler(st.Metric, st.Front, nil)
+	h := newHandler(st.Metric, st.Front, st.Node, nil)
 	r := httptest.NewRequest("GET", "/api/metrics/history?server_id=1", nil)
 
 	allowed, err := h.canReadHistory(context.Background(), r, 1)
@@ -37,7 +38,7 @@ func TestIntegrationHistoryGuestAccessDisabledByDefault(t *testing.T) {
 func TestIntegrationHistoryGuestAccessByNodeUsesGuestVisible(t *testing.T) {
 	st, db := newHistoryTestStore(t)
 	ctx := context.Background()
-	h := newHandler(st.Metric, st.Front, nil)
+	h := newHandler(st.Metric, st.Front, st.Node, nil)
 	r := httptest.NewRequest("GET", "/api/metrics/history?server_id=1", nil)
 
 	if err := st.Metric.SetHistoryGuestAccessMode(ctx, metricdata.HistoryGuestAccessByNode); err != nil {

@@ -25,6 +25,7 @@ func (h *handler) accessRoute(r *routes.Blueprint) {
 		routes.Func(h.accessHandler),
 		routes.Tags("statistics"),
 		routes.Auth(routes.AuthOptional),
+		routes.Use(h.optionalBearer),
 	)
 }
 

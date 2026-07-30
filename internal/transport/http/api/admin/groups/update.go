@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"net/http"
-	"strings"
 
 	"dash/internal/infra"
 	"dash/internal/transport/http/httperr"
@@ -68,14 +67,18 @@ func (h *handler) updateHandler(w http.ResponseWriter, r *http.Request, rawID st
 func updatesFromInput(in updateInput) (map[string]any, bool, error) {
 	updates := make(map[string]any)
 	if in.Name != nil {
-		name := strings.TrimSpace(*in.Name)
-		if name == "" {
-			return nil, false, errors.New("name cannot be empty")
+		name, err := groupName(*in.Name)
+		if err != nil {
+			return nil, false, err
 		}
 		updates["name"] = name
 	}
 	if in.Remark != nil {
-		updates["remark"] = strings.TrimSpace(*in.Remark)
+		remark, err := groupRemark(*in.Remark)
+		if err != nil {
+			return nil, false, err
+		}
+		updates["remark"] = remark
 	}
 	return updates, len(updates) > 0, nil
 }

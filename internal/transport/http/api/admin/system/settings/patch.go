@@ -61,14 +61,9 @@ func (h *handler) patchHandler(w http.ResponseWriter, r *http.Request) {
 		updateMode = &normalized
 	}
 
-	var brand *systemstore.SiteBrand
+	var brand *systemstore.SiteBrandPatch
 	if in.hasSiteBrandFields() {
-		current, err := loadSiteBrand(r.Context(), h.system)
-		if err != nil {
-			httperr.Write(w, http.StatusServiceUnavailable, "db_error", "failed to fetch settings")
-			return
-		}
-		next, err := in.applySiteBrand(current)
+		next, err := in.siteBrandPatch()
 		if err != nil {
 			httperr.Write(w, http.StatusBadRequest, "invalid_fields", "invalid site brand fields")
 			return

@@ -3,7 +3,10 @@ package alertspec
 import (
 	"errors"
 	"fmt"
+	"math"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 
 	"dash/internal/metrics"
 	"dash/internal/model"
@@ -20,6 +23,8 @@ const (
 	BuiltinSmartFailedID   int64 = -3
 	BuiltinSmartCriticalID int64 = -4
 	// -5 was used by a retired built-in rule; do not reuse it.
+	maxRuleNameRunes       = 128
+	maxCooldownMin   int32 = 365 * 24 * 60
 )
 
 type BuiltinRule struct {
@@ -30,6 +35,13 @@ type BuiltinRule struct {
 	Threshold   float64
 	DurationSec int32
 	CooldownMin int32
+}
+
+type Threshold struct {
+	Metric string
+	Mode   string
+	Value  float64
+	Offset float64
 }
 
 func BuiltinRules() []BuiltinRule {
@@ -82,15 +94,6 @@ func BuiltinRuleIDs() []int64 {
 	return ids
 }
 
-func IsBuiltinRule(id int64) bool {
-	for _, item := range BuiltinRules() {
-		if item.ID == id {
-			return true
-		}
-	}
-	return false
-}
-
 type ValidationError struct {
 	msg string
 }
@@ -113,6 +116,11 @@ func invalidf(format string, args ...any) error {
 }
 
 var metricRegistry = map[string]metricSpec{
+	"node.offline": {
+		extract: func(metrics.NodeView) (float64, bool) {
+			return 0, false
+		},
+	},
 	"cpu.usage_ratio": {
 		extract: func(node metrics.NodeView) (float64, bool) {
 			return node.CPU.UsageRatio, true
@@ -221,11 +229,6 @@ func NormalizeMetric(name string) (string, error) {
 	return name, nil
 }
 
-func IsAllowedMetric(name string) bool {
-	_, err := NormalizeMetric(name)
-	return err == nil
-}
-
 func IsAllowedOperator(op string) bool {
 	_, ok := operatorRegistry[strings.TrimSpace(op)]
 	return ok
@@ -257,6 +260,15 @@ func NormalizeRuleModel(rule model.AlertRule) (model.AlertRule, error) {
 	if rule.Name == "" {
 		return model.AlertRule{}, invalid("name is required")
 	}
+	if utf8.RuneCountInString(rule.Name) > maxRuleNameRunes || containsControl(rule.Name) {
+		return model.AlertRule{}, invalid("name must contain at most 128 characters and no control characters")
+	}
+	if !finite(rule.Threshold) {
+		return model.AlertRule{}, invalid("threshold must be finite")
+	}
+	if !finite(rule.ThresholdOffset) {
+		return model.AlertRule{}, invalid("threshold_offset must be finite")
+	}
 
 	metric, err := NormalizeMetric(rule.Metric)
 	if err != nil {
@@ -280,7 +292,7 @@ func NormalizeRuleModel(rule model.AlertRule) (model.AlertRule, error) {
 	if !IsAllowedDurationSec(rule.DurationSec) {
 		return model.AlertRule{}, invalid("duration_sec is not supported")
 	}
-	if rule.CooldownMin < 0 {
+	if rule.CooldownMin < 0 || rule.CooldownMin > maxCooldownMin {
 		return model.AlertRule{}, invalid("cooldown_min is not supported")
 	}
 
@@ -328,20 +340,25 @@ func SupportsCorePlus(metricName string) bool {
 	return ok && spec.corePlusAllowed
 }
 
-func EffectiveThreshold(rule model.AlertRule, node metrics.NodeView) (float64, error) {
-	switch strings.TrimSpace(rule.ThresholdMode) {
+func EffectiveThreshold(rule Threshold, node metrics.NodeView) (float64, error) {
+	var threshold float64
+	switch strings.TrimSpace(rule.Mode) {
 	case "", "static":
-		return rule.Threshold, nil
+		threshold = rule.Value
 	case "core_plus":
 		metricName := strings.TrimSpace(rule.Metric)
 		spec, ok := metricRegistry[metricName]
 		if !ok || !spec.corePlusAllowed {
 			return 0, fmt.Errorf("metric %s does not support core_plus", metricName)
 		}
-		return float64(ResolveCPUCores(node)) + rule.Threshold + rule.ThresholdOffset, nil
+		threshold = float64(ResolveCPUCores(node)) + rule.Value + rule.Offset
 	default:
-		return 0, fmt.Errorf("unsupported threshold_mode %s", rule.ThresholdMode)
+		return 0, fmt.Errorf("unsupported threshold_mode %s", rule.Mode)
 	}
+	if !finite(threshold) {
+		return 0, errors.New("effective threshold is not finite")
+	}
+	return threshold, nil
 }
 
 func ResolveCPUCores(node metrics.NodeView) int {
@@ -360,12 +377,25 @@ func pickPrimaryMount(node metrics.NodeView) (metrics.DiskMount, bool) {
 			return mount, true
 		}
 	}
-	// Keep historical compatibility: older UI and saved rules expect a disk
-	// value even when agents do not report "/", so fall back to the first mount.
+	// Mounts are sorted by size when the view is built. On systems without a
+	// Unix root mount (notably Windows), the largest filesystem is primary.
 	if len(node.Disk.Mounts) == 0 {
 		return metrics.DiskMount{}, false
 	}
 	return node.Disk.Mounts[0], true
+}
+
+func finite(value float64) bool {
+	return !math.IsNaN(value) && !math.IsInf(value, 0)
+}
+
+func containsControl(value string) bool {
+	for _, r := range value {
+		if unicode.IsControl(r) {
+			return true
+		}
+	}
+	return false
 }
 
 func raidFailed(node metrics.NodeView) (float64, bool) {

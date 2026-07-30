@@ -3,7 +3,6 @@ package groups
 import (
 	"context"
 	"net/http"
-	"strings"
 
 	"dash/internal/infra"
 	"dash/internal/transport/http/httperr"
@@ -32,15 +31,19 @@ func (h *handler) createHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	name := strings.TrimSpace(in.Name)
-	if name == "" {
-		httperr.Write(w, http.StatusBadRequest, "invalid_name", "name is required")
+	name, err := groupName(in.Name)
+	if err != nil {
+		httperr.Write(w, http.StatusBadRequest, "invalid_name", err.Error())
 		return
 	}
 
 	remark := ""
 	if in.Remark != nil {
-		remark = strings.TrimSpace(*in.Remark)
+		remark, err = groupRemark(*in.Remark)
+		if err != nil {
+			httperr.Write(w, http.StatusBadRequest, "invalid_remark", err.Error())
+			return
+		}
 	}
 
 	if _, err := infra.WithPGWriteTimeout(r.Context(), func(c context.Context) (struct{}, error) {

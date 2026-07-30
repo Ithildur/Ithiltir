@@ -44,7 +44,7 @@ type CompiledRule struct {
 	ThresholdMode       string
 	ThresholdOffset     float64
 	GenerationUpdatedAt time.Time
-	Snapshot            RuleSnapshot
+	snapshotRaw         json.RawMessage
 }
 
 type CompiledRules struct {
@@ -54,8 +54,11 @@ type CompiledRules struct {
 	RefreshedAt time.Time
 }
 
-func CompileRules(items []model.AlertRule, refreshedAt time.Time) *CompiledRules {
-	builtins := builtinRules()
+func CompileRules(items []model.AlertRule, refreshedAt time.Time) (*CompiledRules, error) {
+	builtins, err := builtinRules()
+	if err != nil {
+		return nil, err
+	}
 	out := &CompiledRules{
 		Rules:       make([]CompiledRule, 0, len(items)+len(builtins)),
 		ByStateKey:  make(map[string]CompiledRule, len(items)+len(builtins)),
@@ -86,7 +89,7 @@ func CompileRules(items []model.AlertRule, refreshedAt time.Time) *CompiledRules
 		return out.Rules[i].RuleID < out.Rules[j].RuleID
 	})
 
-	return out
+	return out, nil
 }
 
 func (r *CompiledRules) add(rule CompiledRule) {
@@ -95,9 +98,6 @@ func (r *CompiledRules) add(rule CompiledRule) {
 }
 
 func (r *CompiledRules) ForMounts(mounts map[int64]bool) *CompiledRules {
-	if r == nil {
-		return CompileRules(nil, time.Now().UTC())
-	}
 	out := &CompiledRules{
 		Rules:       make([]CompiledRule, 0, len(r.Rules)),
 		ByStateKey:  make(map[string]CompiledRule, len(r.Rules)),
@@ -125,12 +125,11 @@ func (r CompiledRule) StateKey() string {
 	return ruleStateKey(r.RuleID, r.Generation)
 }
 
-func (r CompiledRule) SnapshotJSON() []byte {
-	raw, err := json.Marshal(r.Snapshot)
-	if err != nil {
-		return []byte(`{}`)
+func (r CompiledRule) snapshotJSON() ([]byte, error) {
+	if len(r.snapshotRaw) == 0 {
+		return nil, fmt.Errorf("rule %d generation %d has no compiled snapshot", r.RuleID, r.Generation)
 	}
-	return raw
+	return r.snapshotRaw, nil
 }
 
 func compileRule(item model.AlertRule) (*CompiledRule, *InvalidRule) {
@@ -152,6 +151,10 @@ func compileRule(item model.AlertRule) (*CompiledRule, *InvalidRule) {
 		ThresholdOffset: normalized.ThresholdOffset,
 		UpdatedAt:       updatedAt.Format(time.RFC3339),
 	}
+	snapshotRaw, err := encodeRuleSnapshot(snapshot)
+	if err != nil {
+		return nil, invalidRule(item, err)
+	}
 	return &CompiledRule{
 		RuleID:              normalized.ID,
 		Name:                normalized.Name,
@@ -164,21 +167,25 @@ func compileRule(item model.AlertRule) (*CompiledRule, *InvalidRule) {
 		ThresholdMode:       normalized.ThresholdMode,
 		ThresholdOffset:     normalized.ThresholdOffset,
 		GenerationUpdatedAt: updatedAt,
-		Snapshot:            snapshot,
+		snapshotRaw:         snapshotRaw,
 	}, nil
 }
 
-func builtinRules() []CompiledRule {
+func builtinRules() ([]CompiledRule, error) {
 	updatedAt := time.Unix(0, 0).UTC()
 	specs := alertspec.BuiltinRules()
 	rules := make([]CompiledRule, 0, len(specs))
 	for _, spec := range specs {
-		rules = append(rules, builtinRule(spec, updatedAt))
+		rule, err := builtinRule(spec, updatedAt)
+		if err != nil {
+			return nil, fmt.Errorf("compile builtin rule %d: %w", spec.ID, err)
+		}
+		rules = append(rules, rule)
 	}
-	return rules
+	return rules, nil
 }
 
-func builtinRule(spec alertspec.BuiltinRule, updatedAt time.Time) CompiledRule {
+func builtinRule(spec alertspec.BuiltinRule, updatedAt time.Time) (CompiledRule, error) {
 	snapshot := RuleSnapshot{
 		RuleID:          spec.ID,
 		Generation:      1,
@@ -193,6 +200,10 @@ func builtinRule(spec alertspec.BuiltinRule, updatedAt time.Time) CompiledRule {
 		ThresholdOffset: 0,
 		UpdatedAt:       updatedAt.Format(time.RFC3339),
 	}
+	snapshotRaw, err := encodeRuleSnapshot(snapshot)
+	if err != nil {
+		return CompiledRule{}, err
+	}
 	return CompiledRule{
 		RuleID:              spec.ID,
 		Builtin:             true,
@@ -206,8 +217,16 @@ func builtinRule(spec alertspec.BuiltinRule, updatedAt time.Time) CompiledRule {
 		ThresholdMode:       "static",
 		ThresholdOffset:     0,
 		GenerationUpdatedAt: updatedAt,
-		Snapshot:            snapshot,
+		snapshotRaw:         snapshotRaw,
+	}, nil
+}
+
+func encodeRuleSnapshot(snapshot RuleSnapshot) (json.RawMessage, error) {
+	raw, err := json.Marshal(snapshot)
+	if err != nil {
+		return nil, fmt.Errorf("encode rule snapshot: %w", err)
 	}
+	return raw, nil
 }
 
 func invalidRule(item model.AlertRule, err error) *InvalidRule {

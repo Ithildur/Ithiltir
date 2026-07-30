@@ -46,6 +46,9 @@ var digestCache = struct {
 }
 
 func BundledAsset(cfg *config.Config, osName, arch string) (Asset, error) {
+	if cfg == nil || cfg.App.PublicURLScheme == "" || cfg.App.PublicURLHost == "" {
+		return Asset{}, fmt.Errorf("node update public URL is not configured")
+	}
 	platform, arch, file, err := assetName(osName, arch)
 	if err != nil {
 		return Asset{}, err
@@ -118,52 +121,49 @@ func assetName(osName, arch string) (string, string, string, error) {
 }
 
 func assetURL(cfg *config.Config, platform, file string) string {
-	basePath := ""
-	scheme := ""
-	host := ""
-	if cfg != nil {
-		basePath = cfg.App.PublicURLBasePath
-		scheme = cfg.App.PublicURLScheme
-		host = cfg.App.PublicURLHost
-	}
-	fullPath := path.Join("/", strings.TrimPrefix(basePath, "/"), "deploy", platform, file)
+	fullPath := path.Join("/", strings.TrimPrefix(cfg.App.PublicURLBasePath, "/"), "deploy", platform, file)
 	return (&url.URL{
-		Scheme: scheme,
-		Host:   host,
+		Scheme: cfg.App.PublicURLScheme,
+		Host:   cfg.App.PublicURLHost,
 		Path:   fullPath,
 	}).String()
 }
 
 func cachedDigest(path string) (fileDigest, error) {
-	info, err := os.Stat(path)
-	if err != nil {
-		return fileDigest{}, err
-	}
-	if !info.Mode().IsRegular() {
-		return fileDigest{}, fmt.Errorf("node asset is not a regular file: %s", path)
-	}
+	for attempt := 0; attempt < 2; attempt++ {
+		before, err := os.Stat(path)
+		if err != nil {
+			return fileDigest{}, err
+		}
+		if !before.Mode().IsRegular() {
+			return fileDigest{}, fmt.Errorf("node asset is not a regular file: %s", path)
+		}
 
-	digestCache.RLock()
-	cached, ok := digestCache.items[path]
-	digestCache.RUnlock()
-	if ok && cached.Size == info.Size() && cached.ModTime.Equal(info.ModTime()) {
-		return cached, nil
-	}
+		digestCache.RLock()
+		cached, ok := digestCache.items[path]
+		digestCache.RUnlock()
+		if ok && cached.Size == before.Size() && cached.ModTime.Equal(before.ModTime()) {
+			return cached, nil
+		}
 
-	sum, size, err := fileSHA256(path)
-	if err != nil {
-		return fileDigest{}, err
+		sum, size, err := fileSHA256(path)
+		if err != nil {
+			return fileDigest{}, err
+		}
+		after, err := os.Stat(path)
+		if err != nil {
+			return fileDigest{}, err
+		}
+		if size != before.Size() || size != after.Size() || !before.ModTime().Equal(after.ModTime()) {
+			continue
+		}
+		fresh := fileDigest{SHA256: sum, Size: size, ModTime: after.ModTime()}
+		digestCache.Lock()
+		digestCache.items[path] = fresh
+		digestCache.Unlock()
+		return fresh, nil
 	}
-	fresh := fileDigest{
-		SHA256:  sum,
-		Size:    size,
-		ModTime: info.ModTime(),
-	}
-
-	digestCache.Lock()
-	digestCache.items[path] = fresh
-	digestCache.Unlock()
-	return fresh, nil
+	return fileDigest{}, fmt.Errorf("node asset changed while hashing: %s", path)
 }
 
 func fileSHA256(path string) (string, int64, error) {

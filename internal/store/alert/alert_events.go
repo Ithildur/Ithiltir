@@ -83,6 +83,20 @@ func (s *Store) ListOpenEvents(ctx context.Context) ([]model.AlertEvent, error) 
 	return items, err
 }
 
+func (s *Store) ListOpenEventsByServer(ctx context.Context, serverID int64) ([]model.AlertEvent, error) {
+	var items []model.AlertEvent
+	err := s.db.WithContext(ctx).
+		Where(
+			"object_type = ? AND object_id = ? AND status = ?",
+			model.ObjectTypeServer,
+			serverID,
+			model.AlertStatusOpen,
+		).
+		Order("id ASC").
+		Find(&items).Error
+	return items, err
+}
+
 func (s *Store) ListOpenEventsForDeletedServers(ctx context.Context) ([]model.AlertEvent, error) {
 	var items []model.AlertEvent
 	err := s.db.WithContext(ctx).

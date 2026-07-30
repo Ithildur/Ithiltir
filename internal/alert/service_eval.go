@@ -3,8 +3,10 @@ package alert
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
+	"dash/internal/metrics"
 	"dash/internal/model"
 	alertstore "dash/internal/store/alert"
 	kitlog "github.com/Ithildur/EiluneKit/logging"
@@ -12,55 +14,61 @@ import (
 
 func (s *Service) runEvalWorker(ctx context.Context, workerID int) error {
 	for {
-		if ctx.Err() != nil {
+		serverID, snapshot, ok := s.store.NextDirtyServer(ctx)
+		if !ok {
 			return nil
 		}
-		if err := s.store.RequeueExpiredDirtyServers(ctx, time.Now().UTC(), 128); err != nil {
-			s.logger.Warn("requeue expired dirty servers failed", err, kitlog.Int("worker", workerID))
-		}
 
-		serverID, ok, err := s.store.ClaimDirtyServer(ctx, time.Now().UTC().Add(evalLeaseTTL))
+		err := s.processServer(ctx, serverID, snapshot)
 		if err != nil {
-			s.logger.Warn("claim dirty server failed", err, kitlog.Int("worker", workerID))
-			if err := s.store.WaitDirtyWakeup(ctx, dirtyWakeTimeout); err != nil && !errors.Is(err, context.Canceled) {
-				s.logger.Warn("wait dirty wakeup failed", err, kitlog.Int("worker", workerID))
+			s.logger.Warn("process server alert reconcile failed", err,
+				kitlog.Int("worker", workerID),
+				kitlog.Int64("server_id", serverID),
+			)
+			if !waitEvalRetry(ctx) {
+				s.store.FinishDirtyServer(serverID, true)
+				return nil
 			}
+			s.store.FinishDirtyServer(serverID, true)
 			continue
 		}
-		if !ok {
-			if err := s.store.WaitDirtyWakeup(ctx, dirtyWakeTimeout); err != nil {
-				if errors.Is(err, context.Canceled) {
-					return nil
-				}
-				s.logger.Warn("wait dirty wakeup failed", err, kitlog.Int("worker", workerID))
-			}
-			continue
-		}
-
-		err = s.processServer(ctx, serverID)
-		if err != nil {
-			s.logger.Warn("process server alert reconcile failed", err, kitlog.Int64("server_id", serverID))
-			continue
-		}
-		if ackErr := s.store.AckDirtyServer(ctx, serverID); ackErr != nil {
-			s.logger.Warn("ack dirty server failed", ackErr, kitlog.Int64("server_id", serverID))
-		}
+		s.store.FinishDirtyServer(serverID, false)
 	}
 }
 
-func (s *Service) processServer(ctx context.Context, serverID int64) error {
+func waitEvalRetry(ctx context.Context) bool {
+	timer := time.NewTimer(evalRetryDelay)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return false
+	case <-timer.C:
+		return true
+	}
+}
+
+func (s *Service) processServer(ctx context.Context, serverID int64, snapshot *metrics.NodeView) error {
 	compiled, cacheErr := s.cache.Refresh(ctx, false)
+	if compiled == nil {
+		if cacheErr != nil {
+			return fmt.Errorf("refresh rule cache: %w", cacheErr)
+		}
+		return errors.New("alert rule cache returned no compiled rules")
+	}
 	if cacheErr != nil {
 		s.logger.Warn("refresh rule cache failed during evaluation", cacheErr)
 	}
 
-	current, err := loadRuntimeState(ctx, s.store, serverID)
+	current, err := s.loadRuntimeState(ctx, serverID)
 	if err != nil {
 		return err
 	}
-	snapshot, err := s.front.LoadFrontNodeSnapshot(ctx, serverID)
-	if err != nil {
-		return err
+	if snapshot == nil {
+		var err error
+		snapshot, err = s.front.FetchCurrentNode(ctx, serverID, s.staleAfterSec)
+		if err != nil {
+			return err
+		}
 	}
 	mounts, err := s.store.RuleMountsForServer(ctx, serverID)
 	if err != nil {
@@ -73,11 +81,13 @@ func (s *Service) processServer(ctx context.Context, serverID int64) error {
 	result.OpenTransitions = filterStartupOpens(result.OpenTransitions, now, s.openAfter)
 	closingStateKeys := make(map[string]struct{}, len(result.CloseTransitions))
 	for _, transition := range result.CloseTransitions {
-		closingStateKeys[transition.StateKey] = struct{}{}
 		message := buildCloseMessage(transition, s.message)
 		notifications, notifyErr := s.closeNotificationParams(ctx, transition, message)
 		if notifyErr != nil {
 			s.logNotificationTargetError(notifyErr, serverID, transition.StateKey, notifications)
+			if errors.Is(notifyErr, errNotificationTargetsUnavailable) {
+				continue
+			}
 		}
 		outcome, err := s.store.WriteCloseTransition(ctx, alertstore.AlertCloseEventParams{
 			EventID:        transition.EventID,
@@ -98,6 +108,7 @@ func (s *Service) processServer(ctx context.Context, serverID int64) error {
 			s.logger.Warn("write close transition failed", err, kitlog.Int64("server_id", serverID), kitlog.String("state_key", transition.StateKey))
 			continue
 		}
+		closingStateKeys[transition.StateKey] = struct{}{}
 		if shouldDropRuntimeAfterClose(outcome) {
 			delete(result.Next, transition.StateKey)
 			if cooldownAfterClose(transition) && outcome.Status == alertstore.CloseStatusClosed {
@@ -107,16 +118,23 @@ func (s *Service) processServer(ctx context.Context, serverID int64) error {
 	}
 
 	for _, transition := range result.OpenTransitions {
+		ruleSnapshot, err := transition.Rule.snapshotJSON()
+		if err != nil {
+			return fmt.Errorf("prepare open transition: %w", err)
+		}
 		message := buildOpenMessage(transition, s.message)
 		notifications, notifyErr := s.openNotificationParams(ctx, transition, message)
 		if notifyErr != nil {
 			s.logNotificationTargetError(notifyErr, serverID, transition.StateKey, notifications)
+			if errors.Is(notifyErr, errNotificationTargetsUnavailable) {
+				continue
+			}
 		}
 		outcome, err := s.store.WriteOpenTransition(ctx, alertstore.AlertOpenEventParams{
 			RuleID:             transition.Rule.RuleID,
 			RuleGeneration:     transition.Rule.Generation,
 			Builtin:            transition.Rule.Builtin,
-			RuleSnapshot:       transition.Rule.SnapshotJSON(),
+			RuleSnapshot:       ruleSnapshot,
 			ObjectType:         model.ObjectTypeServer,
 			ObjectID:           transition.ObjectID,
 			TriggeredAt:        transition.TriggeredAt,
@@ -143,8 +161,8 @@ func (s *Service) processServer(ctx context.Context, serverID int64) error {
 }
 
 func (s *Service) logNotificationTargetError(err error, serverID int64, stateKey string, notifications []alertstore.AlertNotificationParams) {
-	if len(notifications) == 0 {
-		s.logger.Warn("alert notification targets unavailable; committing transition without notification outbox", err, kitlog.Int64("server_id", serverID), kitlog.String("state_key", stateKey))
+	if errors.Is(err, errNotificationTargetsUnavailable) {
+		s.logger.Warn("alert notification targets unavailable; deferring transition", err, kitlog.Int64("server_id", serverID), kitlog.String("state_key", stateKey))
 		return
 	}
 	s.logger.Warn("load alert notification targets failed; using cached notification targets", err, kitlog.Int64("server_id", serverID), kitlog.String("state_key", stateKey))

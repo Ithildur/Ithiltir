@@ -14,6 +14,7 @@ import (
 	"dash/internal/config"
 	"dash/internal/dashupdate"
 	"dash/internal/infra"
+	"dash/internal/infra/cachekeys"
 	"dash/internal/migrate"
 	"dash/internal/store"
 	themefs "dash/internal/theme"
@@ -105,6 +106,9 @@ func main() {
 		infra.Fatal("extract sql.DB failed", err)
 	}
 	defer sqlDB.Close()
+	if err := migrate.CheckVersion(ctx, db); err != nil {
+		infra.Fatal("validate database schema failed", err)
+	}
 	if err := migrate.SyncRetentionPolicies(ctx, db, cfg.Database.EffectiveRetentionDays(), cfg.Database.EffectiveTrafficRetentionDays()); err != nil {
 		infra.Fatal("sync retention policies failed", err)
 	}
@@ -132,7 +136,8 @@ func main() {
 		logger.Warn("redis disabled by startup flag", nil)
 	}
 
-	st := store.New(db, redisClient)
+	appLocation := cfg.App.EffectiveLocation()
+	st := store.New(db, redisClient, appLocation)
 	if err := st.Validate(); err != nil {
 		infra.Fatal("init store failed", err)
 	}
@@ -155,7 +160,7 @@ func main() {
 	var tokenStore authstore.SessionStore
 	if redisClient != nil {
 		tokenStore = redissession.New(redisClient, redissession.Options{
-			Prefix:       "auth:jwt:",
+			Prefix:       cachekeys.RedisKeyAuthTokenPrefix,
 			ReadTimeout:  cfg.Redis.ReadTimeoutDur,
 			WriteTimeout: cfg.Redis.WriteTimeoutDur,
 		})
@@ -171,15 +176,25 @@ func main() {
 			err,
 			slog.Bool("signing_key_set", cfg.Auth.JWTSigningKey != ""))
 	}
-	appLocation := cfg.App.EffectiveLocation()
-	trafficRuntime := trafficservice.NewRuntime(
+	trafficRuntime, err := trafficservice.NewRuntime(
 		ctx,
 		st.Traffic,
 		appLocation,
+		cfg.Database.EffectiveRetentionDays(),
 		cfg.Database.EffectiveTrafficRetentionDays(),
 	)
+	if err != nil {
+		infra.Fatal("init traffic runtime failed", err)
+	}
 	dashUpdateRunner := dashupdate.NewRunner()
 	dashUpdateService := dashupdate.NewService(st.System, st.Alert, dashUpdateRunner, cfg.App.EffectiveLanguage())
+	alertService, err := alert.NewService(st.Alert, st.Front, alert.MessageConfig{
+		Language: cfg.App.EffectiveLanguage(),
+		Location: appLocation,
+	}, cfg.App.EffectiveNodeOfflineThreshold())
+	if err != nil {
+		infra.Fatal("init alert service failed", err)
+	}
 	deps := httpapi.Dependencies{
 		Stores:         st,
 		Auth:           jwtAuth,
@@ -192,10 +207,6 @@ func main() {
 	if err != nil {
 		infra.Fatal("init http server failed", err)
 	}
-	alertService := alert.NewService(st.Alert, st.Front, alert.WithMessageConfig(alert.MessageConfig{
-		Language: cfg.App.EffectiveLanguage(),
-		Location: appLocation,
-	}))
 
 	group, groupCtx := errgroup.WithContext(ctx)
 	group.Go(func() error { return srv.Run(groupCtx) })

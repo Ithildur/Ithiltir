@@ -1,12 +1,32 @@
 package traffic
 
 import (
+	"errors"
+	"math"
 	"reflect"
 	"testing"
 	"time"
 
 	"dash/internal/model"
 )
+
+func mustRule(t testing.TB, mode BillingCycleMode, day int, anchor string, loc *time.Location) cycleRule {
+	t.Helper()
+	rule, err := newCycleRule(mode, day, anchor, loc)
+	if err != nil {
+		t.Fatalf("newCycleRule() error = %v", err)
+	}
+	return rule
+}
+
+func mustCycle(t testing.TB, mode BillingCycleMode, day int, anchor string, loc *time.Location, ref time.Time) TrafficCycle {
+	t.Helper()
+	cycle, err := mustRule(t, mode, day, anchor, loc).at(ref)
+	if err != nil {
+		t.Fatalf("cycleRule.at() error = %v", err)
+	}
+	return cycle
+}
 
 func TestP95DiscardTop(t *testing.T) {
 	values := make([]float64, 100)
@@ -18,11 +38,54 @@ func TestP95DiscardTop(t *testing.T) {
 	}
 }
 
+func TestTrafficBytesAtKeepsSignedCounterBoundary(t *testing.T) {
+	if got := trafficBytesAt(math.MaxInt64, 1, 1); got != math.MaxInt64 {
+		t.Fatalf("trafficBytesAt(max, end) = %d, want %d", got, int64(math.MaxInt64))
+	}
+	if got := trafficBytesAt(math.MaxInt64, 0.5, 1); got < 0 {
+		t.Fatalf("trafficBytesAt(max, midpoint) = %d", got)
+	}
+}
+
+func TestBuildTrafficStatRejectsOverflow(t *testing.T) {
+	start := time.Date(2026, time.April, 1, 0, 0, 0, 0, time.UTC)
+	_, err := buildTrafficStat(
+		[]trafficBucket{{InBytes: math.MaxInt64, OutBytes: 1}},
+		start,
+		start.Add(trafficBucketSize),
+		false,
+		TrafficSnapshotProvisional,
+		DirectionBoth,
+		UsageBilling,
+		false,
+	)
+	if !errors.Is(err, ErrTrafficDataOverflow) {
+		t.Fatalf("buildTrafficStat() error = %v, want %v", err, ErrTrafficDataOverflow)
+	}
+}
+
+func TestApplyTrafficSelectionRejectsInvalidDirection(t *testing.T) {
+	stat := TrafficStat{InBytes: 1, OutBytes: 2}
+	if err := applyTrafficSelection(&stat, DirectionMode("unknown")); err == nil {
+		t.Fatal("applyTrafficSelection() error = nil")
+	}
+}
+
+func TestTrafficCycleMissingBoundariesReturnError(t *testing.T) {
+	ref := time.Date(2026, time.April, 1, 0, 0, 0, 0, time.UTC)
+	if _, _, err := trafficBoundsFrom(nil, ref); err == nil {
+		t.Fatal("trafficBoundsFrom() error = nil")
+	}
+	if _, err := prevBoundaryFrom(nil, ref); err == nil {
+		t.Fatal("prevBoundaryFrom() error = nil")
+	}
+}
+
 func TestTrafficCycleCalendarMonth(t *testing.T) {
 	loc := time.UTC
 	ref := time.Date(2026, time.April, 26, 12, 0, 0, 0, loc)
 
-	cycle := currentTrafficCycle(CycleCalendarMonth, 15, loc, ref)
+	cycle := mustCycle(t, CycleCalendarMonth, 1, "", loc, ref)
 
 	wantStart := time.Date(2026, time.April, 1, 0, 0, 0, 0, time.UTC)
 	wantEnd := time.Date(2026, time.May, 1, 0, 0, 0, 0, time.UTC)
@@ -38,7 +101,7 @@ func TestTrafficCycleClampMonthEnd(t *testing.T) {
 	loc := time.UTC
 	ref := time.Date(2026, time.February, 15, 12, 0, 0, 0, loc)
 
-	cycle := currentTrafficCycle(CycleClampMonthEnd, 31, loc, ref)
+	cycle := mustCycle(t, CycleClampMonthEnd, 31, "", loc, ref)
 
 	wantStart := time.Date(2026, time.January, 31, 0, 0, 0, 0, time.UTC)
 	wantEnd := time.Date(2026, time.February, 28, 0, 0, 0, 0, time.UTC)
@@ -51,7 +114,7 @@ func TestTrafficCycleWHMCSCompatible(t *testing.T) {
 	loc := time.UTC
 	ref := time.Date(2026, time.February, 15, 12, 0, 0, 0, loc)
 
-	cycle := currentTrafficCycle(CycleWHMCS, 31, loc, ref)
+	cycle := mustCycle(t, CycleWHMCS, 31, "2026-01-31", loc, ref)
 
 	wantStart := time.Date(2026, time.January, 31, 0, 0, 0, 0, time.UTC)
 	wantEnd := time.Date(2026, time.March, 3, 0, 0, 0, 0, time.UTC)
@@ -60,7 +123,7 @@ func TestTrafficCycleWHMCSCompatible(t *testing.T) {
 	}
 
 	ref = time.Date(2026, time.March, 15, 12, 0, 0, 0, loc)
-	cycle = currentTrafficCycle(CycleWHMCS, 31, loc, ref)
+	cycle = mustCycle(t, CycleWHMCS, 31, "2026-01-31", loc, ref)
 	wantStart = time.Date(2026, time.March, 3, 0, 0, 0, 0, time.UTC)
 	wantEnd = time.Date(2026, time.April, 3, 0, 0, 0, 0, time.UTC)
 	if !cycle.Start.Equal(wantStart) || !cycle.End.Equal(wantEnd) {
@@ -68,11 +131,11 @@ func TestTrafficCycleWHMCSCompatible(t *testing.T) {
 	}
 }
 
-func TestTrafficCycleWHMCSAnchorOverridesBillingDay(t *testing.T) {
+func TestTrafficCycleWHMCSUsesAnchor(t *testing.T) {
 	loc := time.UTC
 	ref := time.Date(2026, time.February, 15, 12, 0, 0, 0, loc)
 
-	cycle := currentTrafficCycleAnchored(CycleWHMCS, 31, "2026-01-30", loc, ref)
+	cycle := mustCycle(t, CycleWHMCS, 30, "2026-01-30", loc, ref)
 
 	wantStart := time.Date(2026, time.January, 30, 0, 0, 0, 0, time.UTC)
 	wantEnd := time.Date(2026, time.March, 2, 0, 0, 0, 0, time.UTC)
@@ -87,11 +150,35 @@ func TestTrafficCycleWHMCSAnchorOverridesBillingDay(t *testing.T) {
 	}
 }
 
+func TestNewCycleRuleRejectsInvalidValues(t *testing.T) {
+	tests := []struct {
+		name   string
+		mode   BillingCycleMode
+		day    int
+		anchor string
+		loc    *time.Location
+	}{
+		{name: "mode", mode: "unknown", day: 1, loc: time.UTC},
+		{name: "day", mode: CycleClampMonthEnd, day: 0, loc: time.UTC},
+		{name: "location", mode: CycleCalendarMonth, day: 1},
+		{name: "calendar fields", mode: CycleCalendarMonth, day: 2, loc: time.UTC},
+		{name: "WHMCS anchor", mode: CycleWHMCS, day: 31, loc: time.UTC},
+		{name: "WHMCS day", mode: CycleWHMCS, day: 31, anchor: "2026-01-30", loc: time.UTC},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if _, err := newCycleRule(tt.mode, tt.day, tt.anchor, tt.loc); err == nil {
+				t.Fatal("newCycleRule() error = nil")
+			}
+		})
+	}
+}
+
 func TestSplitTrafficSamplesAcrossBuckets(t *testing.T) {
 	start := time.Date(2026, time.April, 1, 0, 4, 0, 0, time.UTC)
 	end := time.Date(2026, time.April, 1, 0, 9, 0, 0, time.UTC)
 
-	samples := splitTrafficSamples(7, "eth0", start, end, 300, 600)
+	samples := splitTrafficSamplesWindow(7, "eth0", start, end, start, end, 300, 600)
 
 	if len(samples) != 2 {
 		t.Fatalf("samples = %d, want 2", len(samples))
@@ -142,7 +229,15 @@ func TestMergeTrafficUsagePairClampsToWindowEnd(t *testing.T) {
 	usage := map[trafficUsageKey]*trafficUsageAccumulator{}
 	progress := map[trafficUsageKey]time.Time{}
 
-	if err := mergeTrafficUsagePair(usage, progress, DefaultSettings(), time.UTC, start, end, prev, current); err != nil {
+	if err := mergeTrafficUsagePair(
+		usage,
+		progress,
+		mustRule(t, CycleCalendarMonth, 1, "", time.UTC),
+		start,
+		end,
+		prev,
+		current,
+	); err != nil {
 		t.Fatalf("mergeTrafficUsagePair() error = %v", err)
 	}
 
@@ -174,7 +269,15 @@ func TestMergeTrafficUsagePairUsesRetentionFloor(t *testing.T) {
 	usage := map[trafficUsageKey]*trafficUsageAccumulator{}
 	progress := map[trafficUsageKey]time.Time{}
 
-	if err := mergeTrafficUsagePair(usage, progress, DefaultSettings(), time.UTC, floor, end, prev, current); err != nil {
+	if err := mergeTrafficUsagePair(
+		usage,
+		progress,
+		mustRule(t, CycleCalendarMonth, 1, "", time.UTC),
+		floor,
+		end,
+		prev,
+		current,
+	); err != nil {
 		t.Fatalf("mergeTrafficUsagePair() error = %v", err)
 	}
 
@@ -202,7 +305,7 @@ func TestBuildTrafficMonthUsageRowsUsesPairSpanningWindow(t *testing.T) {
 		{ServerID: 7, Iface: "eth0", CollectedAt: end.Add(30 * time.Minute), BytesRecv: 7200, BytesSent: 14400},
 	}
 
-	items := mustBuildTrafficMonthUsageRows(t, rows, DefaultSettings(), time.UTC, start, end, map[trafficUsageKey]time.Time{})
+	items := mustBuildTrafficMonthUsageRows(t, rows, defaultSettings(), time.UTC, start, end, map[trafficUsageKey]time.Time{})
 
 	if len(items) != 1 {
 		t.Fatalf("usage rows = %d, want 1", len(items))
@@ -227,7 +330,7 @@ func TestBuildTrafficMonthUsageRowsDoesNotRoundEachSegment(t *testing.T) {
 		{ServerID: 7, Iface: "eth0", CollectedAt: end, BytesRecv: 1, BytesSent: 1},
 	}
 
-	items := mustBuildTrafficMonthUsageRows(t, rows, DefaultSettings(), time.UTC, start, end, map[trafficUsageKey]time.Time{})
+	items := mustBuildTrafficMonthUsageRows(t, rows, defaultSettings(), time.UTC, start, end, map[trafficUsageKey]time.Time{})
 
 	var inBytes int64
 	var outBytes int64
@@ -244,7 +347,7 @@ func TestSplitTrafficSamplesMarksLongGapInvalid(t *testing.T) {
 	start := time.Date(2026, time.April, 1, 0, 0, 0, 0, time.UTC)
 	end := start.Add(30 * time.Minute)
 
-	samples := splitTrafficSamples(7, "eth0", start, end, 1800, 3600)
+	samples := splitTrafficSamplesWindow(7, "eth0", start, end, start, end, 1800, 3600)
 
 	if len(samples) != 6 {
 		t.Fatalf("samples = %d, want 6", len(samples))
@@ -276,7 +379,10 @@ func TestTrafficCoverageDoesNotTreatGapBucketsAsSamples(t *testing.T) {
 		{InBytes: 300, OutBytes: 600, InRateBytesPerSec: 1, OutRateBytesPerSec: 2, InPeakBytesPerSec: 1, OutPeakBytesPerSec: 2},
 	}
 
-	stat := buildTrafficStat(rows, cycle.Start, cycle.End, true, TrafficSnapshotSealed, DirectionBoth, UsageBilling, true)
+	stat, err := buildTrafficStat(rows, cycle.Start, cycle.End, true, TrafficSnapshotSealed, DirectionBoth, UsageBilling, true)
+	if err != nil {
+		t.Fatalf("buildTrafficStat() error = %v", err)
+	}
 
 	if stat.SampleCount != 0 {
 		t.Fatalf("sample count = %d, want 0", stat.SampleCount)
@@ -284,8 +390,8 @@ func TestTrafficCoverageDoesNotTreatGapBucketsAsSamples(t *testing.T) {
 	if stat.CoverageRatio != 0 {
 		t.Fatalf("coverage = %v, want 0", stat.CoverageRatio)
 	}
-	if !stat.Partial {
-		t.Fatalf("partial = false, want true")
+	if stat.DataComplete {
+		t.Fatal("data complete = true, want false")
 	}
 }
 
@@ -316,7 +422,7 @@ func TestTrafficStatEndUsesCompletedBucketForCurrentCycle(t *testing.T) {
 
 func TestTrafficDailyKeepsCurrentDayIncomplete(t *testing.T) {
 	statEnd := time.Date(2026, time.April, 2, 12, 0, 0, 0, time.UTC)
-	items := buildTrafficDaily(
+	items, err := buildTrafficDaily(
 		TrafficQuery{
 			ServerID:      7,
 			Iface:         "eth0",
@@ -349,6 +455,9 @@ func TestTrafficDailyKeepsCurrentDayIncomplete(t *testing.T) {
 		false,
 		TrafficSnapshotProvisional,
 	)
+	if err != nil {
+		t.Fatalf("buildTrafficDaily() error = %v", err)
+	}
 
 	if len(items) != 2 {
 		t.Fatalf("daily items = %d, want 2", len(items))
@@ -379,7 +488,10 @@ func TestTrafficInvalidBucketIgnoredForP95AndPeak(t *testing.T) {
 		},
 	}
 
-	stat := buildTrafficStat(rows, cycle.Start, cycle.End, true, TrafficSnapshotSealed, DirectionBoth, UsageBilling, true)
+	stat, err := buildTrafficStat(rows, cycle.Start, cycle.End, true, TrafficSnapshotSealed, DirectionBoth, UsageBilling, true)
+	if err != nil {
+		t.Fatalf("buildTrafficStat() error = %v", err)
+	}
 
 	if stat.InP95BytesPerSec != 0 || stat.OutP95BytesPerSec != 0 {
 		t.Fatalf("p95 = %v/%v, want 0/0", stat.InP95BytesPerSec, stat.OutP95BytesPerSec)
@@ -559,7 +671,7 @@ func traffic5mGapCount(rows []model.Traffic5m) int32 {
 func TestBuildTrafficMonthUsageRowsDoesNotWriteAllAggregate(t *testing.T) {
 	start := time.Date(2026, time.April, 1, 0, 0, 0, 0, time.UTC)
 	end := start.Add(5 * time.Minute)
-	settings := DefaultSettings()
+	settings := defaultSettings()
 	settings.CycleMode = CycleCalendarMonth
 	settings.BillingStartDay = 1
 	rows := []trafficUsageNICRow{
@@ -595,7 +707,7 @@ func TestBuildTrafficMonthUsageRowsDoesNotWriteAllAggregate(t *testing.T) {
 
 func TestBuildTrafficMonthUsageRowsKeepsIfaceRowsSeparate(t *testing.T) {
 	start := time.Date(2026, time.April, 1, 0, 0, 0, 0, time.UTC)
-	settings := DefaultSettings()
+	settings := defaultSettings()
 	settings.CycleMode = CycleCalendarMonth
 	settings.BillingStartDay = 1
 	rows := []trafficUsageNICRow{
@@ -627,7 +739,7 @@ func TestBuildTrafficMonthUsageRowsKeepsIfaceRowsSeparate(t *testing.T) {
 func TestBuildTrafficMonthUsageRowsKeepsGapBytesOutOfPeak(t *testing.T) {
 	start := time.Date(2026, time.April, 1, 0, 0, 0, 0, time.UTC)
 	end := start.Add(10 * time.Minute)
-	settings := DefaultSettings()
+	settings := defaultSettings()
 	settings.CycleMode = CycleCalendarMonth
 	settings.BillingStartDay = 1
 	rows := []trafficUsageNICRow{
@@ -656,7 +768,7 @@ func TestBuildTrafficMonthUsageRowsUsesGivenLocation(t *testing.T) {
 	loc := time.FixedZone("Asia/Test", 8*60*60)
 	start := time.Date(2026, time.March, 31, 16, 0, 0, 0, time.UTC)
 	end := start.Add(5 * time.Minute)
-	settings := DefaultSettings()
+	settings := defaultSettings()
 	settings.CycleMode = CycleCalendarMonth
 	settings.BillingStartDay = 1
 	rows := []trafficUsageNICRow{
@@ -683,7 +795,7 @@ func TestBuildTrafficMonthUsageRowsUsesGivenLocation(t *testing.T) {
 func TestBuildTrafficMonthUsageRowsUsesServerCycleOverride(t *testing.T) {
 	start := time.Date(2026, time.April, 16, 0, 0, 0, 0, time.UTC)
 	end := start.Add(5 * time.Minute)
-	settings := DefaultSettings()
+	settings := defaultSettings()
 	settings.CycleMode = CycleCalendarMonth
 	settings.BillingStartDay = 1
 	rows := []trafficUsageNICRow{
@@ -707,7 +819,10 @@ func TestBuildTrafficMonthUsageRowsUsesServerCycleOverride(t *testing.T) {
 		},
 	}
 
-	items := mustBuildTrafficMonthUsageRows(t, rows, settings, time.UTC, start, end, map[trafficUsageKey]time.Time{})
+	items, err := buildTrafficMonthUsageRows(rows, settings, time.UTC, start, end, map[trafficUsageKey]time.Time{})
+	if err != nil {
+		t.Fatalf("buildTrafficMonthUsageRows() error = %v", err)
+	}
 
 	if len(items) != 1 {
 		t.Fatalf("items = %d, want 1", len(items))
@@ -741,7 +856,7 @@ func mustBuildTrafficMonthUsageRows(t *testing.T, rows []trafficUsageNICRow, set
 	return items
 }
 
-func TestTrafficBillingSelectionUsesOutboundP95(t *testing.T) {
+func TestTrafficBillingSelection(t *testing.T) {
 	cycle := TrafficCycle{
 		Start: time.Date(2026, time.April, 1, 0, 0, 0, 0, time.UTC),
 		End:   time.Date(2026, time.April, 1, 8, 20, 0, 0, time.UTC),
@@ -760,88 +875,77 @@ func TestTrafficBillingSelectionUsesOutboundP95(t *testing.T) {
 			SampleCount:        1,
 		}
 	}
-
-	stat := buildTrafficStat(rows, cycle.Start, cycle.End, true, TrafficSnapshotSealed, DirectionOut, UsageBilling, true)
-
-	if stat.OutP95BytesPerSec != 95 {
-		t.Fatalf("out p95 = %v, want 95", stat.OutP95BytesPerSec)
-	}
-	if stat.InP95BytesPerSec != 1095 {
-		t.Fatalf("in p95 = %v, want 1095", stat.InP95BytesPerSec)
-	}
-	if stat.SelectedP95BytesPerSec != stat.OutP95BytesPerSec || stat.SelectedP95Direction != TrafficDirectionOutKey {
-		t.Fatalf("selected p95 = %v/%s, want outbound %v", stat.SelectedP95BytesPerSec, stat.SelectedP95Direction, stat.OutP95BytesPerSec)
-	}
-	if stat.SelectedPeakBytesPerSec != stat.OutPeakBytesPerSec || stat.SelectedPeakDirection != TrafficDirectionOutKey {
-		t.Fatalf("selected peak = %v/%s, want outbound %v", stat.SelectedPeakBytesPerSec, stat.SelectedPeakDirection, stat.OutPeakBytesPerSec)
-	}
-}
-
-func TestTrafficBillingSelectionUsesBothDirections(t *testing.T) {
-	cycle := TrafficCycle{
-		Start: time.Date(2026, time.April, 1, 0, 0, 0, 0, time.UTC),
-		End:   time.Date(2026, time.April, 1, 8, 20, 0, 0, time.UTC),
-	}
-	rows := make([]trafficBucket, 100)
-	for i := range rows {
-		inRate := float64(1001 + i)
-		outRate := float64(1 + i)
-		rows[i] = trafficBucket{
-			InBytes:            int64(inRate),
-			OutBytes:           int64(outRate),
-			InRateBytesPerSec:  inRate,
-			OutRateBytesPerSec: outRate,
-			InPeakBytesPerSec:  inRate,
-			OutPeakBytesPerSec: outRate,
-			SampleCount:        1,
-		}
-	}
-
-	stat := buildTrafficStat(rows, cycle.Start, cycle.End, true, TrafficSnapshotSealed, DirectionBoth, UsageBilling, true)
-
-	if stat.SelectedBytes != stat.InBytes+stat.OutBytes || stat.SelectedBytesDirection != TrafficDirectionTotal {
-		t.Fatalf("selected bytes = %d/%s, want total %d", stat.SelectedBytes, stat.SelectedBytesDirection, stat.InBytes+stat.OutBytes)
-	}
-	if stat.BothP95BytesPerSec != 1190 {
-		t.Fatalf("both p95 = %v, want 1190", stat.BothP95BytesPerSec)
-	}
-	if stat.SelectedP95BytesPerSec != stat.BothP95BytesPerSec || stat.SelectedP95Direction != TrafficDirectionTotal {
-		t.Fatalf("selected p95 = %v/%s, want total %v", stat.SelectedP95BytesPerSec, stat.SelectedP95Direction, stat.BothP95BytesPerSec)
-	}
-	if stat.SelectedPeakBytesPerSec != stat.BothPeakBytesPerSec || stat.SelectedPeakDirection != TrafficDirectionTotal {
-		t.Fatalf("selected peak = %v/%s, want total %v", stat.SelectedPeakBytesPerSec, stat.SelectedPeakDirection, stat.BothPeakBytesPerSec)
-	}
-}
-
-func TestTrafficBillingSelectionUsesMaxDirection(t *testing.T) {
-	cycle := TrafficCycle{
-		Start: time.Date(2026, time.April, 1, 0, 0, 0, 0, time.UTC),
-		End:   time.Date(2026, time.April, 1, 8, 20, 0, 0, time.UTC),
-	}
-	rows := make([]trafficBucket, 100)
-	for i := range rows {
-		inRate := float64(1001 + i)
-		outRate := float64(1 + i)
-		rows[i] = trafficBucket{
-			InBytes:            int64(inRate),
-			OutBytes:           int64(outRate),
-			InRateBytesPerSec:  inRate,
-			OutRateBytesPerSec: outRate,
-			InPeakBytesPerSec:  inRate,
-			OutPeakBytesPerSec: outRate,
-			SampleCount:        1,
-		}
+	tests := []struct {
+		name      string
+		direction DirectionMode
+		check     func(*testing.T, TrafficStat)
+	}{
+		{
+			name:      "outbound",
+			direction: DirectionOut,
+			check: func(t *testing.T, stat TrafficStat) {
+				if stat.OutP95BytesPerSec != 95 || stat.InP95BytesPerSec != 1095 {
+					t.Fatalf("p95 = in %v out %v, want in 1095 out 95", stat.InP95BytesPerSec, stat.OutP95BytesPerSec)
+				}
+				if stat.SelectedP95BytesPerSec != stat.OutP95BytesPerSec || stat.SelectedP95Direction != TrafficDirectionOutKey {
+					t.Fatalf("selected p95 = %v/%s, want outbound %v", stat.SelectedP95BytesPerSec, stat.SelectedP95Direction, stat.OutP95BytesPerSec)
+				}
+				if stat.SelectedPeakBytesPerSec != stat.OutPeakBytesPerSec || stat.SelectedPeakDirection != TrafficDirectionOutKey {
+					t.Fatalf("selected peak = %v/%s, want outbound %v", stat.SelectedPeakBytesPerSec, stat.SelectedPeakDirection, stat.OutPeakBytesPerSec)
+				}
+			},
+		},
+		{
+			name:      "both",
+			direction: DirectionBoth,
+			check: func(t *testing.T, stat TrafficStat) {
+				if stat.SelectedBytes != stat.InBytes+stat.OutBytes || stat.SelectedBytesDirection != TrafficDirectionTotal {
+					t.Fatalf("selected bytes = %d/%s, want total %d", stat.SelectedBytes, stat.SelectedBytesDirection, stat.InBytes+stat.OutBytes)
+				}
+				if stat.BothP95BytesPerSec != 1190 {
+					t.Fatalf("both p95 = %v, want 1190", stat.BothP95BytesPerSec)
+				}
+				if stat.SelectedP95BytesPerSec != stat.BothP95BytesPerSec || stat.SelectedP95Direction != TrafficDirectionTotal {
+					t.Fatalf("selected p95 = %v/%s, want total %v", stat.SelectedP95BytesPerSec, stat.SelectedP95Direction, stat.BothP95BytesPerSec)
+				}
+				if stat.SelectedPeakBytesPerSec != stat.BothPeakBytesPerSec || stat.SelectedPeakDirection != TrafficDirectionTotal {
+					t.Fatalf("selected peak = %v/%s, want total %v", stat.SelectedPeakBytesPerSec, stat.SelectedPeakDirection, stat.BothPeakBytesPerSec)
+				}
+			},
+		},
+		{
+			name:      "maximum direction",
+			direction: DirectionMax,
+			check: func(t *testing.T, stat TrafficStat) {
+				if stat.SelectedBytes != stat.InBytes || stat.SelectedBytesDirection != TrafficDirectionInKey {
+					t.Fatalf("selected bytes = %d/%s, want inbound %d", stat.SelectedBytes, stat.SelectedBytesDirection, stat.InBytes)
+				}
+				if stat.SelectedP95BytesPerSec != stat.InP95BytesPerSec || stat.SelectedP95Direction != TrafficDirectionInKey {
+					t.Fatalf("selected p95 = %v/%s, want inbound %v", stat.SelectedP95BytesPerSec, stat.SelectedP95Direction, stat.InP95BytesPerSec)
+				}
+				if stat.SelectedPeakBytesPerSec != stat.InPeakBytesPerSec || stat.SelectedPeakDirection != TrafficDirectionInKey {
+					t.Fatalf("selected peak = %v/%s, want inbound %v", stat.SelectedPeakBytesPerSec, stat.SelectedPeakDirection, stat.InPeakBytesPerSec)
+				}
+			},
+		},
 	}
 
-	stat := buildTrafficStat(rows, cycle.Start, cycle.End, true, TrafficSnapshotSealed, DirectionMax, UsageBilling, true)
-
-	if stat.SelectedBytes != stat.InBytes || stat.SelectedBytesDirection != TrafficDirectionInKey {
-		t.Fatalf("selected bytes = %d/%s, want inbound %d", stat.SelectedBytes, stat.SelectedBytesDirection, stat.InBytes)
-	}
-	if stat.SelectedP95BytesPerSec != stat.InP95BytesPerSec || stat.SelectedP95Direction != TrafficDirectionInKey {
-		t.Fatalf("selected p95 = %v/%s, want inbound %v", stat.SelectedP95BytesPerSec, stat.SelectedP95Direction, stat.InP95BytesPerSec)
-	}
-	if stat.SelectedPeakBytesPerSec != stat.InPeakBytesPerSec || stat.SelectedPeakDirection != TrafficDirectionInKey {
-		t.Fatalf("selected peak = %v/%s, want inbound %v", stat.SelectedPeakBytesPerSec, stat.SelectedPeakDirection, stat.InPeakBytesPerSec)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			stat, err := buildTrafficStat(
+				rows,
+				cycle.Start,
+				cycle.End,
+				true,
+				TrafficSnapshotSealed,
+				tt.direction,
+				UsageBilling,
+				true,
+			)
+			if err != nil {
+				t.Fatalf("buildTrafficStat() error = %v", err)
+			}
+			tt.check(t, stat)
+		})
 	}
 }

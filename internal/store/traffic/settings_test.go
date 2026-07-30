@@ -1,28 +1,68 @@
 package traffic
 
 import (
+	"context"
 	"errors"
 	"testing"
+
+	pgtest "dash/internal/testutil/postgres"
 )
 
-func TestSettingsDefaultDirectionIsOutbound(t *testing.T) {
-	settings := DefaultSettings()
-	if settings.DirectionMode != DirectionOut {
-		t.Fatalf("direction = %q, want %q", settings.DirectionMode, DirectionOut)
-	}
-
-	normalized, ok := NormalizeSettings(Settings{
+func TestNormalizeSettingsRejectsInvalidDirection(t *testing.T) {
+	_, err := NormalizeSettings(Settings{
 		GuestAccessMode: GuestAccessMode(""),
 		UsageMode:       UsageMode(""),
 		CycleMode:       BillingCycleMode(""),
 		BillingStartDay: 0,
 		DirectionMode:   DirectionMode("dominant"),
 	})
-	if ok {
-		t.Fatalf("NormalizeSettings(invalid) ok = true, want false")
+	if !errors.Is(err, ErrInvalidSettings) {
+		t.Fatalf("NormalizeSettings(invalid) error = %v, want %v", err, ErrInvalidSettings)
 	}
-	if normalized.DirectionMode != DirectionOut {
-		t.Fatalf("normalized direction = %q, want %q", normalized.DirectionMode, DirectionOut)
+}
+
+func TestIntegrationPatchSettingsMergesConcurrentFields(t *testing.T) {
+	st := New(pgtest.NewDB(t))
+	ctx := context.Background()
+
+	guest := GuestAccessByNode
+	usage := UsageBilling
+	ref := recentTrafficTestRef()
+	start := make(chan struct{})
+	done := make(chan error, 2)
+	go func() {
+		<-start
+		_, err := st.PatchSettingsAt(ctx, SettingsPatch{GuestAccessMode: &guest}, ref)
+		done <- err
+	}()
+	go func() {
+		<-start
+		_, err := st.PatchSettingsAt(ctx, SettingsPatch{UsageMode: &usage}, ref)
+		done <- err
+	}()
+	close(start)
+	for range 2 {
+		if err := <-done; err != nil {
+			t.Fatalf("PatchSettingsAt() error = %v", err)
+		}
+	}
+
+	got, err := st.GetSettings(ctx)
+	if err != nil {
+		t.Fatalf("GetSettings() error = %v", err)
+	}
+	if got.GuestAccessMode != guest || got.UsageMode != usage {
+		t.Fatalf("settings = %#v, want guest=%q usage=%q", got, guest, usage)
+	}
+}
+
+func defaultSettings() Settings {
+	return Settings{
+		GuestAccessMode: GuestAccessDisabled,
+		UsageMode:       UsageLite,
+		CycleMode:       CycleCalendarMonth,
+		BillingStartDay: 1,
+		DirectionMode:   DirectionOut,
 	}
 }
 
@@ -70,8 +110,8 @@ func TestNormalizeServerCycleSettings(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NormalizeServerCycleSettings(default) error = %v", err)
 	}
-	if cycle.Mode != ServerCycleDefault || cycle.BillingStartDay != 1 || cycle.BillingAnchorDate != "" || cycle.BillingTimezone != "" {
-		t.Fatalf("default cycle = %#v, want cleared default", cycle)
+	if cycle.Mode != ServerCycleMode(CycleCalendarMonth) || cycle.BillingStartDay != 1 || cycle.BillingAnchorDate != "" || cycle.BillingTimezone != "" {
+		t.Fatalf("default cycle = %#v, want explicit calendar month", cycle)
 	}
 
 	if _, err := NormalizeServerCycleSettings(ServerCycleSettings{
@@ -94,5 +134,21 @@ func TestNormalizeServerCycleSettings(t *testing.T) {
 		BillingAnchorDate: "not-a-date",
 	}); !errors.Is(err, ErrInvalidServerCycleAnchorDate) {
 		t.Fatalf("NormalizeServerCycleSettings(default invalid anchor) error = %v, want %v", err, ErrInvalidServerCycleAnchorDate)
+	}
+}
+
+func TestLegacyDefaultCycleDoesNotInheritGlobalCycle(t *testing.T) {
+	global := defaultSettings()
+	global.CycleMode = CycleClampMonthEnd
+	global.BillingStartDay = 20
+	global.BillingTimezone = "UTC"
+
+	got, err := SettingsWithServerCycle(global, ServerCycleSettings{Mode: ServerCycleDefault})
+	if err != nil {
+		t.Fatalf("SettingsWithServerCycle() error = %v", err)
+	}
+	if got.CycleMode != CycleCalendarMonth || got.BillingStartDay != 1 ||
+		got.BillingAnchorDate != "" || got.BillingTimezone != "" {
+		t.Fatalf("legacy default cycle = %#v, want explicit calendar month", got)
 	}
 }

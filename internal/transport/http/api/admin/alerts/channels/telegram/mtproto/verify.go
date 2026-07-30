@@ -10,8 +10,6 @@ import (
 	"dash/internal/transport/http/request"
 	"github.com/Ithildur/EiluneKit/http/response"
 	"github.com/Ithildur/EiluneKit/http/routes"
-
-	"gorm.io/gorm"
 )
 
 type verifyInput struct {
@@ -50,20 +48,20 @@ func (h *handler) verifyHandler(w http.ResponseWriter, r *http.Request) {
 			httperr.Write(w, http.StatusNotFound, "not_found", "login_id not found")
 			return
 		}
-		httperr.Write(w, http.StatusServiceUnavailable, "redis_error", "state unavailable")
+		httperr.Write(w, http.StatusServiceUnavailable, "login_state_error", "login state unavailable")
 		return
 	}
 
-	sessionText, passwordRequired, err := notify.VerifyCode(r.Context(), state, in.Code)
+	sessionText, passwordRequired, err := notify.VerifyCode(r.Context(), state.Auth, in.Code)
 	if err != nil {
 		httperr.Write(w, http.StatusServiceUnavailable, "notify_error", "failed to verify code")
 		return
 	}
 
 	if passwordRequired {
-		state.Session = sessionText
+		state.Auth.Session = sessionText
 		if err := saveLoginState(r.Context(), h.login, in.LoginID, state); err != nil {
-			httperr.Write(w, http.StatusServiceUnavailable, "redis_error", "state unavailable")
+			httperr.Write(w, http.StatusServiceUnavailable, "login_state_error", "login state unavailable")
 			return
 		}
 		response.WriteJSON(w, http.StatusOK, verifyView{
@@ -72,18 +70,10 @@ func (h *handler) verifyHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := updateSession(r.Context(), h.alert, state.ChannelID, sessionText); err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			httperr.Write(w, http.StatusNotFound, "not_found", "channel not found")
-			return
-		}
-		if errors.Is(err, errInvalidChannel) {
-			httperr.Write(w, http.StatusBadRequest, "invalid_fields", "invalid mtproto channel")
-			return
-		}
-		httperr.Write(w, http.StatusServiceUnavailable, "db_error", "failed to save session")
+	if err := updateSession(r.Context(), h.alert, state.ChannelID, state.ChannelRevision, sessionText); err != nil {
+		writeSessionUpdateError(w, err)
 		return
 	}
-	deleteLoginState(r.Context(), h.login, in.LoginID)
+	h.clearLoginState(r.Context(), in.LoginID)
 	w.WriteHeader(http.StatusNoContent)
 }

@@ -56,16 +56,20 @@ func (h *handler) codeHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	state, timeout, err := notify.StartLogin(r.Context(), cfg.APIID, cfg.APIHash, cfg.Phone)
+	auth, timeout, err := notify.StartLogin(r.Context(), cfg.APIID, cfg.APIHash, cfg.Phone)
 	if err != nil {
 		httperr.Write(w, http.StatusServiceUnavailable, "notify_error", "failed to send code")
 		return
 	}
-	state.ChannelID = in.ChannelID
+	state := loginState{
+		ChannelID:       in.ChannelID,
+		ChannelRevision: cfg.Revision,
+		Auth:            auth,
+	}
 
 	loginID := uuid.NewString()
 	if err := saveLoginState(r.Context(), h.login, loginID, state); err != nil {
-		httperr.Write(w, http.StatusServiceUnavailable, "redis_error", "state unavailable")
+		httperr.Write(w, http.StatusServiceUnavailable, "login_state_error", "login state unavailable")
 		return
 	}
 

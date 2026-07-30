@@ -3,17 +3,14 @@ package mounts
 import (
 	"context"
 	"errors"
-	"log/slog"
 	"net/http"
 
 	"dash/internal/alertspec"
-	"dash/internal/config"
 	"dash/internal/infra"
 	alertstore "dash/internal/store/alert"
 	nodestore "dash/internal/store/node"
 	"dash/internal/transport/http/httperr"
 	"dash/internal/transport/http/request"
-	"github.com/Ithildur/EiluneKit/contextutil"
 	"github.com/Ithildur/EiluneKit/http/middleware"
 	"github.com/Ithildur/EiluneKit/http/routes"
 )
@@ -39,8 +36,6 @@ var (
 )
 
 func (h *handler) replaceHandler(w http.ResponseWriter, r *http.Request) {
-	const warningCode = "alert_reconcile_delayed"
-
 	var in replaceInput
 	if ok := request.DecodeJSONOrWriteError(w, r, &in); !ok {
 		return
@@ -71,23 +66,6 @@ func (h *handler) replaceHandler(w http.ResponseWriter, r *http.Request) {
 	if err := save(r.Context(), h.alert, ruleIDs, serverIDs, *in.Mounted); err != nil {
 		httperr.Write(w, http.StatusServiceUnavailable, "db_error", "failed to update alert mounts")
 		return
-	}
-	warning := ""
-	if err := markDirty(r.Context(), h.alert, serverIDs); err != nil {
-		infra.WithModule("admin.alerts").Warn("alert reconcile queue update failed after mount replace", err,
-			slog.Int("rule_count", len(ruleIDs)),
-			slog.Int("server_count", len(serverIDs)),
-		)
-		if fallbackErr := enqueueFullReconcile(r.Context(), h.alert); fallbackErr != nil {
-			infra.WithModule("admin.alerts").Warn("alert full reconcile fallback enqueue failed after mount replace", fallbackErr,
-				slog.Int("rule_count", len(ruleIDs)),
-				slog.Int("server_count", len(serverIDs)),
-			)
-		}
-		warning = warningCode
-	}
-	if warning != "" {
-		httperr.WriteWarningHeader(w, warning)
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -170,25 +148,6 @@ func ensureKnown(ctx context.Context, alert *alertstore.Store, node *nodestore.S
 func save(ctx context.Context, st *alertstore.Store, ruleIDs, serverIDs []int64, mounted bool) error {
 	_, err := infra.WithPGWriteTimeout(ctx, func(c context.Context) (struct{}, error) {
 		return struct{}{}, st.SetRuleMounts(c, ruleIDs, serverIDs, mounted)
-	})
-	return err
-}
-
-func markDirty(ctx context.Context, st *alertstore.Store, serverIDs []int64) error {
-	_, err := contextutil.WithTimeout(ctx, config.RedisWriteTimeout, func(c context.Context) (struct{}, error) {
-		for _, id := range serverIDs {
-			if err := st.MarkServerDirty(c, id); err != nil {
-				return struct{}{}, err
-			}
-		}
-		return struct{}{}, nil
-	})
-	return err
-}
-
-func enqueueFullReconcile(ctx context.Context, st *alertstore.Store) error {
-	_, err := infra.WithPGWriteTimeout(ctx, func(c context.Context) (struct{}, error) {
-		return struct{}{}, st.EnqueueFullReconcileTask(c, "full_reconcile:global")
 	})
 	return err
 }

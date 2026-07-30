@@ -1,7 +1,6 @@
 package alert
 
 import (
-	"fmt"
 	"strings"
 	"time"
 
@@ -112,7 +111,18 @@ func EvaluateServer(serverID int64, snapshot *metrics.NodeView, compiled *Compil
 		}
 
 		value, ok, evalAt := metricValue(rule, snapshot, online, observedAt, now)
-		threshold, err := effectiveThreshold(rule, *snapshot)
+		threshold, err := alertspec.EffectiveThreshold(alertspec.Threshold{
+			Metric: rule.Metric,
+			Mode:   rule.ThresholdMode,
+			Value:  rule.Threshold,
+			Offset: rule.ThresholdOffset,
+		}, *snapshot)
+		if online && (err != nil || !ok) {
+			if exists && existing.Phase == RuntimePhaseFiring {
+				result.Next[key] = existing
+			}
+			continue
+		}
 		conditionTrue := err == nil && ok && alertspec.Compare(rule.Operator, value, threshold)
 
 		switch {
@@ -189,11 +199,6 @@ func EvaluateServer(serverID int64, snapshot *metrics.NodeView, compiled *Compil
 		}
 		result.Next[key] = state
 		closeReason := "rule_unmounted"
-		if compiled != nil {
-			if _, ok := compiled.ByStateKey[key]; ok {
-				closeReason = "rule_unmounted"
-			}
-		}
 		if !online {
 			closeReason = "snapshot_stale"
 		}
@@ -436,20 +441,6 @@ func shouldHeartbeatFiring(previous, next RuntimeState, interval time.Duration, 
 	return observedAt.Sub(lastHeartbeat) >= interval
 }
 
-func effectiveThreshold(rule CompiledRule, node metrics.NodeView) (float64, error) {
-	switch rule.ThresholdMode {
-	case "", "static":
-		return rule.Threshold, nil
-	case "core_plus":
-		if !alertspec.SupportsCorePlus(rule.Metric) {
-			return 0, fmt.Errorf("metric %s does not support core_plus", rule.Metric)
-		}
-		return float64(alertspec.ResolveCPUCores(node)) + rule.Threshold + rule.ThresholdOffset, nil
-	default:
-		return 0, fmt.Errorf("unsupported threshold_mode %s", rule.ThresholdMode)
-	}
-}
-
 func ruleForState(compiled *CompiledRules, state RuntimeState) CompiledRule {
 	if compiled != nil {
 		if rule, ok := compiled.ByStateKey[ruleStateKey(state.RuleID, state.Generation)]; ok {
@@ -459,9 +450,5 @@ func ruleForState(compiled *CompiledRules, state RuntimeState) CompiledRule {
 	return CompiledRule{
 		RuleID:     state.RuleID,
 		Generation: state.Generation,
-		Snapshot: RuleSnapshot{
-			RuleID:     state.RuleID,
-			Generation: state.Generation,
-		},
 	}
 }

@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
-	"strings"
 
 	"dash/internal/infra"
 	"dash/internal/model"
@@ -39,9 +38,9 @@ func (h *handler) createHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	name := strings.TrimSpace(in.Name)
-	if name == "" {
-		httperr.Write(w, http.StatusBadRequest, "invalid_fields", "name is required")
+	name, err := normalizeChannelName(in.Name)
+	if err != nil {
+		httperr.Write(w, http.StatusBadRequest, "invalid_fields", err.Error())
 		return
 	}
 	if in.Enabled == nil {

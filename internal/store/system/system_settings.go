@@ -2,14 +2,11 @@ package system
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"strings"
 
 	"dash/internal/model"
 	appversion "dash/internal/version"
-	"gorm.io/gorm"
-	"gorm.io/gorm/clause"
 )
 
 const systemSettingsID int16 = 1
@@ -22,6 +19,11 @@ const (
 
 type DashUpdateChannel = appversion.Channel
 type DashUpdateMode string
+
+type DashUpdatePolicy struct {
+	Channel DashUpdateChannel
+	Mode    DashUpdateMode
+}
 
 const (
 	DashUpdateChannelRelease    DashUpdateChannel = appversion.ChannelRelease
@@ -36,6 +38,14 @@ type SiteBrand struct {
 	LogoURL    string `json:"logo_url"`
 	PageTitle  string `json:"page_title"`
 	TopbarText string `json:"topbar_text"`
+}
+
+// SiteBrandPatch preserves PATCH tri-state semantics: nil leaves a field
+// unchanged, while an empty string resets that field to its default.
+type SiteBrandPatch struct {
+	LogoURL    *string
+	PageTitle  *string
+	TopbarText *string
 }
 
 func DefaultSiteBrand() SiteBrand {
@@ -86,42 +96,27 @@ func ParseDashUpdateMode(mode DashUpdateMode) (DashUpdateMode, bool) {
 	}
 }
 
-func defaultSystemSetting() model.SystemSetting {
-	brand := DefaultSiteBrand()
-	return model.SystemSetting{
-		ID:                systemSettingsID,
-		DashUpdateChannel: string(DashUpdateChannelRelease),
-		DashUpdateMode:    string(DashUpdateModeManual),
-		LogoURL:           brand.LogoURL,
-		PageTitle:         brand.PageTitle,
-		TopbarText:        brand.TopbarText,
-	}
-}
-
 func (s *Store) loadSettings(ctx context.Context) (model.SystemSetting, error) {
 	var item model.SystemSetting
 	err := s.db.WithContext(ctx).
 		Where("id = ?", systemSettingsID).
 		First(&item).Error
 	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return defaultSystemSetting(), nil
-		}
 		return model.SystemSetting{}, fmt.Errorf("load system settings: %w", err)
 	}
 	return item, nil
 }
 
-func (s *Store) saveSettingsColumns(ctx context.Context, item model.SystemSetting, columns []string) error {
-	item.ID = systemSettingsID
-	err := s.db.WithContext(ctx).
-		Clauses(clause.OnConflict{
-			Columns:   []clause.Column{{Name: "id"}},
-			DoUpdates: clause.AssignmentColumns(columns),
-		}).
-		Create(&item).Error
-	if err != nil {
-		return fmt.Errorf("save system settings: %w", err)
+func (s *Store) saveSettings(ctx context.Context, updates map[string]any) error {
+	result := s.db.WithContext(ctx).
+		Model(&model.SystemSetting{}).
+		Where("id = ?", systemSettingsID).
+		Updates(updates)
+	if result.Error != nil {
+		return fmt.Errorf("save system settings: %w", result.Error)
+	}
+	if result.RowsAffected != 1 {
+		return fmt.Errorf("save system settings: singleton row is missing")
 	}
 	return nil
 }
@@ -135,21 +130,39 @@ func (s *Store) GetActiveThemeID(ctx context.Context) (string, error) {
 }
 
 func (s *Store) SetActiveThemeID(ctx context.Context, id string) error {
-	item := defaultSystemSetting()
-	item.ActiveThemeID = id
-	return s.saveSettingsColumns(ctx, item, []string{"active_theme_id"})
+	return s.saveSettings(ctx, map[string]any{"active_theme_id": id})
 }
 
-func (s *Store) GetDashUpdateChannel(ctx context.Context) (DashUpdateChannel, error) {
+// GetDashUpdatePolicy reads the coupled update channel and mode from one
+// committed system_settings row.
+func (s *Store) GetDashUpdatePolicy(ctx context.Context) (DashUpdatePolicy, error) {
 	item, err := s.loadSettings(ctx)
 	if err != nil {
-		return DashUpdateChannelRelease, err
+		return DashUpdatePolicy{}, err
 	}
 	channel, ok := ParseDashUpdateChannel(DashUpdateChannel(item.DashUpdateChannel))
 	if !ok {
-		return DashUpdateChannelRelease, fmt.Errorf("invalid dash update channel %q", item.DashUpdateChannel)
+		return DashUpdatePolicy{}, fmt.Errorf("invalid dash update channel %q", item.DashUpdateChannel)
 	}
-	return channel, nil
+	mode, ok := ParseDashUpdateMode(DashUpdateMode(item.DashUpdateMode))
+	if !ok {
+		return DashUpdatePolicy{}, fmt.Errorf("invalid dash update mode %q", item.DashUpdateMode)
+	}
+	return DashUpdatePolicy{Channel: channel, Mode: mode}, nil
+}
+
+// GetDashUpdateChannel keeps the pre-policy reader available while the update
+// service is migrated in the following commit.
+func (s *Store) GetDashUpdateChannel(ctx context.Context) (DashUpdateChannel, error) {
+	policy, err := s.GetDashUpdatePolicy(ctx)
+	return policy.Channel, err
+}
+
+// GetDashUpdateMode keeps the pre-policy reader available while the update
+// service is migrated in the following commit.
+func (s *Store) GetDashUpdateMode(ctx context.Context) (DashUpdateMode, error) {
+	policy, err := s.GetDashUpdatePolicy(ctx)
+	return policy.Mode, err
 }
 
 func (s *Store) SetDashUpdateChannel(ctx context.Context, channel DashUpdateChannel) error {
@@ -157,21 +170,7 @@ func (s *Store) SetDashUpdateChannel(ctx context.Context, channel DashUpdateChan
 	if !ok {
 		return fmt.Errorf("invalid dash update channel %q", channel)
 	}
-	item := defaultSystemSetting()
-	item.DashUpdateChannel = string(normalized)
-	return s.saveSettingsColumns(ctx, item, []string{"dash_update_channel"})
-}
-
-func (s *Store) GetDashUpdateMode(ctx context.Context) (DashUpdateMode, error) {
-	item, err := s.loadSettings(ctx)
-	if err != nil {
-		return DashUpdateModeManual, err
-	}
-	mode, ok := ParseDashUpdateMode(DashUpdateMode(item.DashUpdateMode))
-	if !ok {
-		return DashUpdateModeManual, fmt.Errorf("invalid dash update mode %q", item.DashUpdateMode)
-	}
-	return mode, nil
+	return s.saveSettings(ctx, map[string]any{"dash_update_channel": string(normalized)})
 }
 
 func (s *Store) SetDashUpdateMode(ctx context.Context, mode DashUpdateMode) error {
@@ -179,9 +178,7 @@ func (s *Store) SetDashUpdateMode(ctx context.Context, mode DashUpdateMode) erro
 	if !ok {
 		return fmt.Errorf("invalid dash update mode %q", mode)
 	}
-	item := defaultSystemSetting()
-	item.DashUpdateMode = string(normalized)
-	return s.saveSettingsColumns(ctx, item, []string{"dash_update_mode"})
+	return s.saveSettings(ctx, map[string]any{"dash_update_mode": string(normalized)})
 }
 
 func (s *Store) GetSiteBrand(ctx context.Context) (SiteBrand, error) {
@@ -189,22 +186,40 @@ func (s *Store) GetSiteBrand(ctx context.Context) (SiteBrand, error) {
 	if err != nil {
 		return DefaultSiteBrand(), err
 	}
-	return NormalizeSiteBrand(SiteBrand{
+	stored := SiteBrand{
 		LogoURL:    item.LogoURL,
 		PageTitle:  item.PageTitle,
 		TopbarText: item.TopbarText,
-	}), nil
+	}
+	brand := NormalizeSiteBrand(stored)
+	if brand != stored {
+		return SiteBrand{}, fmt.Errorf("invalid stored site brand")
+	}
+	return brand, nil
 }
 
-func (s *Store) SetSiteBrand(ctx context.Context, brand SiteBrand) error {
-	item := defaultSystemSetting()
-	normalized := NormalizeSiteBrand(brand)
-	item.LogoURL = normalized.LogoURL
-	item.PageTitle = normalized.PageTitle
-	item.TopbarText = normalized.TopbarText
-	return s.saveSettingsColumns(ctx, item, []string{
-		"logo_url",
-		"page_title",
-		"topbar_text",
-	})
+func (s *Store) PatchSiteBrand(ctx context.Context, patch SiteBrandPatch) error {
+	updates := make(map[string]any, 3)
+	defaults := DefaultSiteBrand()
+	if patch.LogoURL != nil {
+		updates["logo_url"] = normalizeSiteBrandField(*patch.LogoURL, defaults.LogoURL)
+	}
+	if patch.PageTitle != nil {
+		updates["page_title"] = normalizeSiteBrandField(*patch.PageTitle, defaults.PageTitle)
+	}
+	if patch.TopbarText != nil {
+		updates["topbar_text"] = normalizeSiteBrandField(*patch.TopbarText, defaults.TopbarText)
+	}
+	if len(updates) == 0 {
+		return nil
+	}
+	return s.saveSettings(ctx, updates)
+}
+
+func normalizeSiteBrandField(value, fallback string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return fallback
+	}
+	return value
 }

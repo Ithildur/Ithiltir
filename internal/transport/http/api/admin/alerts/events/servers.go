@@ -29,7 +29,6 @@ func serversRoute(r *routes.Blueprint, h *handler) {
 }
 
 func (h *handler) serversHandler(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Cache-Control", "no-store")
 
 	refs, err := infra.WithPGReadTimeout(r.Context(), func(c context.Context) ([]nodestore.ServerRef, error) {
 		return h.nodes.ServerRefs(c)

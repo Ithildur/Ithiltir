@@ -3,6 +3,7 @@ package api
 import (
 	"fmt"
 	"math"
+	"net/http"
 	"net/netip"
 	"time"
 
@@ -19,6 +20,7 @@ import (
 	nodeapi "dash/internal/transport/http/api/node"
 	statisticsapi "dash/internal/transport/http/api/statistics"
 	versionapi "dash/internal/transport/http/api/version"
+	"dash/internal/transport/http/request"
 	authhttp "github.com/Ithildur/EiluneKit/auth/http"
 	authjwt "github.com/Ithildur/EiluneKit/auth/jwt"
 	kitmw "github.com/Ithildur/EiluneKit/http/middleware"
@@ -46,6 +48,7 @@ const (
 type routeSetup struct {
 	authHandler      *authhttp.Handler
 	bearer           routes.Middleware
+	optionalBearer   routes.Middleware
 	serverID         *serverid.Store
 	offlineThreshold time.Duration
 	staleAfterSec    int
@@ -84,6 +87,10 @@ func prepareRoutes(cfg *config.Config, deps Dependencies) (routeSetup, error) {
 	if err != nil {
 		return routeSetup{}, fmt.Errorf("api: build bearer middleware: %w", err)
 	}
+	optionalBearer, err := request.OptionalBearer(deps.Auth)
+	if err != nil {
+		return routeSetup{}, fmt.Errorf("api: build optional bearer middleware: %w", err)
+	}
 	installIDPath, err := config.InstallIDPath()
 	if err != nil {
 		return routeSetup{}, fmt.Errorf("api: resolve install id path: %w", err)
@@ -92,6 +99,7 @@ func prepareRoutes(cfg *config.Config, deps Dependencies) (routeSetup, error) {
 	return routeSetup{
 		authHandler:      authHandler,
 		bearer:           bearer,
+		optionalBearer:   optionalBearer,
 		serverID:         serverid.New(installIDPath),
 		offlineThreshold: offlineThreshold,
 		staleAfterSec:    staleAfterSec,
@@ -105,9 +113,9 @@ func buildRoutes(cfg *config.Config, deps Dependencies, setup routeSetup) *route
 	r.Include("/version", versionapi.Router())
 	r.Include("/admin", adminapi.Router(deps.Stores, cfg, deps.Theme, deps.TrafficRebuild, deps.DashUpdate), routes.IncludeAuth(routes.AuthRequired), routes.IncludeMiddleware(setup.bearer))
 	r.Include("/node", nodeapi.Router(deps.Stores, setup.serverID, setup.staleAfterSec, setup.trustedProxies), routes.IncludeAuth(nodeSecretAuth))
-	r.Include("/front", frontapi.Router(deps.Stores, setup.offlineThreshold, deps.Auth))
-	r.Include("/metrics", metricsapi.Router(deps.Stores, deps.Auth))
-	r.Include("/statistics", statisticsapi.Router(deps.Stores, deps.Auth, cfg.App.EffectiveLocation(), setup.bearer))
+	r.Include("/front", frontapi.Router(deps.Stores, setup.offlineThreshold, setup.optionalBearer))
+	r.Include("/metrics", metricsapi.Router(deps.Stores, setup.optionalBearer))
+	r.Include("/statistics", statisticsapi.Router(deps.Stores, cfg.App.EffectiveLocation(), setup.bearer, setup.optionalBearer))
 	return r
 }
 
@@ -122,6 +130,7 @@ func Register(router chi.Router, cfg *config.Config, deps Dependencies) error {
 
 	var mountErr error
 	router.Route("/api", func(r chi.Router) {
+		r.Use(apiBoundary)
 		r.MethodNotAllowed(kitmw.MethodNotAllowedResponder(r))
 		if err := blueprint.Mount(r); err != nil && mountErr == nil {
 			mountErr = err
@@ -140,6 +149,7 @@ func newAuthHandler(password string, auth authhttp.TokenManager, trustedProxies 
 		LoginAuthenticator: authenticator,
 		BasePath:           "/auth",
 		RefreshCookiePath:  "/api/auth",
+		CookieSameSite:     http.SameSiteStrictMode,
 		TrustedProxies:     trustedProxies,
 	})
 }

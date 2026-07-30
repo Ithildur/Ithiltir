@@ -9,22 +9,25 @@ import (
 	"gorm.io/datatypes"
 )
 
-func decodeChannelIDs(raw []byte) ([]int64, error) {
+func DecodeChannelIDs(raw []byte) ([]int64, error) {
 	if len(raw) == 0 {
-		return nil, nil
+		return nil, errors.New("channel_ids is empty")
 	}
 	var items []int64
 	if err := json.Unmarshal(raw, &items); err != nil {
 		return nil, err
 	}
+	if items == nil {
+		return nil, errors.New("channel_ids must be an array")
+	}
 	out := make([]int64, 0, len(items))
 	seen := make(map[int64]struct{}, len(items))
 	for _, id := range items {
 		if id <= 0 {
-			continue
+			return nil, errors.New("channel_ids contains a non-positive id")
 		}
 		if _, ok := seen[id]; ok {
-			continue
+			return nil, errors.New("channel_ids contains a duplicate id")
 		}
 		seen[id] = struct{}{}
 		out = append(out, id)

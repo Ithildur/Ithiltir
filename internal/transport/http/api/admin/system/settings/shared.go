@@ -2,7 +2,9 @@ package settings
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
+	"net/url"
 	"strings"
 	"unicode/utf8"
 
@@ -43,21 +45,11 @@ func loadSettings(ctx context.Context, metric *metricdata.Store, system *systems
 		if err != nil {
 			return settingsView{}, err
 		}
-		channel, err := system.GetDashUpdateChannel(c)
+		policy, err := system.GetDashUpdatePolicy(c)
 		if err != nil {
 			return settingsView{}, err
 		}
-		updateMode, err := system.GetDashUpdateMode(c)
-		if err != nil {
-			return settingsView{}, err
-		}
-		return settingsViewFrom(mode, channel, updateMode, brand), nil
-	})
-}
-
-func loadSiteBrand(ctx context.Context, st *systemstore.Store) (systemstore.SiteBrand, error) {
-	return infra.WithPGReadTimeout(ctx, func(c context.Context) (systemstore.SiteBrand, error) {
-		return st.GetSiteBrand(c)
+		return settingsViewFrom(mode, policy.Channel, policy.Mode, brand), nil
 	})
 }
 
@@ -67,7 +59,7 @@ func saveSettingsPatch(
 	mode *metricdata.HistoryGuestAccessMode,
 	channel *systemstore.DashUpdateChannel,
 	updateMode *systemstore.DashUpdateMode,
-	brand *systemstore.SiteBrand,
+	brand *systemstore.SiteBrandPatch,
 ) error {
 	_, err := infra.WithPGWriteTimeout(ctx, func(c context.Context) (struct{}, error) {
 		return struct{}{}, tx.WithSettingsTx(c, func(metric *metricdata.Store, system *systemstore.Store) error {
@@ -87,7 +79,7 @@ func saveSettingsPatch(
 				}
 			}
 			if brand != nil {
-				if err := system.SetSiteBrand(c, *brand); err != nil {
+				if err := system.PatchSiteBrand(c, *brand); err != nil {
 					return err
 				}
 			}
@@ -98,7 +90,7 @@ func saveSettingsPatch(
 }
 
 func saveSettingsDoc(ctx context.Context, tx settingsTx, doc settingsView) error {
-	brand := doc.siteBrand()
+	brand := fullSiteBrandPatch(doc.siteBrand())
 	return saveSettingsPatch(
 		ctx,
 		tx,
@@ -134,22 +126,42 @@ func (v settingsView) siteBrand() systemstore.SiteBrand {
 	}
 }
 
+func fullSiteBrandPatch(brand systemstore.SiteBrand) systemstore.SiteBrandPatch {
+	return systemstore.SiteBrandPatch{
+		LogoURL:    &brand.LogoURL,
+		PageTitle:  &brand.PageTitle,
+		TopbarText: &brand.TopbarText,
+	}
+}
+
 func (in settingsInput) hasSiteBrandFields() bool {
 	return in.LogoURL != nil || in.PageTitle != nil || in.TopbarText != nil
 }
 
-func (in settingsInput) applySiteBrand(current systemstore.SiteBrand) (systemstore.SiteBrand, error) {
-	next := current
+func (in settingsInput) siteBrandPatch() (systemstore.SiteBrandPatch, error) {
+	var patch systemstore.SiteBrandPatch
 	if in.LogoURL != nil {
-		next.LogoURL = *in.LogoURL
+		value, err := normalizeLogoURL(*in.LogoURL)
+		if err != nil {
+			return systemstore.SiteBrandPatch{}, err
+		}
+		patch.LogoURL = &value
 	}
 	if in.PageTitle != nil {
-		next.PageTitle = *in.PageTitle
+		value, err := normalizePageTitle(*in.PageTitle)
+		if err != nil {
+			return systemstore.SiteBrandPatch{}, err
+		}
+		patch.PageTitle = &value
 	}
 	if in.TopbarText != nil {
-		next.TopbarText = *in.TopbarText
+		value, err := normalizeTopbarText(*in.TopbarText)
+		if err != nil {
+			return systemstore.SiteBrandPatch{}, err
+		}
+		patch.TopbarText = &value
 	}
-	return validateSiteBrand(next)
+	return patch, nil
 }
 
 func (in settingsInput) requiredSiteBrand() (systemstore.SiteBrand, error) {
@@ -172,17 +184,52 @@ const (
 var errInvalidSiteBrand = errors.New("invalid site brand")
 
 func validateSiteBrand(brand systemstore.SiteBrand) (systemstore.SiteBrand, error) {
-	normalized := systemstore.NormalizeSiteBrand(brand)
-	if utf8.RuneCountInString(normalized.PageTitle) > maxPageTitleRunes {
-		return systemstore.SiteBrand{}, errInvalidSiteBrand
+	logoURL, err := normalizeLogoURL(brand.LogoURL)
+	if err != nil {
+		return systemstore.SiteBrand{}, err
 	}
-	if utf8.RuneCountInString(normalized.TopbarText) > maxTopbarTextRunes {
-		return systemstore.SiteBrand{}, errInvalidSiteBrand
+	pageTitle, err := normalizePageTitle(brand.PageTitle)
+	if err != nil {
+		return systemstore.SiteBrand{}, err
 	}
-	if len(normalized.LogoURL) > maxLogoURLBytes || !validLogoURL(normalized.LogoURL) {
-		return systemstore.SiteBrand{}, errInvalidSiteBrand
+	topbarText, err := normalizeTopbarText(brand.TopbarText)
+	if err != nil {
+		return systemstore.SiteBrand{}, err
 	}
-	return normalized, nil
+	return systemstore.SiteBrand{LogoURL: logoURL, PageTitle: pageTitle, TopbarText: topbarText}, nil
+}
+
+func normalizeLogoURL(value string) (string, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		value = systemstore.DefaultSiteLogoURL
+	}
+	if len(value) > maxLogoURLBytes || !validLogoURL(value) {
+		return "", errInvalidSiteBrand
+	}
+	return value, nil
+}
+
+func normalizePageTitle(value string) (string, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		value = systemstore.DefaultSitePageTitle
+	}
+	if utf8.RuneCountInString(value) > maxPageTitleRunes {
+		return "", errInvalidSiteBrand
+	}
+	return value, nil
+}
+
+func normalizeTopbarText(value string) (string, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		value = systemstore.DefaultSiteTopbarText
+	}
+	if utf8.RuneCountInString(value) > maxTopbarTextRunes {
+		return "", errInvalidSiteBrand
+	}
+	return value, nil
 }
 
 func validLogoURL(value string) bool {
@@ -190,12 +237,34 @@ func validLogoURL(value string) bool {
 		return true
 	}
 	if strings.HasPrefix(value, "/") {
-		return !strings.HasPrefix(value, "//")
+		if strings.HasPrefix(value, "//") || strings.ContainsAny(value, "\\\r\n\t") {
+			return false
+		}
+		parsed, err := url.ParseRequestURI(value)
+		return err == nil && parsed.Host == "" && !parsed.IsAbs()
 	}
 
-	lower := strings.ToLower(value)
-	if strings.HasPrefix(lower, "https://") || strings.HasPrefix(lower, "http://") {
-		return true
+	parsed, err := url.ParseRequestURI(value)
+	if err == nil && parsed.Scheme == "https" {
+		return parsed.Hostname() != "" && parsed.User == nil
 	}
-	return strings.HasPrefix(lower, "data:image/") && strings.Contains(lower, ";base64,")
+
+	media, payload, ok := strings.Cut(value, ",")
+	if !ok {
+		return false
+	}
+	switch strings.ToLower(media) {
+	case "data:image/svg+xml;base64",
+		"data:image/png;base64",
+		"data:image/jpeg;base64",
+		"data:image/gif;base64",
+		"data:image/webp;base64",
+		"data:image/ico;base64",
+		"data:image/x-icon;base64",
+		"data:image/vnd.microsoft.icon;base64":
+		_, err := base64.StdEncoding.Strict().DecodeString(payload)
+		return err == nil
+	default:
+		return false
+	}
 }

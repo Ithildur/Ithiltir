@@ -1,16 +1,12 @@
 package node
 
 import (
-	"context"
-	"errors"
 	"net/http"
 
 	"dash/internal/infra"
 	"dash/internal/transport/http/httperr"
 	"github.com/Ithildur/EiluneKit/http/response"
 	"github.com/Ithildur/EiluneKit/http/routes"
-	kitlog "github.com/Ithildur/EiluneKit/logging"
-	"gorm.io/gorm"
 )
 
 type identityView struct {
@@ -32,33 +28,18 @@ func (h *handler) identityHandler(w http.ResponseWriter, r *http.Request) {
 	defer r.Body.Close()
 	logger := infra.WithModule("node")
 
-	if err := h.validateIdentity(ctx, r, logger); err != nil {
-		httperr.WriteOrInternal(w, logger, err)
+	if _, _, err := h.authenticate(ctx, r, logger); err != nil {
+		h.writeError(w, r, logger, err)
 		return
 	}
 
 	identity, err := h.loadIdentity()
 	if err != nil {
 		logger.Error("load server identity failed", err)
-		httperr.WriteOrInternal(w, logger, httperr.ServiceUnavailable(err))
+		h.writeError(w, r, logger, httperr.ServiceUnavailable(err))
 		return
 	}
 	response.WriteJSON(w, http.StatusOK, identity)
-}
-
-func (h *handler) validateIdentity(ctx context.Context, r *http.Request, logger *kitlog.Helper) error {
-	secret, ok := readSecret(r)
-	if !ok {
-		return httperr.Unauthorized(nil)
-	}
-	if _, err := h.loadServer(ctx, secret); err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return httperr.Unauthorized(err)
-		}
-		logger.Error("redis load server failed", err)
-		return httperr.ServiceUnavailable(err)
-	}
-	return nil
 }
 
 func (h *handler) loadIdentity() (identityView, error) {

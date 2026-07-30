@@ -5,11 +5,11 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
-	"strings"
 
 	"dash/internal/infra"
 	"dash/internal/model"
 	"dash/internal/notify"
+	alertstore "dash/internal/store/alert"
 	"dash/internal/transport/http/httperr"
 	"dash/internal/transport/http/request"
 	"github.com/Ithildur/EiluneKit/http/middleware"
@@ -47,9 +47,9 @@ func (h *handler) replaceHandler(w http.ResponseWriter, r *http.Request, rawID s
 		return
 	}
 
-	name := strings.TrimSpace(in.Name)
-	if name == "" {
-		httperr.Write(w, http.StatusBadRequest, "invalid_fields", "name is required")
+	name, err := normalizeChannelName(in.Name)
+	if err != nil {
+		httperr.Write(w, http.StatusBadRequest, "invalid_fields", err.Error())
 		return
 	}
 	if in.Enabled == nil {
@@ -77,20 +77,26 @@ func (h *handler) replaceHandler(w http.ResponseWriter, r *http.Request, rawID s
 
 	cfg, err := notify.NormalizeConfigForUpdate(typ, in.Config, existing.Type, json.RawMessage(existing.Config))
 	if err != nil {
+		if errors.Is(err, notify.ErrStoredConfig) {
+			httperr.Write(w, http.StatusServiceUnavailable, "db_error", "stored channel config is invalid")
+			return
+		}
 		httperr.Write(w, http.StatusBadRequest, "invalid_fields", err.Error())
 		return
 	}
 
-	updates := map[string]any{
-		"name":    name,
-		"type":    typ,
-		"config":  datatypes.JSON(cfg),
-		"enabled": *in.Enabled,
-	}
-
 	if _, err := infra.WithPGWriteTimeout(r.Context(), func(c context.Context) (struct{}, error) {
-		return struct{}{}, h.store.ReplaceChannel(c, id, updates)
+		return struct{}{}, h.store.ReplaceChannel(c, id, existing.Revision, model.NotifyChannel{
+			Name:    name,
+			Type:    typ,
+			Config:  datatypes.JSON(cfg),
+			Enabled: *in.Enabled,
+		})
 	}); err != nil {
+		if errors.Is(err, alertstore.ErrChannelVersionStale) {
+			httperr.Write(w, http.StatusConflict, "channel_changed", "channel changed; retry with the latest configuration")
+			return
+		}
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			httperr.Write(w, http.StatusNotFound, "not_found", "channel not found")
 			return

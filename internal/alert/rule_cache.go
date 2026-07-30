@@ -2,6 +2,7 @@ package alert
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -23,19 +24,9 @@ func NewRuleCache(st *alertstore.Store, minRefresh time.Duration) *RuleCache {
 	}
 }
 
-func (c *RuleCache) Get() *CompiledRules {
-	if c == nil {
-		return emptyRules(time.Now().UTC())
-	}
-	if current := c.current.Load(); current != nil {
-		return current
-	}
-	return emptyRules(time.Now().UTC())
-}
-
 func (c *RuleCache) Refresh(ctx context.Context, force bool) (*CompiledRules, error) {
 	if c == nil || c.store == nil {
-		return emptyRules(time.Now().UTC()), nil
+		return nil, fmt.Errorf("alert rule store is not initialized")
 	}
 
 	if !force {
@@ -58,14 +49,16 @@ func (c *RuleCache) Refresh(ctx context.Context, force bool) (*CompiledRules, er
 		if current := c.current.Load(); current != nil {
 			return current, err
 		}
-		return emptyRules(time.Now().UTC()), err
+		return nil, err
 	}
 
-	compiled := CompileRules(items, time.Now().UTC())
+	compiled, err := CompileRules(items, time.Now().UTC())
+	if err != nil {
+		if current := c.current.Load(); current != nil {
+			return current, err
+		}
+		return nil, err
+	}
 	c.current.Store(compiled)
 	return compiled, nil
-}
-
-func emptyRules(refreshedAt time.Time) *CompiledRules {
-	return CompileRules(nil, refreshedAt)
 }

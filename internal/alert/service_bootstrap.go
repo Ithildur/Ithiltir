@@ -2,8 +2,7 @@ package alert
 
 import (
 	"context"
-	"encoding/json"
-	"fmt"
+	"maps"
 	"time"
 
 	"dash/internal/model"
@@ -33,7 +32,7 @@ func (s *Service) rebuildRuntimeFromOpenEvents(ctx context.Context) error {
 	}
 
 	for serverID := range targets {
-		current, err := loadRuntimeState(ctx, s.store, serverID)
+		loaded, err := readRuntimeState(ctx, s.store, serverID)
 		if err != nil {
 			return err
 		}
@@ -42,7 +41,7 @@ func (s *Service) rebuildRuntimeFromOpenEvents(ctx context.Context) error {
 		for key, state := range grouped[serverID] {
 			next[key] = state
 		}
-		if err := saveRuntimeState(ctx, s.store, serverID, current, next); err != nil {
+		if err := saveRuntimeState(ctx, s.store, serverID, loaded.States, next, loaded.Corrupt...); err != nil {
 			return err
 		}
 	}
@@ -56,30 +55,30 @@ func (s *Service) restoreOpenRuntime(ctx context.Context) error {
 	}
 	grouped := runtimeStatesFromOpenEvents(events, time.Now().UTC())
 	for serverID, states := range grouped {
-		current, err := loadRuntimeState(ctx, s.store, serverID)
+		loaded, err := readRuntimeState(ctx, s.store, serverID)
 		if err != nil {
 			return err
 		}
+		current := loaded.States
 		next := current
-		changed := false
+		changed := len(loaded.Corrupt) > 0
+		copied := false
 		for key, state := range states {
 			existing, ok := current[key]
 			if ok && existing.Phase == RuntimePhaseFiring && existing.EventID > 0 && existing.EventID == state.EventID {
 				continue
 			}
-			if !changed {
-				next = make(map[string]RuntimeState, len(current)+len(states))
-				for key, state := range current {
-					next[key] = state
-				}
-				changed = true
+			if !copied {
+				next = maps.Clone(current)
+				copied = true
 			}
 			next[key] = state
+			changed = true
 		}
 		if !changed {
 			continue
 		}
-		if err := saveRuntimeState(ctx, s.store, serverID, current, next); err != nil {
+		if err := saveRuntimeState(ctx, s.store, serverID, current, next, loaded.Corrupt...); err != nil {
 			return err
 		}
 	}
@@ -124,50 +123,4 @@ func float64OrZero(p *float64) float64 {
 		return 0
 	}
 	return *p
-}
-
-func ruleFromEvent(event model.AlertEvent) (CompiledRule, error) {
-	rule := CompiledRule{
-		RuleID:     event.RuleID,
-		Generation: event.RuleGeneration,
-		Snapshot:   RuleSnapshot{RuleID: event.RuleID, Generation: event.RuleGeneration},
-	}
-	if err := json.Unmarshal(event.RuleSnapshot, &rule.Snapshot); err != nil {
-		return rule, fmt.Errorf("decode rule_snapshot for event %d: %w", event.ID, err)
-	}
-	if err := validateSnapshot(event, rule.Snapshot); err != nil {
-		return rule, err
-	}
-	rule.Name = rule.Snapshot.Name
-	rule.Builtin = rule.Snapshot.Builtin
-	rule.Metric = rule.Snapshot.Metric
-	rule.Operator = rule.Snapshot.Operator
-	rule.Threshold = rule.Snapshot.Threshold
-	rule.DurationSec = rule.Snapshot.DurationSec
-	rule.CooldownMin = rule.Snapshot.CooldownMin
-	rule.ThresholdMode = rule.Snapshot.ThresholdMode
-	rule.ThresholdOffset = rule.Snapshot.ThresholdOffset
-	if updatedAt, err := time.Parse(time.RFC3339, rule.Snapshot.UpdatedAt); err == nil {
-		rule.GenerationUpdatedAt = updatedAt.UTC()
-	}
-	return rule, nil
-}
-
-func validateSnapshot(event model.AlertEvent, snapshot RuleSnapshot) error {
-	if snapshot.RuleID != event.RuleID {
-		return fmt.Errorf("rule_snapshot rule_id mismatch for event %d", event.ID)
-	}
-	if snapshot.Generation != event.RuleGeneration {
-		return fmt.Errorf("rule_snapshot generation mismatch for event %d", event.ID)
-	}
-	if snapshot.Metric == "" || snapshot.Operator == "" || snapshot.ThresholdMode == "" {
-		return fmt.Errorf("rule_snapshot is incomplete for event %d", event.ID)
-	}
-	if snapshot.DurationSec < 0 {
-		return fmt.Errorf("rule_snapshot duration_sec is invalid for event %d", event.ID)
-	}
-	if snapshot.CooldownMin < 0 {
-		return fmt.Errorf("rule_snapshot cooldown_min is invalid for event %d", event.ID)
-	}
-	return nil
 }

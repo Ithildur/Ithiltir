@@ -7,7 +7,11 @@ import (
 	"dash/internal/model"
 )
 
-var ErrAlertRuleVersionStale = errors.New("alert rule version stale")
+var (
+	ErrAlertRuleVersionStale    = errors.New("alert rule version stale")
+	ErrChannelVersionStale      = errors.New("notification channel version stale")
+	ErrNotificationStateChanged = errors.New("notification state changed")
+)
 
 type AlertOpenEventParams struct {
 	RuleID             int64
@@ -29,7 +33,7 @@ type AlertOpenEventResult struct {
 	Created bool
 }
 
-type AlertNotificationPayload struct {
+type NotificationPayload struct {
 	Title    string            `json:"title"`
 	Body     string            `json:"body"`
 	Metadata map[string]string `json:"metadata,omitempty"`
@@ -39,7 +43,25 @@ type AlertNotificationParams struct {
 	Transition  string
 	ChannelID   int64
 	ChannelType model.NotifyType
-	Payload     AlertNotificationPayload
+	Payload     NotificationPayload
+}
+
+type NotificationFailure struct {
+	ID              int64
+	ChannelID       int64
+	ChannelRevision int64
+	Code            string
+	LastError       string
+	FailedAt        time.Time
+	NextAttemptAt   time.Time
+}
+
+type ChannelFailure struct {
+	ID        int64
+	Revision  int64
+	Code      string
+	LastError string
+	FailedAt  time.Time
 }
 
 type CloseStatus string

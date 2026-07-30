@@ -42,7 +42,7 @@ func (h *handler) createHandler(w http.ResponseWriter, r *http.Request) {
 			collisions++
 			continue
 		}
-		if errors.Is(err, nodestore.ErrServerMetaCacheUpdate) || errors.Is(err, nodestore.ErrFrontCacheUpdate) {
+		if errors.Is(err, nodestore.ErrFrontCacheUpdate) {
 			httperr.Write(w, http.StatusServiceUnavailable, "redis_cache_error", "sync failed")
 			return
 		}

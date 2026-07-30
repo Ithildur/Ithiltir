@@ -164,6 +164,11 @@ func (s *Store) FetchHistory(ctx context.Context, q HistoryQuery) ([]HistoryPoin
 	if q.Step <= 0 {
 		return nil, fmt.Errorf("invalid step")
 	}
+	switch q.Aggregation {
+	case HistoryAggregationAvg, HistoryAggregationMax, HistoryAggregationMin, HistoryAggregationLast:
+	default:
+		return nil, fmt.Errorf("invalid history aggregation %q", q.Aggregation)
+	}
 	if q.Since.IsZero() || q.Until.IsZero() {
 		return nil, fmt.Errorf("invalid time range")
 	}
@@ -178,8 +183,14 @@ func (s *Store) FetchHistory(ctx context.Context, q HistoryQuery) ([]HistoryPoin
 }
 
 func (s *Store) fetchRaw(ctx context.Context, def metricDef, q HistoryQuery, interval string) ([]HistoryPoint, error) {
-	table := rawTableName(def.Source)
-	expr := aggregationSelect(q.Aggregation, def.Column, "collected_at")
+	table, err := rawTableName(def.Source)
+	if err != nil {
+		return nil, err
+	}
+	expr, err := aggregationSelect(q.Aggregation, def.Column, "collected_at")
+	if err != nil {
+		return nil, err
+	}
 	where, vals := deviceFilter(def, q.Device)
 	query := fmt.Sprintf(
 		"SELECT time_bucket(?, collected_at) AS ts, %s AS value FROM %s WHERE server_id = ? AND collected_at >= ? AND collected_at <= ?%s GROUP BY ts ORDER BY ts",
@@ -202,7 +213,10 @@ func (s *Store) fetchRollup(ctx context.Context, def metricDef, q HistoryQuery, 
 	if base <= 0 {
 		return nil, fmt.Errorf("invalid rollup base")
 	}
-	table := rollupTableName(def.Source, base)
+	table, err := rollupTableName(def.Source, base)
+	if err != nil {
+		return nil, err
+	}
 	rollupCol := fmt.Sprintf("%s_%s", def.RollupPrefix, q.Aggregation)
 	where, vals := deviceFilter(def, q.Device)
 	if base == q.Step {
@@ -221,7 +235,10 @@ func (s *Store) fetchRollup(ctx context.Context, def metricDef, q HistoryQuery, 
 		return points, nil
 	}
 
-	expr := aggregationSelect(q.Aggregation, rollupCol, "bucket")
+	expr, err := aggregationSelect(q.Aggregation, rollupCol, "bucket")
+	if err != nil {
+		return nil, err
+	}
 	query := fmt.Sprintf(
 		"SELECT time_bucket(?, bucket) AS ts, %s AS value FROM %s WHERE server_id = ? AND bucket >= ? AND bucket <= ?%s GROUP BY ts ORDER BY ts",
 		expr,
@@ -237,39 +254,45 @@ func (s *Store) fetchRollup(ctx context.Context, def metricDef, q HistoryQuery, 
 	return points, nil
 }
 
-func rawTableName(source metricSource) string {
+func rawTableName(source metricSource) (string, error) {
 	switch source {
 	case metricSourceServer:
-		return "server_metrics"
+		return "server_metrics", nil
 	case metricSourceDiskIO:
-		return "disk_metrics"
+		return "disk_metrics", nil
 	case metricSourceDiskUsage:
-		return "disk_usage_metrics"
+		return "disk_usage_metrics", nil
 	case metricSourceDiskPhysical:
-		return "disk_physical_metrics"
+		return "disk_physical_metrics", nil
 	default:
-		return "server_metrics"
+		return "", fmt.Errorf("invalid metric source %d", source)
 	}
 }
 
-func rollupTableName(source metricSource, base time.Duration) string {
+func rollupTableName(source metricSource, base time.Duration) (string, error) {
+	var prefix string
 	switch source {
 	case metricSourceServer:
-		return rollupTableByBase("server_metrics", base)
+		prefix = "server_metrics"
 	case metricSourceDiskIO:
-		return rollupTableByBase("disk_metrics", base)
+		prefix = "disk_metrics"
 	case metricSourceDiskUsage:
-		return rollupTableByBase("disk_usage_metrics", base)
+		prefix = "disk_usage_metrics"
 	default:
-		return rollupTableByBase("server_metrics", base)
+		return "", fmt.Errorf("invalid rollup metric source %d", source)
 	}
+	return rollupTableByBase(prefix, base)
 }
 
-func rollupTableByBase(prefix string, base time.Duration) string {
-	if base >= time.Hour {
-		return prefix + "_1h"
+func rollupTableByBase(prefix string, base time.Duration) (string, error) {
+	switch base {
+	case 15 * time.Minute:
+		return prefix + "_15m", nil
+	case time.Hour:
+		return prefix + "_1h", nil
+	default:
+		return "", fmt.Errorf("invalid rollup base %s", base)
 	}
-	return prefix + "_15m"
 }
 
 func formatInterval(d time.Duration) string {
@@ -280,16 +303,18 @@ func formatInterval(d time.Duration) string {
 	return fmt.Sprintf("%d seconds", seconds)
 }
 
-func aggregationSelect(aggregation HistoryAggregation, col, ts string) string {
+func aggregationSelect(aggregation HistoryAggregation, col, ts string) (string, error) {
 	switch aggregation {
+	case HistoryAggregationAvg:
+		return fmt.Sprintf("avg(%s)", col), nil
 	case HistoryAggregationMax:
-		return fmt.Sprintf("max(%s)", col)
+		return fmt.Sprintf("max(%s)", col), nil
 	case HistoryAggregationMin:
-		return fmt.Sprintf("min(%s)", col)
+		return fmt.Sprintf("min(%s)", col), nil
 	case HistoryAggregationLast:
-		return fmt.Sprintf("last(%s, %s)", col, ts)
+		return fmt.Sprintf("last(%s, %s)", col, ts), nil
 	default:
-		return fmt.Sprintf("avg(%s)", col)
+		return "", fmt.Errorf("invalid history aggregation %q", aggregation)
 	}
 }
 

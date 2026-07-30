@@ -3,15 +3,17 @@ package nodeid
 import (
 	"net/url"
 	"testing"
+	"time"
 
 	"dash/internal/store/frontcache"
+	"dash/internal/store/frontprojection"
 	nodestore "dash/internal/store/node"
 	"dash/internal/transport/http/request"
 )
 
 func TestLegacyUpdateURLAddsDeployGrant(t *testing.T) {
-	h := &handler{store: nodestore.New(nil, nil, frontcache.New(nil, nil))}
-
+	projection := frontprojection.New()
+	h := &handler{store: nodestore.New(nil, frontcache.New(nil, nil, projection), projection, time.Local)}
 	got, err := h.legacyUpdateURL("https://dash.example.com/deploy/linux/node_linux_amd64?mirror=local")
 	if err != nil {
 		t.Fatalf("legacyUpdateURL() error = %v", err)

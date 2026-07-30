@@ -36,7 +36,6 @@ func listRoute(r *routes.Blueprint, h *handler) {
 }
 
 func (h *handler) listHandler(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Cache-Control", "no-store")
 
 	items, err := infra.WithPGReadTimeout(r.Context(), func(c context.Context) ([]alertstore.AlertRuleItem, error) {
 		return h.store.ListRules(c)

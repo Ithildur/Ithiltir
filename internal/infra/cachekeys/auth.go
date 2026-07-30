@@ -1,6 +1,6 @@
 package cachekeys
 
 const (
-	// RedisKeyAuthTokenPrefix prefixes login tokens stored for validation or revocation.
+	// RedisKeyAuthTokenPrefix remains unchanged so sessions survive upgrades.
 	RedisKeyAuthTokenPrefix = "auth:jwt:"
 )

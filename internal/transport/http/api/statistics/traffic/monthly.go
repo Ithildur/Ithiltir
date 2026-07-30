@@ -23,6 +23,7 @@ func (h *handler) monthlyRoute(r *routes.Blueprint) {
 		"List monthly traffic summaries",
 		routes.Func(h.monthlyHandler),
 		routes.Auth(routes.AuthOptional),
+		routes.Use(h.optionalBearer),
 	)
 }
 
@@ -45,20 +46,25 @@ func (h *handler) monthlyHandler(w http.ResponseWriter, r *http.Request) {
 	in.Period = period
 	allowed, err := h.canReadTraffic(r.Context(), r, in.ServerID)
 	if err != nil {
-		httperr.TryWrite(w, httperr.ServiceUnavailable(err))
+		writeTrafficAccessError(w, err)
 		return
 	}
 	if !allowed {
 		httperr.TryWrite(w, httperr.Forbidden(errTrafficGuestForbidden))
 		return
 	}
-	effectiveSettings, err := loadEffectiveSettings(r.Context(), h.traffic, in.ServerID, settings)
+	effectiveSettings, err := loadEffectiveSettings(r.Context(), h.traffic, in.ServerID, settings, h.location)
 	if err != nil {
 		httperr.Write(w, http.StatusServiceUnavailable, "db_error", "failed to fetch traffic settings")
 		return
 	}
 	in.applySettings(effectiveSettings)
 
+	cycleLoc, err := trafficstore.SettingsLocation(effectiveSettings, h.location)
+	if err != nil {
+		httperr.TryWrite(w, httperr.ServiceUnavailable(err))
+		return
+	}
 	q := trafficstore.TrafficMonthlyQuery{
 		ServerID:          in.ServerID,
 		Iface:             in.Iface,
@@ -67,7 +73,7 @@ func (h *handler) monthlyHandler(w http.ResponseWriter, r *http.Request) {
 		BillingStartDay:   in.BillingStartDay,
 		BillingAnchorDate: in.BillingAnchorDate,
 		DirectionMode:     in.DirectionMode,
-		Location:          trafficstore.SettingsLocation(effectiveSettings, h.location),
+		Location:          cycleLoc,
 		Ref:               time.Now(),
 		Months:            in.Months,
 		Period:            in.Period,

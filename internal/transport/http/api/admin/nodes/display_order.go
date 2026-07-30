@@ -43,22 +43,15 @@ func (h *handler) displayOrderHandler(w http.ResponseWriter, r *http.Request) {
 	if _, err := infra.WithPGWriteTimeout(r.Context(), func(c context.Context) (struct{}, error) {
 		return struct{}{}, h.store.UpdateDisplayOrder(c, ids)
 	}); err != nil {
-		if errors.Is(err, nodestore.ErrServerMetaCacheUpdate) {
-			infra.WithModule("admin.nodes").Error("server cache sync failed after display order update", err,
-				slog.Int("count", len(ids)),
-			)
-			httperr.Write(w, http.StatusServiceUnavailable, "redis_cache_error", "sync failed")
-			return
-		} else if errors.Is(err, nodestore.ErrFrontCacheUpdate) {
+		if errors.Is(err, nodestore.ErrFrontCacheUpdate) {
 			infra.WithModule("admin.nodes").Warn("front cache sync failed after display order update", err,
 				slog.Int("count", len(ids)),
 			)
 			httperr.Write(w, http.StatusServiceUnavailable, "redis_cache_error", "sync failed")
 			return
-		} else {
-			httperr.Write(w, http.StatusServiceUnavailable, "db_error", "failed to update display order")
-			return
 		}
+		httperr.Write(w, http.StatusServiceUnavailable, "db_error", "failed to update display order")
+		return
 	}
 
 	w.WriteHeader(http.StatusNoContent)

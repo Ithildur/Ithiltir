@@ -9,9 +9,63 @@ import (
 	"dash/internal/infra"
 	"dash/internal/metrics"
 	"dash/internal/model"
+	"dash/internal/nodetags"
 )
 
 func (s *Store) FetchFrontNodes(ctx context.Context, staleAfterSec int, limit, offset int, authorized bool) ([]metrics.NodeView, error) {
+	projections, err := s.fetchFrontProjections(ctx, staleAfterSec, limit, offset, authorized, 0, true)
+	if err != nil {
+		return nil, err
+	}
+	if len(projections) == 0 {
+		return nil, nil
+	}
+	nodes := make([]metrics.NodeView, 0, len(projections))
+	for _, projection := range projections {
+		nodes = append(nodes, projection.Node)
+	}
+	return nodes, nil
+}
+
+// FetchCurrentNode reads the authoritative PostgreSQL projection. Alert
+// evaluation uses this path when no ingest snapshot is queued; a frontend
+// cache miss must never be interpreted as a recovered alert.
+func (s *Store) FetchCurrentNode(ctx context.Context, id int64, staleAfterSec int) (*metrics.NodeView, error) {
+	if id <= 0 {
+		return nil, nil
+	}
+	projections, err := s.fetchFrontProjections(ctx, staleAfterSec, 1, 0, true, id, false)
+	if err != nil || len(projections) == 0 {
+		return nil, err
+	}
+	node := projections[0].Node
+	return &node, nil
+}
+
+func (s *Store) ListCurrentNodeIDs(ctx context.Context) ([]int64, error) {
+	if s == nil || s.db == nil {
+		return nil, errMissingDB
+	}
+	var rows []struct {
+		ID int64
+	}
+	err := s.db.WithContext(ctx).
+		Table("server_current_metrics AS scm").
+		Select("scm.server_id AS id").
+		Joins("JOIN servers s ON s.id = scm.server_id AND s.is_deleted = ?", false).
+		Order("scm.server_id ASC").
+		Find(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+	ids := make([]int64, 0, len(rows))
+	for _, row := range rows {
+		ids = append(ids, row.ID)
+	}
+	return ids, nil
+}
+
+func (s *Store) fetchFrontProjections(ctx context.Context, staleAfterSec int, limit, offset int, authorized bool, serverID int64, withSmart bool) ([]frontNodeProjection, error) {
 	var rows []model.ServerCurrentMetric
 	query := s.db.WithContext(ctx).
 		Table("server_current_metrics AS scm").
@@ -19,6 +73,9 @@ func (s *Store) FetchFrontNodes(ctx context.Context, staleAfterSec int, limit, o
 		Joins("JOIN servers s ON s.id = scm.server_id AND s.is_deleted = ?", false)
 	if !authorized {
 		query = query.Where("s.is_guest_visible = ?", true)
+	}
+	if serverID > 0 {
+		query = query.Where("scm.server_id = ?", serverID)
 	}
 	if offset > 0 {
 		query = query.Offset(offset)
@@ -65,6 +122,7 @@ func (s *Store) FetchFrontNodes(ctx context.Context, staleAfterSec int, limit, o
 	}
 
 	nodes := make([]metrics.NodeView, 0, len(rows))
+	projections := make([]frontNodeProjection, 0, len(rows))
 	logger := infra.Log()
 	for _, m := range rows {
 		srv, ok := serversByID[m.ServerID]
@@ -88,16 +146,29 @@ func (s *Store) FetchFrontNodes(ctx context.Context, staleAfterSec int, limit, o
 		if nics, ok := nicsByID[m.ServerID]; ok {
 			report.Metrics.Network = nics
 		}
-		view, err := metrics.BuildNodeView(srv, report, staleAfterSec)
-		if err != nil {
-			return nil, err
+		if _, err := nodetags.ParseStored(srv.Tags); err != nil {
+			logger.Warn("discard invalid stored node tags", err,
+				slog.Int64("server_id", srv.ID),
+			)
 		}
+		view := metrics.BuildNodeView(srv, report, staleAfterSec)
 		nodes = append(nodes, view)
+		projections = append(projections, frontNodeProjection{
+			Node:        view,
+			Meta:        frontNodeMetaFromServer(srv),
+			MemoryTotal: m.MemTotal,
+			SwapTotal:   m.SwapTotal,
+		})
 	}
-	if err := s.applySmartRuntimeFields(ctx, nodes); err != nil {
-		return nil, fmt.Errorf("load smart runtime: %w", err)
+	if withSmart {
+		if err := s.applySmartRuntimeFields(ctx, nodes); err != nil {
+			return nil, fmt.Errorf("load smart runtime: %w", err)
+		}
 	}
-	return nodes, nil
+	for i := range nodes {
+		projections[i].Node = nodes[i]
+	}
+	return projections, nil
 }
 
 func (s *Store) fetchDiskLogical(ctx context.Context, ids []int64) (map[int64][]metrics.DiskLogicalMetrics, error) {
@@ -122,9 +193,9 @@ func (s *Store) fetchDiskLogical(ctx context.Context, ids []int64) (map[int64][]
 			Name:        row.Name,
 			DevicePath:  row.Path,
 			Ref:         row.Ref,
-			Total:       uint64(row.Total),
-			Used:        uint64(row.Used),
-			Free:        uint64(row.Free),
+			Total:       row.Total,
+			Used:        row.Used,
+			Free:        row.Free,
 			UsedRatio:   row.UsedRatio,
 			Health:      row.Health,
 			Level:       row.Level,
@@ -161,8 +232,8 @@ func (s *Store) fetchDiskBaseIO(ctx context.Context, ids []int64) (map[int64][]m
 			DevicePath:           row.Path,
 			Ref:                  row.Ref,
 			Role:                 row.Role,
-			ReadBytes:            uint64(row.ReadBytes),
-			WriteBytes:           uint64(row.WriteBytes),
+			ReadBytes:            row.ReadBytes,
+			WriteBytes:           row.WriteBytes,
 			ReadRateBytesPerSec:  row.ReadRateBytesPerSec,
 			WriteRateBytesPerSec: row.WriteRateBytesPerSec,
 			ReadIOPS:             row.ReadIOPS,
@@ -198,18 +269,18 @@ func (s *Store) fetchNICs(ctx context.Context, ids []int64) (map[int64][]metrics
 	for _, row := range rows {
 		out[row.ServerID] = append(out[row.ServerID], metrics.NetIOMetrics{
 			Name:                  row.Iface,
-			BytesRecv:             uint64(row.BytesRecv),
-			BytesSent:             uint64(row.BytesSent),
+			BytesRecv:             row.BytesRecv,
+			BytesSent:             row.BytesSent,
 			RecvRateBytesPerSec:   row.RecvRateBytesPerSec,
 			SentRateBytesPerSec:   row.SentRateBytesPerSec,
-			PacketsRecv:           uint64(row.PacketsRecv),
-			PacketsSent:           uint64(row.PacketsSent),
+			PacketsRecv:           row.PacketsRecv,
+			PacketsSent:           row.PacketsSent,
 			RecvRatePacketsPerSec: row.RecvRatePacketsPerSec,
 			SentRatePacketsPerSec: row.SentRatePacketsPerSec,
-			ErrIn:                 uint64(row.ErrIn),
-			ErrOut:                uint64(row.ErrOut),
-			DropIn:                uint64(row.DropIn),
-			DropOut:               uint64(row.DropOut),
+			ErrIn:                 row.ErrIn,
+			ErrOut:                row.ErrOut,
+			DropIn:                row.DropIn,
+			DropOut:               row.DropOut,
 		})
 	}
 	if len(out) == 0 {

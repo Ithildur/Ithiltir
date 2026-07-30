@@ -38,7 +38,6 @@ type statView struct {
 	CycleComplete           bool     `json:"cycle_complete"`
 	DataComplete            bool     `json:"data_complete"`
 	Status                  string   `json:"status"`
-	Partial                 bool     `json:"partial"`
 }
 
 type summaryView struct {
@@ -103,7 +102,6 @@ func statViewFrom(stat trafficstore.TrafficStat) statView {
 		CycleComplete:           stat.CycleComplete,
 		DataComplete:            stat.DataComplete,
 		Status:                  string(stat.Status),
-		Partial:                 stat.Partial,
 	}
 }
 

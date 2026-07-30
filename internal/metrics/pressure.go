@@ -69,7 +69,7 @@ func setPressureStats(avg10, avg60, avg300 **float64, total **int64, stats *Pres
 	*avg10 = float64Ptr(stats.Avg10)
 	*avg60 = float64Ptr(stats.Avg60)
 	*avg300 = float64Ptr(stats.Avg300)
-	*total = int64Ptr(int64(stats.Total))
+	*total = int64Ptr(stats.Total)
 }
 
 func pressureFromSnapshot(snap model.MetricsSnapshot) *Pressure {
@@ -115,7 +115,7 @@ func pressureStatsFromSnapshot(avg10, avg60, avg300 *float64, total *int64) *Pre
 		stats.Avg300 = *avg300
 	}
 	if total != nil && *total > 0 {
-		stats.Total = uint64(*total)
+		stats.Total = *total
 	}
 	return &stats
 }
@@ -124,11 +124,10 @@ func validPressureStats(stats *PressureStats) bool {
 	if stats == nil {
 		return true
 	}
-	const maxInt64 = uint64(^uint64(0) >> 1)
 	return validPressureAvg(stats.Avg10) &&
 		validPressureAvg(stats.Avg60) &&
 		validPressureAvg(stats.Avg300) &&
-		stats.Total <= maxInt64
+		stats.Total >= 0
 }
 
 func validPressureAvg(v float64) bool {

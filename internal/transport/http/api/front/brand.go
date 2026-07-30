@@ -21,8 +21,6 @@ func (h *handler) brandRoute(r *routes.Blueprint) {
 }
 
 func (h *handler) brandHandler(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Cache-Control", "no-store")
-
 	brand, err := h.loadBrand(r.Context())
 	if err != nil {
 		httperr.TryWrite(w, httperr.ServiceUnavailable(err))

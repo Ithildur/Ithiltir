@@ -41,25 +41,39 @@ func (s *Store) loadSnapshot(ctx context.Context, timeout time.Duration) ([]metr
 }
 
 func (s *Store) rebuildSnapshot(ctx context.Context, dbTimeout, cacheTimeout time.Duration, staleAfterSec int) ([]metrics.NodeView, error) {
-	dbCtx, dbCancel := context.WithTimeout(ctx, dbTimeout)
-	defer dbCancel()
+	for range projectionBuildAttempts {
+		version := s.currentProjectionVersion()
+		dbCtx, dbCancel := context.WithTimeout(ctx, dbTimeout)
+		projections, err := s.fetchFrontProjections(dbCtx, staleAfterSec, 0, 0, true, 0, true)
+		dbCancel()
+		if err != nil {
+			return nil, fmt.Errorf("fetch front nodes: %w", err)
+		}
+		if projections == nil {
+			projections = make([]frontNodeProjection, 0)
+		}
 
-	nodes, err := s.FetchFrontNodes(dbCtx, staleAfterSec, 0, 0, true)
-	if err != nil {
-		return nil, fmt.Errorf("fetch front nodes: %w", err)
+		cacheCtx, cacheCancel := context.WithTimeout(ctx, cacheTimeout)
+		published, err := s.replaceFrontSnapshotIfCurrent(cacheCtx, projections, version)
+		cacheCancel()
+		if err != nil {
+			return nil, fmt.Errorf("publish front snapshot: %w", err)
+		}
+		if published {
+			cacheCtx, cacheCancel := context.WithTimeout(ctx, cacheTimeout)
+			cached, ok, cacheErr := s.fetchSnapshotCache(cacheCtx)
+			cacheCancel()
+			if cacheErr == nil && ok {
+				return cached, nil
+			}
+			nodes := make([]metrics.NodeView, 0, len(projections))
+			for _, projection := range projections {
+				nodes = append(nodes, projection.Node)
+			}
+			return nodes, nil
+		}
 	}
-	if nodes == nil {
-		nodes = make([]metrics.NodeView, 0)
-	}
-
-	cacheCtx, cacheCancel := context.WithTimeout(ctx, cacheTimeout)
-	defer cacheCancel()
-
-	if err := s.replaceFrontSnapshot(cacheCtx, nodes); err != nil {
-		return nil, fmt.Errorf("publish front snapshot: %w", err)
-	}
-
-	return nodes, nil
+	return nil, errProjectionChanged
 }
 
 func (s *Store) applySmartRuntimeFields(ctx context.Context, nodes []metrics.NodeView) error {

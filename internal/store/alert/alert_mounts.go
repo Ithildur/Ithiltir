@@ -2,6 +2,7 @@ package alert
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"dash/internal/model"
@@ -36,6 +37,21 @@ func (s *Store) SetRuleMounts(ctx context.Context, ruleIDs, serverIDs []int64, e
 	if len(ruleIDs) == 0 || len(serverIDs) == 0 {
 		return nil
 	}
+	if err := s.WithTx(ctx, func(tx *Store) error {
+		if err := tx.setRuleMounts(ctx, ruleIDs, serverIDs, enabled); err != nil {
+			return fmt.Errorf("set alert rule mounts: %w", err)
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+	for _, serverID := range serverIDs {
+		s.MarkServerDirty(serverID)
+	}
+	return nil
+}
+
+func (s *Store) setRuleMounts(ctx context.Context, ruleIDs, serverIDs []int64, enabled bool) error {
 	now := time.Now().UTC()
 	rows := make([]model.AlertRuleMount, 0, len(ruleIDs)*len(serverIDs))
 	for _, ruleID := range ruleIDs {

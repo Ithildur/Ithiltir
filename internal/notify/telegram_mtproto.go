@@ -17,7 +17,6 @@ import (
 )
 
 type MTProtoLoginState struct {
-	ChannelID     int64  `json:"channel_id"`
 	APIID         int    `json:"api_id"`
 	APIHash       string `json:"api_hash"`
 	Phone         string `json:"phone"`
@@ -66,7 +65,7 @@ func StartLogin(ctx context.Context, apiID int, apiHash, phone string) (MTProtoL
 }
 
 func VerifyCode(ctx context.Context, state MTProtoLoginState, code string) (string, bool, error) {
-	storage, err := loadSession(state.Session)
+	storage, err := loadSession(ctx, state.Session)
 	if err != nil {
 		return "", false, err
 	}
@@ -99,7 +98,7 @@ func VerifyCode(ctx context.Context, state MTProtoLoginState, code string) (stri
 }
 
 func SubmitPassword(ctx context.Context, state MTProtoLoginState, password string) (string, error) {
-	storage, err := loadSession(state.Session)
+	storage, err := loadSession(ctx, state.Session)
 	if err != nil {
 		return "", err
 	}
@@ -121,7 +120,7 @@ func PingSession(ctx context.Context, apiID int, apiHash, sessionText string) er
 	if strings.TrimSpace(sessionText) == "" {
 		return errors.New("session is empty")
 	}
-	storage, err := loadSession(sessionText)
+	storage, err := loadSession(ctx, sessionText)
 	if err != nil {
 		return err
 	}
@@ -139,7 +138,7 @@ func PingSession(ctx context.Context, apiID int, apiHash, sessionText string) er
 }
 
 func sendMTProtoMessage(ctx context.Context, cfg TelegramMTProtoConfig, peer tg.InputPeerClass, text string) error {
-	storage, err := loadSession(cfg.Session)
+	storage, err := loadSession(ctx, cfg.Session)
 	if err != nil {
 		return err
 	}
@@ -264,7 +263,7 @@ func extractSentCode(sent tg.AuthSentCodeClass) (string, int, error) {
 	}
 }
 
-func loadSession(encoded string) (*session.StorageMemory, error) {
+func loadSession(ctx context.Context, encoded string) (*session.StorageMemory, error) {
 	storage := &session.StorageMemory{}
 	encoded = strings.TrimSpace(encoded)
 	if encoded == "" {
@@ -274,7 +273,7 @@ func loadSession(encoded string) (*session.StorageMemory, error) {
 	if err != nil {
 		return nil, fmt.Errorf("invalid session")
 	}
-	if err := storage.StoreSession(context.Background(), data); err != nil {
+	if err := storage.StoreSession(ctx, data); err != nil {
 		return nil, err
 	}
 	return storage, nil

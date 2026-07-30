@@ -5,6 +5,7 @@ import (
 	"crypto/sha1"
 	"crypto/tls"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"html"
 	"mime"
@@ -67,7 +68,7 @@ func sendSMTP(ctx context.Context, cfg EmailConfig, msg Message) error {
 
 	if cfg.UseTLS && cfg.SMTPPort != 465 {
 		if ok, _ := client.Extension("STARTTLS"); !ok {
-			return fmt.Errorf("smtp server does not support starttls")
+			return blockedError("smtp_starttls_unavailable", errors.New("smtp server does not support starttls"))
 		}
 		if err := client.StartTLS(&tls.Config{ServerName: cfg.SMTPHost}); err != nil {
 			return err

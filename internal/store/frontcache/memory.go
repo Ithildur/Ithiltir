@@ -4,17 +4,21 @@ import "sync"
 
 type memState struct {
 	mu                sync.RWMutex
-	frontNodes        map[string][]byte
+	frontIDs          map[string]struct{}
+	frontRuntime      map[string][]byte
+	frontMetadata     map[string][]byte
 	frontSmart        map[string][]byte
 	frontThermal      map[string][]byte
-	frontMeta         bool
+	frontCatalog      bool
 	frontGuestVisible map[string]struct{}
-	guestVisibleMeta  bool
+	guestCatalog      bool
 }
 
 func newMemory() *memState {
 	return &memState{
-		frontNodes:        make(map[string][]byte),
+		frontIDs:          make(map[string]struct{}),
+		frontRuntime:      make(map[string][]byte),
+		frontMetadata:     make(map[string][]byte),
 		frontSmart:        make(map[string][]byte),
 		frontThermal:      make(map[string][]byte),
 		frontGuestVisible: make(map[string]struct{}),

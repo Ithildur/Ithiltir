@@ -14,9 +14,6 @@ import (
 	"dash/internal/version"
 	"github.com/Ithildur/EiluneKit/http/decoder"
 	"github.com/Ithildur/EiluneKit/http/routes"
-	kitlog "github.com/Ithildur/EiluneKit/logging"
-
-	"gorm.io/gorm"
 )
 
 func (h *handler) staticRoute(r *routes.Blueprint) {
@@ -33,15 +30,20 @@ func (h *handler) staticHandler(w http.ResponseWriter, r *http.Request) {
 	defer r.Body.Close()
 	logger := infra.WithModule("node")
 
-	validated, err := h.validateStatic(ctx, r, logger)
+	secret, server, err := h.authenticate(ctx, r, logger)
 	if err != nil {
-		httperr.WriteOrInternal(w, logger, err)
+		h.writeError(w, r, logger, err)
+		return
+	}
+	validated, err := validateStatic(r, secret, server)
+	if err != nil {
+		h.writeError(w, r, logger, err)
 		return
 	}
 
-	if err := h.saveStatic(ctx, validated.secret, validated.server.ID, validated.updates); err != nil {
+	if err := h.saveStatic(ctx, validated.secret, validated.server.ID, validated.patch); err != nil {
 		logger.Error("save static metrics failed", err)
-		httperr.WriteOrInternal(w, logger, httperr.ServiceUnavailable(err))
+		h.writeError(w, r, logger, httperr.ServiceUnavailable(err))
 		return
 	}
 
@@ -50,17 +52,12 @@ func (h *handler) staticHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 type validatedStatic struct {
-	secret  string
-	server  model.Server
-	updates nodestore.ServerStaticPatch
+	secret string
+	server model.Server
+	patch  nodestore.ServerStaticPatch
 }
 
-func (h *handler) validateStatic(ctx context.Context, r *http.Request, logger *kitlog.Helper) (*validatedStatic, error) {
-	secret, ok := readSecret(r)
-	if !ok {
-		return nil, httperr.Unauthorized(nil)
-	}
-
+func validateStatic(r *http.Request, secret string, server model.Server) (*validatedStatic, error) {
 	snapshot, err := decodeStatic(r)
 	if err != nil {
 		if errors.Is(err, decoder.ErrBodyTooLarge) {
@@ -73,23 +70,13 @@ func (h *handler) validateStatic(ctx context.Context, r *http.Request, logger *k
 		return nil, err
 	}
 
-	server, err := h.loadServer(ctx, secret)
-	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, httperr.Unauthorized(err)
-		}
-		logger.Error("redis load server failed", err)
-		return nil, httperr.ServiceUnavailable(err)
-	}
-
 	disk, hasDisk := selectLargestDisk(snapshot.Disk.Logical)
-	updates := staticPatch(snapshot, disk, hasDisk, r)
-	applyDisplayName(&server, snapshot, &updates)
+	patch := staticPatch(snapshot, disk, hasDisk, r)
 
 	return &validatedStatic{
-		secret:  secret,
-		server:  server,
-		updates: updates,
+		secret: secret,
+		server: server,
+		patch:  patch,
 	}, nil
 }
 
@@ -104,6 +91,9 @@ func normalizeStatic(snapshot *metrics.StaticMetrics) error {
 	if snapshot.Timestamp.IsZero() || snapshot.ReportIntervalSeconds <= 0 {
 		return httperr.InvalidStaticPayload(nil)
 	}
+	if err := validateStaticNumbers(*snapshot); err != nil {
+		return httperr.InvalidStaticPayload(err)
+	}
 	sys := &snapshot.System
 	for _, field := range []*string{
 		&sys.Hostname,
@@ -115,6 +105,35 @@ func normalizeStatic(snapshot *metrics.StaticMetrics) error {
 	} {
 		if err := requireTrimmed(field); err != nil {
 			return err
+		}
+	}
+	if err := metrics.ValidateStaticText(*snapshot); err != nil {
+		return httperr.InvalidStaticPayload(err)
+	}
+	return nil
+}
+
+func validateStaticNumbers(snapshot metrics.StaticMetrics) error {
+	info := snapshot.CPU.Info
+	if info.Sockets < 0 || info.CoresPhysical < 0 || info.CoresLogical < 0 {
+		return errors.New("negative cpu topology")
+	}
+	if snapshot.Memory.Total < 0 || (snapshot.Memory.SwapTotal != nil && *snapshot.Memory.SwapTotal < 0) {
+		return errors.New("negative memory capacity")
+	}
+	for _, disk := range snapshot.Disk.Logical {
+		if disk.Total < 0 || disk.Used < 0 || disk.Free < 0 {
+			return errors.New("negative logical disk capacity")
+		}
+		for _, mountpoint := range disk.Mountpoints {
+			if mountpoint.InodesTotal < 0 || mountpoint.InodesUsed < 0 || mountpoint.InodesFree < 0 {
+				return errors.New("negative logical disk inode count")
+			}
+		}
+	}
+	for _, filesystem := range snapshot.Disk.Filesystems {
+		if filesystem.Total < 0 || filesystem.InodesTotal < 0 {
+			return errors.New("negative filesystem capacity")
 		}
 	}
 	return nil
@@ -136,102 +155,80 @@ func decodeStatic(r *http.Request) (metrics.StaticMetrics, error) {
 	return snapshot, nil
 }
 
-func (h *handler) saveStatic(ctx context.Context, secret string, serverID int64, updates nodestore.ServerStaticPatch) error {
+func (h *handler) saveStatic(ctx context.Context, secret string, serverID int64, patch nodestore.ServerStaticPatch) error {
 	_, err := infra.WithPGWriteTimeout(ctx, func(ctx context.Context) (struct{}, error) {
-		return struct{}{}, h.node.UpdateStatic(ctx, secret, serverID, updates)
+		return struct{}{}, h.node.UpdateStatic(ctx, secret, serverID, patch)
 	})
 	return err
 }
 
-func applyDisplayName(server *model.Server, snapshot metrics.StaticMetrics, updates *nodestore.ServerStaticPatch) {
-	hostname := snapshot.System.Hostname
-	updates.Hostname = &hostname
-
-	displayName := strings.TrimSpace(server.Name)
-	if displayName == "" || displayName == "Untitled" {
-		updates.Name = &hostname
-	}
-}
-
 func staticPatch(snapshot metrics.StaticMetrics, disk metrics.StaticDiskLogical, hasDisk bool, r *http.Request) nodestore.ServerStaticPatch {
-	var updates nodestore.ServerStaticPatch
 	sys := snapshot.System
-	// /api/node/static is fed by the official node agent only.
-	// The agent validates these core static fields before sending, so treat them as required here.
-	osVal := sys.OS
-	updates.OS = &osVal
-	platformVal := sys.Platform
-	updates.Platform = &platformVal
-	platformVersionVal := sys.PlatformVersion
-	updates.PlatformVersion = &platformVersionVal
-	kernelVersionVal := sys.KernelVersion
-	updates.KernelVersion = &kernelVersionVal
-	archVal := sys.Arch
-	updates.Arch = &archVal
-	agentVersion := snapshot.Version
-	updates.AgentVersion = &agentVersion
-
 	info := snapshot.CPU.Info
-	if info.ModelName != "" {
-		val := info.ModelName
-		updates.CPUModel = &val
+	patch := nodestore.ServerStaticPatch{
+		Name:            &sys.Hostname,
+		Hostname:        &sys.Hostname,
+		OS:              &sys.OS,
+		Platform:        &sys.Platform,
+		PlatformVersion: &sys.PlatformVersion,
+		KernelVersion:   &sys.KernelVersion,
+		Arch:            &sys.Arch,
+		AgentVersion:    &snapshot.Version,
+		RaidSupported:   &snapshot.Raid.Supported,
+		RaidAvailable:   &snapshot.Raid.Available,
 	}
-	if info.VendorID != "" {
-		val := info.VendorID
-		updates.CPUVendor = &val
-	}
+	patch.IntervalSec = &snapshot.ReportIntervalSeconds
 
-	coresPhys := int16(info.CoresPhysical)
-	updates.CPUCoresPhys = &coresPhys
-	coresLog := int16(info.CoresLogical)
-	updates.CPUCoresLog = &coresLog
-	sockets := int16(info.Sockets)
-	updates.CPUSockets = &sockets
+	// CPU identity/topology and physical memory are last-known observations.
+	// Zero or empty means the collector could not resolve the field, so it must
+	// not erase a valid stored value.
+	if v := strings.TrimSpace(info.ModelName); v != "" {
+		patch.CPUModel = &v
+	}
+	if v := strings.TrimSpace(info.VendorID); v != "" {
+		patch.CPUVendor = &v
+	}
+	if info.CoresPhysical > 0 {
+		patch.CPUCoresPhys = &info.CoresPhysical
+	}
+	if info.CoresLogical > 0 {
+		patch.CPUCoresLog = &info.CoresLogical
+	}
+	if info.Sockets > 0 {
+		patch.CPUSockets = &info.Sockets
+	}
 	if info.FrequencyMhz > 0 {
-		v := info.FrequencyMhz
-		updates.CPUMhz = &v
+		patch.CPUMhz = &info.FrequencyMhz
 	}
-
-	memTotal := int64(snapshot.Memory.Total)
-	updates.MemTotal = &memTotal
-	if snapshot.Memory.SwapTotal > 0 {
-		v := int64(snapshot.Memory.SwapTotal)
-		updates.SwapTotal = &v
+	if snapshot.Memory.Total > 0 {
+		patch.MemTotal = &snapshot.Memory.Total
 	}
-
-	intervalSec := int32(snapshot.ReportIntervalSeconds)
-	updates.IntervalSec = &intervalSec
+	// Unlike unavailable hardware data, zero swap is an observed state: it means
+	// swap was disabled and must clear any previously stored positive capacity.
+	if snapshot.Memory.SwapTotal != nil {
+		patch.SwapTotal = snapshot.Memory.SwapTotal
+	}
 
 	if hasDisk {
-		v := int64(disk.Total)
-		updates.DiskTotal = &v
 		label := strings.TrimSpace(disk.Mountpoint)
 		if label == "" {
 			label = strings.TrimSpace(disk.Ref)
 		}
 		if label != "" {
-			updates.RootPath = &label
-		}
-		fsType := mountpointFSType(disk)
-		if fsType != "" {
-			updates.RootFSType = &fsType
-		} else {
-			empty := ""
-			updates.RootFSType = &empty
+			patch.Disk = &nodestore.DiskObservation{
+				Path:   label,
+				FSType: mountpointFSType(disk),
+				Total:  disk.Total,
+			}
 		}
 	}
-
-	raidSupported := snapshot.Raid.Supported
-	raidAvailable := snapshot.Raid.Available
-	updates.RaidSupported = &raidSupported
-	updates.RaidAvailable = &raidAvailable
 
 	if ip, ok := nodeClientIP(r); ok {
 		ipStr := ip.String()
-		updates.IP = &ipStr
+		patch.IP = &ipStr
 	}
 
-	return updates
+	return patch
 }
 
 func selectLargestDisk(items []metrics.StaticDiskLogical) (metrics.StaticDiskLogical, bool) {

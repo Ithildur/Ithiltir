@@ -34,7 +34,6 @@ func summaryRoute(r *routes.Blueprint, h *handler) {
 }
 
 func (h *handler) summaryHandler(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Cache-Control", "no-store")
 
 	items, err := infra.WithPGReadTimeout(r.Context(), func(c context.Context) ([]alertstore.OpenEventSummary, error) {
 		return h.alerts.ListOpenEventSummaries(c)

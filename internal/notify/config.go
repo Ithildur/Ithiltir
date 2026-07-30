@@ -26,11 +26,6 @@ func NormalizeType(v string) (model.NotifyType, error) {
 	}
 }
 
-func IsAllowedType(v string) bool {
-	_, err := NormalizeType(v)
-	return err == nil
-}
-
 func SessionFromConfig(raw []byte) (string, bool, error) {
 	cfg, err := DecodeConfig(model.NotifyTypeTelegram, raw)
 	if err != nil {
@@ -49,8 +44,17 @@ func parseWebhookURL(raw string) (*url.URL, error) {
 		return nil, fmt.Errorf("url cannot be empty")
 	}
 	parsed, err := url.Parse(trimmed)
-	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+	if err != nil || parsed.Scheme == "" || parsed.Hostname() == "" {
 		return nil, fmt.Errorf("url is invalid")
+	}
+	if parsed.Scheme != "http" && parsed.Scheme != "https" {
+		return nil, fmt.Errorf("url scheme must be http or https")
+	}
+	if parsed.User != nil {
+		return nil, fmt.Errorf("url must not include user info")
+	}
+	if parsed.Fragment != "" {
+		return nil, fmt.Errorf("url must not include a fragment")
 	}
 	return parsed, nil
 }

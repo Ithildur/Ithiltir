@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"math/big"
 	"strings"
+	"time"
+	"unicode/utf8"
 
 	"dash/internal/config"
 	"dash/internal/model"
@@ -18,6 +20,7 @@ import (
 
 const (
 	secretLength   = 16
+	secretMaxChars = 128
 	secretAlphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
 )
 
@@ -127,6 +130,20 @@ func (s *Store) GroupRelations(ctx context.Context, serverIDs []int64) ([]model.
 
 func (s *Store) CreateNode(ctx context.Context, secret string) (model.Server, error) {
 	var created model.Server
+	secret, err := normalizeSecret(secret)
+	if err != nil {
+		return created, err
+	}
+	err = s.mutations.global(s.projection, func() error {
+		var err error
+		created, err = s.createNode(ctx, secret)
+		return err
+	})
+	return created, err
+}
+
+func (s *Store) createNode(ctx context.Context, secret string) (model.Server, error) {
+	var created model.Server
 	tx := s.db.WithContext(ctx).Begin()
 	if tx.Error != nil {
 		return created, tx.Error
@@ -159,7 +176,7 @@ func (s *Store) CreateNode(ctx context.Context, secret string) (model.Server, er
 		DisplayOrder: maxOrder + 1,
 	}
 	if err := tx.Create(&srv).Error; err != nil {
-		if isDuplicateError(err) {
+		if isUniqueViolation(err) {
 			return created, ErrDuplicateSecret
 		}
 		return created, err
@@ -173,6 +190,14 @@ func (s *Store) CreateNode(ctx context.Context, secret string) (model.Server, er
 		return created, err
 	}
 
+	// Redis-backed front snapshots are part of the write precondition. Invalidate
+	// them before committing so a known Redis failure cannot create a node while
+	// the API reports failure. A later PostgreSQL commit failure only causes a
+	// harmless cache miss.
+	if err := s.clearFrontSnapshotCache(ctx); err != nil {
+		return created, err
+	}
+
 	if err := tx.Commit().Error; err != nil {
 		_ = s.RefreshMetaByID(ctx, srv.ID)
 		return created, err
@@ -180,15 +205,8 @@ func (s *Store) CreateNode(ctx context.Context, secret string) (model.Server, er
 	committed = true
 	created = srv
 
-	var syncErr error
-	if err := s.clearFrontSnapshotCache(ctx); err != nil {
-		syncErr = errors.Join(syncErr, err)
-	}
-	if err := s.SyncServerCache(ctx, srv); err != nil {
-		_ = s.RefreshMetaByID(ctx, srv.ID)
-		syncErr = errors.Join(syncErr, fmt.Errorf("%w: %w", ErrServerMetaCacheUpdate, err))
-	}
-	return created, syncErr
+	s.syncServerCache(srv, srv.Secret)
+	return created, nil
 }
 
 func (s *Store) GenerateSecret() (string, error) {
@@ -212,18 +230,20 @@ func strPtr(s string) *string {
 	return &s
 }
 
-func isDuplicateError(err error) bool {
-	if errors.Is(err, gorm.ErrDuplicatedKey) {
-		return true
-	}
-	msg := err.Error()
-	return strings.Contains(msg, "duplicate key") || strings.Contains(msg, "UNIQUE constraint")
-}
-
 func (s *Store) UpdateNode(ctx context.Context, id int64, upd NodeUpdate) error {
-	if err := s.patchNode(ctx, id, upd); err != nil {
+	if upd.Secret != nil {
+		secret, err := normalizeSecret(*upd.Secret)
+		if err != nil {
+			return err
+		}
+		upd.Secret = &secret
+	}
+	err := s.mutations.projected(id, s.projection, func() error {
+		return s.patchNode(ctx, id, upd)
+	})
+	if err != nil {
 		switch {
-		case isDuplicateError(err):
+		case isUniqueViolation(err):
 			return ErrDuplicateSecret
 		case isForeignKeyViolation(err):
 			return ErrInvalidGroupIDs
@@ -235,6 +255,14 @@ func (s *Store) UpdateNode(ctx context.Context, id int64, upd NodeUpdate) error 
 
 func needsMetaRefresh(upd NodeUpdate) bool {
 	return upd.Name != nil || upd.DisplayOrder != nil || upd.Secret != nil || upd.Tags != nil
+}
+
+func normalizeSecret(value string) (string, error) {
+	value = strings.TrimSpace(value)
+	if value == "" || utf8.RuneCountInString(value) > secretMaxChars {
+		return "", ErrInvalidSecret
+	}
+	return value, nil
 }
 
 func (s *Store) loadServerMeta(tx *gorm.DB, id int64) (model.Server, error) {
@@ -270,14 +298,17 @@ func (s *Store) patchNode(ctx context.Context, id int64, upd NodeUpdate) error {
 		old = srv
 	}
 
-	if upd.Secret != nil {
-		secret := strings.TrimSpace(*upd.Secret)
-		if secret == "" {
-			return ErrInvalidSecret
+	if cycle, ok, err := cycleUpdate(upd); err != nil {
+		return err
+	} else if ok {
+		if err := trafficstore.PrepareServerCycleChange(tx, id, cycle, s.trafficLoc, time.Now()); err != nil {
+			return err
 		}
-		upd.Secret = &secret
+		upd.TrafficCycleMode = &cycle.Mode
+		upd.TrafficBillingStartDay = &cycle.BillingStartDay
+		upd.TrafficBillingAnchorDate = &cycle.BillingAnchorDate
+		upd.TrafficBillingTimezone = &cycle.BillingTimezone
 	}
-
 	if err := s.patchFields(tx, id, upd); err != nil {
 		return err
 	}
@@ -293,23 +324,53 @@ func (s *Store) patchNode(ctx context.Context, id int64, upd NodeUpdate) error {
 		}
 	}
 
+	// Frontend Redis state is part of the write precondition. A failed cache
+	// update must leave the authoritative PostgreSQL row unchanged.
+	if err := s.invalidateFrontNodeCache(ctx, id, upd); err != nil {
+		return err
+	}
 	if err := tx.Commit().Error; err != nil {
 		_ = s.RefreshMetaByID(ctx, id)
+		_ = s.clearFrontSnapshotCache(ctx)
 		return err
 	}
 	committed = true
 
-	var syncErr error
-	if err := s.syncFrontNodeCache(ctx, id, upd); err != nil {
-		syncErr = errors.Join(syncErr, err)
-	}
 	if needsMetaRefresh(upd) {
-		if err := s.syncServerCache(ctx, fresh, old.Secret); err != nil {
-			_ = s.RefreshMetaByID(ctx, id)
-			syncErr = errors.Join(syncErr, fmt.Errorf("%w: %w", ErrServerMetaCacheUpdate, err))
-		}
+		s.syncServerCache(fresh, old.Secret)
 	}
-	return syncErr
+	return nil
+}
+
+func cycleUpdate(upd NodeUpdate) (trafficstore.ServerCycleSettings, bool, error) {
+	hasFields := upd.TrafficCycleMode != nil ||
+		upd.TrafficBillingStartDay != nil ||
+		upd.TrafficBillingAnchorDate != nil ||
+		upd.TrafficBillingTimezone != nil
+	if !hasFields {
+		return trafficstore.ServerCycleSettings{}, false, nil
+	}
+	if upd.TrafficCycleMode == nil {
+		return trafficstore.ServerCycleSettings{}, false, errors.New("traffic cycle mode is required when cycle fields change")
+	}
+	cycle := trafficstore.ServerCycleSettings{
+		Mode:            *upd.TrafficCycleMode,
+		BillingStartDay: 1,
+	}
+	if upd.TrafficBillingStartDay != nil {
+		cycle.BillingStartDay = *upd.TrafficBillingStartDay
+	}
+	if upd.TrafficBillingAnchorDate != nil {
+		cycle.BillingAnchorDate = *upd.TrafficBillingAnchorDate
+	}
+	if upd.TrafficBillingTimezone != nil {
+		cycle.BillingTimezone = *upd.TrafficBillingTimezone
+	}
+	cycle, err := trafficstore.NormalizeServerCycleSettings(cycle)
+	if err != nil {
+		return trafficstore.ServerCycleSettings{}, false, err
+	}
+	return cycle, true, nil
 }
 
 func (s *Store) patchFields(tx *gorm.DB, id int64, upd NodeUpdate) error {
@@ -353,24 +414,18 @@ func (s *Store) syncGroups(tx *gorm.DB, serverID int64, groupIDs *[]int64) error
 	return tx.Create(&groups).Error
 }
 
-func (s *Store) syncFrontNodeCache(ctx context.Context, id int64, upd NodeUpdate) error {
-	snapshotPatch := upd.Name != nil || upd.DisplayOrder != nil
-	snapshotReset := upd.Tags != nil
-	snapshot := snapshotPatch || snapshotReset
+func (s *Store) invalidateFrontNodeCache(ctx context.Context, id int64, upd NodeUpdate) error {
+	snapshot := upd.Name != nil || upd.DisplayOrder != nil || upd.Tags != nil
 	guest := upd.IsGuestVisible != nil
-	if s.front == nil || (!snapshot && !guest) {
+	if !snapshot && !guest {
 		return nil
 	}
 	cacheCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), config.RedisWriteTimeout)
 	defer cancel()
 
 	var err error
-	if snapshotReset {
-		err = errors.Join(err, s.front.ClearFrontMeta(cacheCtx))
-	} else if snapshotPatch {
-		if patchErr := s.front.PatchNodeSnapshot(cacheCtx, id, upd.Name, upd.DisplayOrder); patchErr != nil {
-			err = errors.Join(err, patchErr, s.front.ClearFrontMeta(cacheCtx))
-		}
+	if snapshot {
+		err = errors.Join(err, s.front.RemoveNodeMetadata(cacheCtx, id))
 	}
 	if guest {
 		err = errors.Join(err, s.front.ClearGuestVisibilityMeta(cacheCtx))
@@ -381,27 +436,25 @@ func (s *Store) syncFrontNodeCache(ctx context.Context, id int64, upd NodeUpdate
 	return nil
 }
 
-func (s *Store) removeFrontNodeCache(ctx context.Context, id int64) error {
-	if s.front == nil {
-		return nil
-	}
+func (s *Store) invalidateFrontNodeDeletion(ctx context.Context) error {
 	cacheCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), config.RedisWriteTimeout)
 	defer cancel()
-
-	if err := s.front.RemoveNodeSnapshot(cacheCtx, id); err != nil {
-		err = errors.Join(err, s.front.ClearFrontMeta(cacheCtx), s.front.ClearGuestVisibilityMeta(cacheCtx))
+	err := errors.Join(s.front.ClearFrontMeta(cacheCtx), s.front.ClearGuestVisibilityMeta(cacheCtx))
+	if err != nil {
 		return fmt.Errorf("%w: %w", ErrFrontCacheUpdate, err)
 	}
 	return nil
 }
 
-func (s *Store) clearFrontSnapshotCache(ctx context.Context) error {
-	if s.front == nil {
-		return nil
-	}
+func (s *Store) removeFrontNodeCache(ctx context.Context, id int64) error {
 	cacheCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), config.RedisWriteTimeout)
 	defer cancel()
+	return s.front.RemoveNodeSnapshot(cacheCtx, id)
+}
 
+func (s *Store) clearFrontSnapshotCache(ctx context.Context) error {
+	cacheCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), config.RedisWriteTimeout)
+	defer cancel()
 	if err := s.front.ClearFrontMeta(cacheCtx); err != nil {
 		return fmt.Errorf("%w: %w", ErrFrontCacheUpdate, err)
 	}
@@ -454,6 +507,12 @@ func patchFields(upd NodeUpdate) map[string]any {
 }
 
 func (s *Store) DeleteNode(ctx context.Context, id int64) error {
+	return s.mutations.projected(id, s.projection, func() error {
+		return s.deleteNode(ctx, id)
+	})
+}
+
+func (s *Store) deleteNode(ctx context.Context, id int64) error {
 	tx := s.db.WithContext(ctx).Begin()
 	if tx.Error != nil {
 		return tx.Error
@@ -483,24 +542,33 @@ func (s *Store) DeleteNode(ctx context.Context, id int64) error {
 		return err
 	}
 
+	// Only invalidate catalogs before commit. Deleting the runtime here would
+	// lose the last good sample if PostgreSQL later failed to commit.
+	if err := s.invalidateFrontNodeDeletion(ctx); err != nil {
+		return err
+	}
+
 	if err := tx.Commit().Error; err != nil {
 		_ = s.RefreshMetaByID(ctx, id)
 		return err
 	}
 	committed = true
 
-	var syncErr error
-	if err := s.removeFrontNodeCache(ctx, id); err != nil {
-		syncErr = errors.Join(syncErr, err)
-	}
-	if err := s.deleteServerMeta(ctx, id, old.Secret); err != nil {
-		_ = s.RefreshMetaByID(ctx, id)
-		syncErr = errors.Join(syncErr, fmt.Errorf("%w: %w", ErrServerMetaCacheUpdate, err))
-	}
-	return syncErr
+	s.removeServerState(id, old.Secret)
+	// Physical cache cleanup is derived-state housekeeping after the durable
+	// delete. Catalogs are already invalid, so cleanup failure cannot expose the
+	// deleted node as a valid projection.
+	_ = s.removeFrontNodeCache(ctx, id)
+	return nil
 }
 
 func (s *Store) UpdateDisplayOrder(ctx context.Context, ids []int64) error {
+	return s.mutations.global(s.projection, func() error {
+		return s.updateDisplayOrder(ctx, ids)
+	})
+}
+
+func (s *Store) updateDisplayOrder(ctx context.Context, ids []int64) error {
 	tx := s.db.WithContext(ctx).Begin()
 	if tx.Error != nil {
 		return tx.Error
@@ -555,23 +623,24 @@ func (s *Store) UpdateDisplayOrder(ctx context.Context, ids []int64) error {
 		Find(&freshRows).Error; err != nil {
 		return err
 	}
+
+	// Redis-backed front snapshots are part of the write precondition. Clear
+	// them before commit so a Redis failure leaves PostgreSQL unchanged. If the
+	// later commit fails, the cleared snapshot is rebuilt from the surviving
+	// database state on the next read.
+	if err := s.syncFrontNodeOrders(ctx, ids); err != nil {
+		return err
+	}
 	if err := tx.Commit().Error; err != nil {
 		_ = s.RefreshMetaByIDs(ctx, ids)
 		return err
 	}
 	committed = true
 
-	var syncErr error
-	if err := s.syncFrontNodeOrders(ctx, ids); err != nil {
-		syncErr = errors.Join(syncErr, err)
-	}
 	for _, srv := range freshRows {
-		if err := s.SyncServerCache(ctx, srv); err != nil {
-			_ = s.RefreshMetaByIDs(ctx, ids)
-			syncErr = errors.Join(syncErr, fmt.Errorf("%w: %w", ErrServerMetaCacheUpdate, err))
-		}
+		s.syncServerCache(srv, srv.Secret)
 	}
-	return syncErr
+	return nil
 }
 
 func (s *Store) SetTrafficP95(ctx context.Context, ids []int64, enabled bool) error {
@@ -594,34 +663,6 @@ func (s *Store) SetTrafficP95(ctx context.Context, ids []int64, enabled bool) er
 			Update("traffic_p95_enabled", enabled).
 			Error
 	})
-}
-
-func (s *Store) GetServerIP(ctx context.Context, serverID int64) (string, bool, error) {
-	if s == nil {
-		return "", false, errors.New("store is nil")
-	}
-	if s.db == nil {
-		return "", false, errors.New("store DB is nil")
-	}
-	if serverID <= 0 {
-		return "", false, fmt.Errorf("invalid server id %d", serverID)
-	}
-	type row struct {
-		IP *string
-	}
-	var out row
-	if err := s.db.WithContext(ctx).
-		Table("servers").
-		Select("ip").
-		Where("id = ?", serverID).
-		Take(&out).
-		Error; err != nil {
-		return "", false, err
-	}
-	if out.IP == nil || *out.IP == "" {
-		return "", false, nil
-	}
-	return *out.IP, true, nil
 }
 
 func orderUpdate(ids []int64) (string, []any) {
