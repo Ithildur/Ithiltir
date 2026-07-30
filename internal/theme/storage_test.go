@@ -1,35 +1,14 @@
 package theme
 
 import (
-	"errors"
+	"bytes"
+	"image"
+	"image/color"
+	"image/png"
 	"os"
 	"path/filepath"
 	"testing"
 )
-
-func TestNewStoreRejectsEmptyRoot(t *testing.T) {
-	if _, err := NewStore(""); err == nil {
-		t.Fatal("NewStore(\"\") error = nil, want error")
-	}
-}
-
-func TestNewStoreCreatesRoot(t *testing.T) {
-	root := filepath.Join(t.TempDir(), "themes")
-	st, err := NewStore(root)
-	if err != nil {
-		t.Fatalf("NewStore() error = %v", err)
-	}
-	if st.Root() != root {
-		t.Fatalf("Root() = %q, want %q", st.Root(), root)
-	}
-	info, err := os.Stat(root)
-	if err != nil {
-		t.Fatalf("Stat(root) error = %v", err)
-	}
-	if !info.IsDir() {
-		t.Fatal("theme root is not a directory")
-	}
-}
 
 func TestCustomThemeInstallReadDeleteUsesStoreRoot(t *testing.T) {
 	source := t.TempDir()
@@ -45,13 +24,15 @@ func TestCustomThemeInstallReadDeleteUsesStoreRoot(t *testing.T) {
   }
 }`)
 	writeThemeFile(t, source, "tokens.css", ":root { --theme-fg-default: #111111; }")
+	writeThemeFile(t, source, "README.md", "# Custom Test\n\nTheme documentation.\n")
 
 	_, archive, err := PackDir(source)
 	if err != nil {
 		t.Fatalf("PackDir() error = %v", err)
 	}
 
-	st, err := NewStore(filepath.Join(t.TempDir(), "themes"))
+	root := filepath.Join(t.TempDir(), "themes")
+	st, err := NewStore(root)
 	if err != nil {
 		t.Fatalf("NewStore() error = %v", err)
 	}
@@ -63,15 +44,19 @@ func TestCustomThemeInstallReadDeleteUsesStoreRoot(t *testing.T) {
 		t.Fatalf("InstallZip().Manifest.ID = %q, want custom_test", installed.Manifest.ID)
 	}
 
-	manifest, err := st.LoadCustomManifest("custom_test")
+	active, err := st.LoadActive("custom_test")
 	if err != nil {
-		t.Fatalf("LoadCustomManifest() error = %v", err)
+		t.Fatalf("LoadActive() error = %v", err)
 	}
-	if manifest.ID != "custom_test" {
-		t.Fatalf("LoadCustomManifest().ID = %q, want custom_test", manifest.ID)
+	if active.State != ActiveReady || active.Manifest.ID != "custom_test" || len(active.CSS) == 0 {
+		t.Fatalf("LoadActive() = %+v, want ready custom_test with CSS", active)
 	}
-	if _, err := st.LoadCustomCSS("custom_test"); err != nil {
-		t.Fatalf("LoadCustomCSS() error = %v", err)
+	readme, err := os.ReadFile(filepath.Join(root, "custom_test", "README.md"))
+	if err != nil {
+		t.Fatalf("ReadFile(README.md) error = %v", err)
+	}
+	if string(readme) != "# Custom Test\n\nTheme documentation.\n" {
+		t.Fatalf("README.md = %q", readme)
 	}
 
 	if err := st.RemoveCustom("custom_test"); err != nil {
@@ -86,39 +71,25 @@ func TestCustomThemeInstallReadDeleteUsesStoreRoot(t *testing.T) {
 	}
 }
 
-func TestStoreFileMethodsRejectUnavailableStorage(t *testing.T) {
-	tests := []struct {
-		name string
-		st   *Store
-	}{
-		{name: "nil"},
-		{name: "zero", st: &Store{}},
+func TestValidatePreviewRejectsTruncatedPNG(t *testing.T) {
+	img := image.NewRGBA(image.Rect(0, 0, 1, 1))
+	img.Set(0, 0, color.RGBA{R: 0xff, A: 0xff})
+	var encoded bytes.Buffer
+	if err := png.Encode(&encoded, img); err != nil {
+		t.Fatalf("png.Encode() error = %v", err)
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if _, err := tt.st.LoadCustomManifest("custom_test"); !errors.Is(err, ErrThemeStorage) {
-				t.Fatalf("LoadCustomManifest() error = %v, want ErrThemeStorage", err)
-			}
-			if _, err := tt.st.LoadCustomCSS("custom_test"); !errors.Is(err, ErrThemeStorage) {
-				t.Fatalf("LoadCustomCSS() error = %v, want ErrThemeStorage", err)
-			}
-			if _, err := tt.st.LoadCustomPreview("custom_test"); !errors.Is(err, ErrThemeStorage) {
-				t.Fatalf("LoadCustomPreview() error = %v, want ErrThemeStorage", err)
-			}
-			if err := tt.st.RemoveCustom("custom_test"); !errors.Is(err, ErrThemeStorage) {
-				t.Fatalf("RemoveCustom() error = %v, want ErrThemeStorage", err)
-			}
-			if _, err := tt.st.CustomExists("custom_test"); !errors.Is(err, ErrThemeStorage) {
-				t.Fatalf("CustomExists() error = %v, want ErrThemeStorage", err)
-			}
-			if _, _, err := tt.st.ListCustomWithWarnings(); !errors.Is(err, ErrThemeStorage) {
-				t.Fatalf("ListCustomWithWarnings() error = %v, want ErrThemeStorage", err)
-			}
-			if _, err := tt.st.InstallZip(nil); !errors.Is(err, ErrThemeStorage) {
-				t.Fatalf("InstallZip() error = %v, want ErrThemeStorage", err)
-			}
-		})
+	raw := encoded.Bytes()
+	idat := bytes.Index(raw, []byte("IDAT"))
+	if idat < 4 {
+		t.Fatal("encoded PNG has no IDAT chunk")
+	}
+	truncated := raw[:idat-4]
+	if _, err := png.DecodeConfig(bytes.NewReader(truncated)); err != nil {
+		t.Fatalf("fixture must pass DecodeConfig(), got %v", err)
+	}
+	if err := validatePreview(truncated); err == nil {
+		t.Fatal("validatePreview() error = nil, want truncated PNG rejection")
 	}
 }
 

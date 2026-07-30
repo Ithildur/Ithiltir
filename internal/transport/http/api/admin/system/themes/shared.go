@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"os"
 	"time"
@@ -11,24 +12,25 @@ import (
 	"dash/internal/infra"
 	themefs "dash/internal/theme"
 	"dash/internal/transport/http/httperr"
-	"log/slog"
 )
 
 type packageView struct {
-	ID          string       `json:"id"`
-	Name        string       `json:"name"`
-	Version     string       `json:"version"`
-	Author      string       `json:"author"`
-	Description string       `json:"description"`
-	Skin        themefs.Skin `json:"skin"`
-	BuiltIn     bool         `json:"built_in"`
-	Active      bool         `json:"active"`
-	Deletable   bool         `json:"deletable"`
-	Missing     bool         `json:"missing"`
-	Broken      bool         `json:"broken"`
-	HasPreview  bool         `json:"has_preview"`
-	CreatedAt   *string      `json:"created_at"`
-	UpdatedAt   *string      `json:"updated_at"`
+	ID            string       `json:"id"`
+	Name          string       `json:"name"`
+	Version       string       `json:"version"`
+	Author        string       `json:"author"`
+	Description   string       `json:"description"`
+	Skin          themefs.Skin `json:"skin"`
+	FormatVersion int          `json:"format_version"`
+	Deprecated    bool         `json:"deprecated"`
+	BuiltIn       bool         `json:"built_in"`
+	Active        bool         `json:"active"`
+	Deletable     bool         `json:"deletable"`
+	Missing       bool         `json:"missing"`
+	Broken        bool         `json:"broken"`
+	HasPreview    bool         `json:"has_preview"`
+	CreatedAt     *string      `json:"created_at"`
+	UpdatedAt     *string      `json:"updated_at"`
 }
 
 func (h *handler) loadActiveThemeState(ctx context.Context) (themefs.Active, error) {
@@ -117,7 +119,6 @@ func unavailableView(id string) packageView {
 			},
 		},
 	}
-
 	return themeView(manifest, false, false, false, nil, nil, false)
 }
 
@@ -131,18 +132,20 @@ func themeView(
 	hasPreview bool,
 ) packageView {
 	return packageView{
-		ID:          manifest.ID,
-		Name:        manifest.Name,
-		Version:     manifest.Version,
-		Author:      manifest.Author,
-		Description: manifest.Description,
-		Skin:        manifest.Skin,
-		BuiltIn:     builtIn,
-		Active:      active,
-		Deletable:   deletable,
-		HasPreview:  hasPreview,
-		CreatedAt:   formatTimePtr(createdAt),
-		UpdatedAt:   formatTimePtr(updatedAt),
+		ID:            manifest.ID,
+		Name:          manifest.Name,
+		Version:       manifest.Version,
+		Author:        manifest.Author,
+		Description:   manifest.Description,
+		Skin:          manifest.Skin,
+		FormatVersion: themefs.PackageFormatV1,
+		Deprecated:    true,
+		BuiltIn:       builtIn,
+		Active:        active,
+		Deletable:     deletable,
+		HasPreview:    hasPreview,
+		CreatedAt:     formatTimePtr(createdAt),
+		UpdatedAt:     formatTimePtr(updatedAt),
 	}
 }
 

@@ -12,7 +12,7 @@ type BrowserThemeRuntime = {
 type BrowserThemePackageRuntime = {
   manifest: unknown | null;
   manifestPromise: Promise<unknown | null>;
-  refresh: () => void;
+  refresh: () => Promise<void>;
 };
 
 declare global {

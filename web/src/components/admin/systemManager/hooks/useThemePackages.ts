@@ -21,8 +21,8 @@ const idleThemePackageBusy: ThemePackageBusy = { kind: 'idle' };
 
 const sortPackages = (items: ThemePackage[]): ThemePackage[] =>
   items.slice().sort((a, b) => {
-    const aUnavailable = Boolean(a.missing || a.broken);
-    const bUnavailable = Boolean(b.missing || b.broken);
+    const aUnavailable = a.missing || a.broken;
+    const bUnavailable = b.missing || b.broken;
 
     if (a.active !== b.active) return a.active ? -1 : 1;
     if (aUnavailable !== bUnavailable) return aUnavailable ? 1 : -1;
@@ -51,7 +51,7 @@ export const useThemePackages = ({
   const [loaded, setLoaded] = React.useState(false);
   const [busy, setBusy] = React.useState<ThemePackageBusy>(idleThemePackageBusy);
   const busyRef = React.useRef<ThemePackageBusy>(idleThemePackageBusy);
-  const loadGate = React.useMemo(createSeqGate, []);
+  const loadGate = React.useMemo(() => createSeqGate(), []);
 
   const beginBusy = React.useCallback((next: ThemePackageBusy): boolean => {
     if (busyRef.current.kind !== 'idle') return false;
@@ -101,6 +101,23 @@ export const useThemePackages = ({
     }
   }, [loadPackages]);
 
+  const finishMutation = React.useCallback(
+    async (successMessage: string, refreshStyles: boolean) => {
+      const refresh = refreshStyles ? refreshActiveThemeStyles() : Promise.resolve();
+      const [syncResult, refreshResult] = await Promise.allSettled([syncPackages(), refresh]);
+
+      if (refreshResult.status === 'rejected') {
+        pushTopBanner(t('admin_theme_refresh_failed'), { tone: 'warning' });
+      } else {
+        pushTopBanner(successMessage, { tone: 'info' });
+      }
+      if (syncResult.status === 'rejected') {
+        apiError(syncResult.reason, { key: 'admin_theme_fetch_failed' });
+      }
+    },
+    [apiError, syncPackages, t],
+  );
+
   React.useEffect(() => {
     if (!enabled) return;
     const controller = new AbortController();
@@ -114,38 +131,40 @@ export const useThemePackages = ({
     async (file: File) => {
       if (!beginBusy({ kind: 'upload' })) return;
       try {
-        const uploaded = await adminApi.uploadThemePackage(file);
-        if (uploaded.active) {
-          refreshActiveThemeStyles();
+        let uploaded: ThemePackage;
+        try {
+          uploaded = await adminApi.uploadThemePackage(file);
+        } catch (error) {
+          apiError(error, t('admin_theme_upload_failed'));
+          return;
         }
-        await syncPackages();
-        pushTopBanner(t('admin_theme_upload_success', { name: uploaded.name }), {
-          tone: 'info',
-        });
-      } catch (error) {
-        apiError(error, t('admin_theme_upload_failed'));
+        await finishMutation(
+          t('admin_theme_upload_success', { name: uploaded.name }),
+          uploaded.active,
+        );
       } finally {
         endBusy();
       }
     },
-    [apiError, beginBusy, endBusy, syncPackages, t],
+    [apiError, beginBusy, endBusy, finishMutation, t],
   );
 
   const applyTheme = React.useCallback(
     async (target: ThemeTarget) => {
       if (target.active || !beginBusy({ kind: 'apply', id: target.id })) return;
       try {
-        await adminApi.applyThemePackage(target.id);
-        refreshActiveThemeStyles();
-        await syncPackages();
-        pushTopBanner(t('admin_theme_apply_success', { name: target.name }), { tone: 'info' });
-      } catch (error) {
-        apiError(error, t('admin_theme_apply_failed'));
+        try {
+          await adminApi.applyThemePackage(target.id);
+        } catch (error) {
+          apiError(error, t('admin_theme_apply_failed'));
+          return;
+        }
+        await finishMutation(t('admin_theme_apply_success', { name: target.name }), true);
       } finally {
         endBusy();
       }
     },
-    [apiError, beginBusy, endBusy, syncPackages, t],
+    [apiError, beginBusy, endBusy, finishMutation, t],
   );
 
   const deleteTheme = React.useCallback(
@@ -162,18 +181,20 @@ export const useThemePackages = ({
         async () => {
           if (!beginBusy({ kind: 'delete', id: pkg.id })) return;
           try {
-            await adminApi.deleteThemePackage(pkg.id);
-            await syncPackages();
-            pushTopBanner(t('admin_theme_delete_success', { name: pkg.name }), { tone: 'info' });
-          } catch (error) {
-            apiError(error, t('admin_theme_delete_failed'));
+            try {
+              await adminApi.deleteThemePackage(pkg.id);
+            } catch (error) {
+              apiError(error, t('admin_theme_delete_failed'));
+              return;
+            }
+            await finishMutation(t('admin_theme_delete_success', { name: pkg.name }), false);
           } finally {
             endBusy();
           }
         },
       );
     },
-    [apiError, beginBusy, confirmAction, endBusy, syncPackages, t],
+    [apiError, beginBusy, confirmAction, endBusy, finishMutation, t],
   );
 
   const isBusy = busy.kind !== 'idle';

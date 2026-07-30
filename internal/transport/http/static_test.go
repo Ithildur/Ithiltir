@@ -113,6 +113,27 @@ func TestDeployAssetRequiresNodeSecret(t *testing.T) {
 	}
 }
 
+func TestThemeBootstrapIsNotCached(t *testing.T) {
+	handler := noStoreThemeBootstrap(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	for _, tt := range []struct {
+		path string
+		want string
+	}{
+		{path: "/theme-bootstrap.js", want: "no-store"},
+		{path: "/assets/index-abc123.js", want: ""},
+	} {
+		req := httptest.NewRequest(http.MethodGet, tt.path, nil)
+		rr := httptest.NewRecorder()
+		handler.ServeHTTP(rr, req)
+		if got := rr.Header().Get("Cache-Control"); got != tt.want {
+			t.Fatalf("%s Cache-Control = %q, want %q", tt.path, got, tt.want)
+		}
+	}
+}
+
 func TestInstallScriptsSendNodeSecretHeader(t *testing.T) {
 	cfg := &config.Config{
 		App: config.AppConfig{

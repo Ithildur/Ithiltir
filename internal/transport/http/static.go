@@ -31,7 +31,22 @@ func Register(router chi.Router, cfg *config.Config, system *systemstore.Store, 
 	if err := mountDeployRoute(router, node, opts); err != nil {
 		return nil, err
 	}
-	return kitstatic.MountSPA(router, "/", "dist", opts)
+	spa, err := kitstatic.SPAHandler("dist", opts)
+	if err != nil {
+		return nil, err
+	}
+	spa = noStoreThemeBootstrap(spa)
+	router.Handle("/*", spa)
+	return spa, nil
+}
+
+func noStoreThemeBootstrap(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/theme-bootstrap.js" {
+			w.Header().Set("Cache-Control", "no-store")
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 func registerInstallScriptRoutes(router chi.Router, cfg *config.Config) {

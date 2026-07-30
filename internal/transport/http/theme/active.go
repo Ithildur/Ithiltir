@@ -48,7 +48,7 @@ func (h *handler) activeManifestHandler(w http.ResponseWriter, r *http.Request) 
 	if err != nil {
 		h.logger.Warn("failed to load active theme, fallback to frontend default", slog.Any("err", err))
 	}
-	if themefs.IsDefault(active.ID) {
+	if themefs.IsDefault(active.ResolvedID) {
 		http.NotFound(w, r)
 		return
 	}
@@ -59,10 +59,11 @@ func (h *handler) activeManifestHandler(w http.ResponseWriter, r *http.Request) 
 func (h *handler) active(ctx context.Context) (themefs.Active, error) {
 	if id, ok := themefs.RuntimeActiveID(); ok {
 		active, err := h.themes.LoadActive(id)
-		if err == nil {
-			h.warnBrokenActive(active)
+		if err != nil {
+			return themefs.DefaultActive(), err
 		}
-		return active, err
+		h.warnFallback(active)
+		return active, nil
 	}
 
 	active, err := infra.WithPGReadTimeout(ctx, func(c context.Context) (themefs.Active, error) {
@@ -73,17 +74,22 @@ func (h *handler) active(ctx context.Context) (themefs.Active, error) {
 	}
 
 	themefs.SetRuntimeActiveID(active.ConfiguredID)
-	h.warnBrokenActive(active)
+	h.warnFallback(active)
 	return active, nil
 }
 
-func (h *handler) warnBrokenActive(active themefs.Active) {
-	if active.BrokenErr == nil {
-		return
+func (h *handler) warnFallback(active themefs.Active) {
+	switch active.State {
+	case themefs.ActiveMissing:
+		h.logger.Warn(
+			"active theme package is missing, fallback to frontend default",
+			slog.String("theme_id", active.ConfiguredID),
+		)
+	case themefs.ActiveBroken:
+		h.logger.Warn(
+			"active theme package is broken, fallback to frontend default",
+			slog.String("theme_id", active.ConfiguredID),
+			slog.Any("err", active.Err),
+		)
 	}
-	h.logger.Warn(
-		"active theme package is broken, fallback to frontend default",
-		slog.String("theme_id", active.BrokenID),
-		slog.Any("err", active.BrokenErr),
-	)
 }

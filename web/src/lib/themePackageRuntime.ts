@@ -9,7 +9,7 @@ import type {
 
 export const themeRefreshEvent = 'dash:theme-refresh';
 
-export const defaultThemeSpec: ThemeSpec = {
+const defaultThemeSpec: ThemeSpec = {
   admin: {
     shell: 'sidebar',
     frame: 'layered',
@@ -67,21 +67,19 @@ const readThemeChoice = <T extends string>(
   source: Record<string, unknown>,
   key: string,
   values: readonly T[],
-  fallback: T,
 ): T => {
   const value = source[key];
-  if (value === undefined || value === null) return fallback;
   if (typeof value !== 'string') throw invalidThemeManifest(key, 'must be a string');
 
   const text = value.trim();
-  if (!text) return fallback;
+  if (!text) throw invalidThemeManifest(key, 'must not be empty');
   if (!values.includes(text as T)) {
     throw invalidThemeManifest(key, `must be one of ${values.join(', ')}`);
   }
   return text as T;
 };
 
-export const parseThemeManifest = (input: unknown): ThemeManifest => {
+const parseThemeManifest = (input: unknown): ThemeManifest => {
   if (!isObject(input)) throw invalidThemeManifest('root', 'must be an object');
 
   const id = readRequiredText(input, 'id');
@@ -101,22 +99,12 @@ export const parseThemeManifest = (input: unknown): ThemeManifest => {
     description: readText(input, 'description'),
     skin: {
       admin: {
-        shell: readThemeChoice(admin, 'shell', themeShells, defaultThemeSpec.admin.shell),
-        frame: readThemeChoice(admin, 'frame', themeFrames, defaultThemeSpec.admin.frame),
+        shell: readThemeChoice(admin, 'shell', themeShells),
+        frame: readThemeChoice(admin, 'frame', themeFrames),
       },
       dashboard: {
-        summary: readThemeChoice(
-          dashboard,
-          'summary',
-          themeSummaries,
-          defaultThemeSpec.dashboard.summary,
-        ),
-        density: readThemeChoice(
-          dashboard,
-          'density',
-          themeDensities,
-          defaultThemeSpec.dashboard.density,
-        ),
+        summary: readThemeChoice(dashboard, 'summary', themeSummaries),
+        density: readThemeChoice(dashboard, 'density', themeDensities),
       },
     },
   };
@@ -178,7 +166,7 @@ export const resolveThemeManifest = async (signal?: AbortSignal): Promise<ThemeM
 export const refreshThemeManifest = async (signal?: AbortSignal): Promise<ThemeManifest> =>
   saveThemeManifest(await fetchActiveThemeManifest(signal));
 
-export const refreshActiveThemeStyles = (): void => {
-  themePackageRuntime().refresh();
+export const refreshActiveThemeStyles = async (): Promise<void> => {
+  await themePackageRuntime().refresh();
   window.dispatchEvent(new Event(themeRefreshEvent));
 };

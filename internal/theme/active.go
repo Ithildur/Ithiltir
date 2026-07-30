@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 )
 
 type ActiveStore interface {
@@ -12,12 +13,19 @@ type ActiveStore interface {
 	SetActiveThemeID(context.Context, string) error
 }
 
+type ActiveState string
+
+const (
+	ActiveReady   ActiveState = "ready"
+	ActiveMissing ActiveState = "missing"
+	ActiveBroken  ActiveState = "broken"
+)
+
 type Active struct {
 	ConfiguredID string
-	ID           string
-	MissingID    string
-	BrokenID     string
-	BrokenErr    error
+	ResolvedID   string
+	State        ActiveState
+	Err          error
 	Manifest     Manifest
 	CSS          []byte
 }
@@ -25,7 +33,8 @@ type Active struct {
 func DefaultActive() Active {
 	return Active{
 		ConfiguredID: DefaultID,
-		ID:           DefaultID,
+		ResolvedID:   DefaultID,
+		State:        ActiveReady,
 		CSS:          []byte{},
 	}
 }
@@ -63,9 +72,16 @@ func SaveActiveID(ctx context.Context, st ActiveStore, id string) error {
 }
 
 func ResolveActive(ctx context.Context, st ActiveStore, themes *Store) (Active, error) {
-	id, err := ReadActiveID(ctx, st)
+	if st == nil {
+		return DefaultActive(), errors.New("theme store is unavailable")
+	}
+	rawID, err := st.GetActiveThemeID(ctx)
 	if err != nil {
 		return DefaultActive(), err
+	}
+	id, err := NormalizeActiveID(rawID)
+	if err != nil {
+		return brokenActive(strings.TrimSpace(rawID), fmt.Errorf("invalid active theme id: %w", err)), nil
 	}
 	return themes.LoadActive(id)
 }
@@ -81,16 +97,17 @@ func (s *Store) LoadActive(id string) (Active, error) {
 
 	active := Active{
 		ConfiguredID: id,
-		ID:           id,
+		ResolvedID:   id,
+		State:        ActiveReady,
 	}
 	if IsBuiltin(id) {
 		manifest, err := BuiltinManifest(id)
 		if err != nil {
-			return DefaultActive(), fmt.Errorf("load builtin theme manifest: %w", err)
+			return brokenActive(id, fmt.Errorf("load builtin theme manifest: %w", err)), nil
 		}
 		css, err := BuiltinCSS(id)
 		if err != nil {
-			return DefaultActive(), fmt.Errorf("load builtin theme css: %w", err)
+			return brokenActive(id, fmt.Errorf("load builtin theme css: %w", err)), nil
 		}
 		active.Manifest = manifest
 		active.CSS = css
@@ -100,15 +117,16 @@ func (s *Store) LoadActive(id string) (Active, error) {
 	if s == nil {
 		return DefaultActive(), ErrThemeStorage
 	}
-	ok, err := s.CustomExists(id)
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	ok, err := s.customExists(id)
 	if err != nil {
 		return DefaultActive(), err
 	}
 	if !ok {
 		return missingActive(id), nil
 	}
-
-	manifest, err := s.LoadCustomManifest(id)
+	manifest, err := s.loadCustomManifest(id)
 	if err != nil {
 		return brokenActive(id, fmt.Errorf("load custom theme manifest: %w", err)), nil
 	}
@@ -116,7 +134,7 @@ func (s *Store) LoadActive(id string) (Active, error) {
 		return brokenActive(id, fmt.Errorf("custom theme manifest id %q does not match directory id %q", manifest.ID, id)), nil
 	}
 
-	css, err := s.LoadCustomCSS(id)
+	css, err := s.loadCustomCSS(id)
 	if err != nil {
 		return brokenActive(id, fmt.Errorf("load custom theme css: %w", err)), nil
 	}
@@ -130,17 +148,29 @@ func (s *Store) ThemeExists(id string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	if IsDefault(id) || IsBuiltin(id) {
+	if IsDefault(id) {
 		return true, nil
-	}
-	if s == nil {
-		return false, ErrThemeStorage
 	}
 	active, err := s.LoadActive(id)
 	if err != nil {
 		return false, err
 	}
-	return active.ID == id, nil
+	return active.State == ActiveReady && active.ResolvedID == id, nil
+}
+
+func missingActive(id string) Active {
+	active := DefaultActive()
+	active.ConfiguredID = id
+	active.State = ActiveMissing
+	return active
+}
+
+func brokenActive(id string, err error) Active {
+	active := DefaultActive()
+	active.ConfiguredID = id
+	active.State = ActiveBroken
+	active.Err = err
+	return active
 }
 
 func (s *Store) LoadPreview(id string) ([]byte, error) {
@@ -158,19 +188,4 @@ func (s *Store) LoadPreview(id string) ([]byte, error) {
 		return nil, ErrThemeStorage
 	}
 	return s.LoadCustomPreview(id)
-}
-
-func missingActive(id string) Active {
-	active := DefaultActive()
-	active.ConfiguredID = id
-	active.MissingID = id
-	return active
-}
-
-func brokenActive(id string, err error) Active {
-	active := DefaultActive()
-	active.ConfiguredID = id
-	active.BrokenID = id
-	active.BrokenErr = err
-	return active
 }

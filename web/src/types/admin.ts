@@ -42,11 +42,13 @@ export interface ThemePackage {
   author: string;
   description: string;
   skin: ThemeSpec;
+  format_version: 1;
+  deprecated: boolean;
   built_in: boolean;
   active: boolean;
   deletable: boolean;
-  missing?: boolean;
-  broken?: boolean;
+  missing: boolean;
+  broken: boolean;
   has_preview: boolean;
   created_at: ISODateString | null;
   updated_at: ISODateString | null;

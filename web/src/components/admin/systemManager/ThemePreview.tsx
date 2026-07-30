@@ -129,15 +129,10 @@ export const FallbackThemePreview: React.FC<{ item: ThemeVisual }> = ({ item }) 
   );
 };
 
-const ThemePreview: React.FC<{ item: ThemePackage }> = ({ item }) => {
-  const src = themePreviewSrc(item);
+const ThemePreviewAttempt: React.FC<{ item: ThemePackage; src: string }> = ({ item, src }) => {
   const [failed, setFailed] = React.useState(false);
 
-  React.useEffect(() => {
-    setFailed(false);
-  }, [src]);
-
-  if (!src || failed) {
+  if (failed) {
     return <FallbackThemePreview item={item} />;
   }
 
@@ -150,6 +145,12 @@ const ThemePreview: React.FC<{ item: ThemePackage }> = ({ item }) => {
       className="h-18 w-30 shrink-0 rounded-lg border border-(--theme-border-subtle)/70 object-cover dark:border-(--theme-border-default)"
     />
   );
+};
+
+const ThemePreview: React.FC<{ item: ThemePackage }> = ({ item }) => {
+  const src = themePreviewSrc(item);
+  if (!src) return <FallbackThemePreview item={item} />;
+  return <ThemePreviewAttempt key={src} item={item} src={src} />;
 };
 
 export default ThemePreview;

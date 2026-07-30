@@ -112,9 +112,9 @@ export const en = {
     'The action completed, but cache sync failed. The page may be briefly stale.',
   warning_api_notice: 'System warning: {{code}}',
   warning_theme_active_broken:
-    'The previously active skin package is broken. Runtime has fallen back to the default skin.',
+    'The selected skin package is broken. Runtime is using the default skin.',
   warning_theme_active_missing:
-    'The previously active skin package was removed. Runtime has fallen back to the default skin.',
+    'The selected skin package is missing. Runtime is using the default skin.',
 
   // Admin console
   admin_menu: 'Menu',
@@ -272,24 +272,26 @@ export const en = {
   admin_theme_applying: 'Applying...',
   admin_theme_apply_success: 'Applied skin "{{name}}".',
   admin_theme_apply_failed: 'Failed to apply skin.',
+  admin_theme_refresh_failed:
+    'The skin was saved, but this page could not refresh its styles. Reload the page.',
   admin_theme_delete_confirm: 'Delete skin "{{name}}"?',
   admin_theme_delete_success: 'Deleted skin "{{name}}".',
   admin_theme_delete_failed: 'Failed to delete skin.',
   admin_theme_builtin_badge: 'Built-in',
   admin_theme_active_badge: 'Active',
   admin_theme_broken_badge: 'Broken',
-  admin_theme_missing_badge: 'Deleted',
+  admin_theme_missing_badge: 'Missing',
   admin_theme_default_desc: 'Built into the app and always available as the default skin.',
   admin_theme_broken_desc:
     'This skin package cannot be read or validated. Upload it again or select another skin.',
   admin_theme_missing_desc:
-    'This skin package was deleted from storage. Select another skin to persist a new active setting.',
+    'This selected skin package is missing from storage. Upload it again or select another skin.',
   admin_theme_no_description: 'This skin does not provide a description.',
   admin_theme_meta_version: 'Version',
   admin_theme_meta_author: 'Author',
   admin_theme_meta_updated: 'Last updated: {{updated}}',
   admin_theme_meta_broken: 'Broken package',
-  admin_theme_meta_deleted: 'Deleted from storage',
+  admin_theme_meta_deleted: 'Missing from storage',
   admin_theme_col_preview: 'Preview',
   admin_theme_col_skin: 'Skin',
   admin_theme_col_meta: 'Metadata',

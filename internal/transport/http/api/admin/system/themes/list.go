@@ -1,12 +1,13 @@
 package themes
 
 import (
+	"log/slog"
 	"net/http"
 
+	themefs "dash/internal/theme"
 	"dash/internal/transport/http/httperr"
 	"github.com/Ithildur/EiluneKit/http/response"
 	"github.com/Ithildur/EiluneKit/http/routes"
-	"log/slog"
 )
 
 func listRoute(r *routes.Blueprint, h *handler) {
@@ -18,19 +19,23 @@ func listRoute(r *routes.Blueprint, h *handler) {
 }
 
 func (h *handler) listHandler(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Cache-Control", "no-store")
-
+	h.mu.RLock()
+	defer h.mu.RUnlock()
 	state, err := h.loadActiveThemeState(r.Context())
 	if err != nil {
 		httperr.Write(w, http.StatusServiceUnavailable, "db_error", "failed to load active theme")
 		return
 	}
-	if state.MissingID != "" {
+	switch state.State {
+	case themefs.ActiveMissing:
 		httperr.WriteWarningHeader(w, "theme_active_missing")
-	}
-	if state.BrokenID != "" {
+	case themefs.ActiveBroken:
 		httperr.WriteWarningHeader(w, "theme_active_broken")
-		h.logger.Warn("active theme package is broken", state.BrokenErr, slog.String("theme_id", state.BrokenID))
+		h.logger.Warn(
+			"active theme package is broken",
+			state.Err,
+			slog.String("theme_id", state.ConfiguredID),
+		)
 	}
 
 	custom, warnings, err := h.themes.ListCustomWithWarnings()
@@ -44,10 +49,14 @@ func (h *handler) listHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	for _, warning := range warnings {
-		h.logger.Warn("skipped invalid theme package", warning.Err, slog.String("theme_id", warning.ID))
+		h.logger.Warn(
+			"theme package warning",
+			warning.Err,
+			slog.String("theme_id", warning.ID),
+		)
 	}
 
-	builtin, err := h.builtinViews(state.ID)
+	builtin, err := h.builtinViews(state.ResolvedID)
 	if err != nil {
 		httperr.Write(w, http.StatusInternalServerError, "theme_unavailable", "failed to load builtin themes")
 		return
@@ -57,24 +66,30 @@ func (h *handler) listHandler(w http.ResponseWriter, r *http.Request) {
 	items = append(items, builtin...)
 
 	for _, item := range custom {
-		items = append(items, customView(item, item.Manifest.ID == state.ID))
+		items = append(items, customView(item, item.Manifest.ID == state.ResolvedID))
 	}
-
-	if state.MissingID != "" && !containsThemeID(items, state.MissingID) {
-		items = append(items, missingView(state.MissingID))
-	}
-	if state.BrokenID != "" && !containsThemeID(items, state.BrokenID) {
-		items = append(items, brokenView(state.BrokenID))
-	}
+	items = markActiveIssue(items, state)
 
 	response.WriteJSON(w, http.StatusOK, items)
 }
 
-func containsThemeID(items []packageView, id string) bool {
-	for _, item := range items {
-		if item.ID == id {
-			return true
-		}
+func markActiveIssue(items []packageView, state themefs.Active) []packageView {
+	if state.State != themefs.ActiveMissing && state.State != themefs.ActiveBroken {
+		return items
 	}
-	return false
+	for i := range items {
+		if items[i].ID != state.ConfiguredID {
+			continue
+		}
+		items[i].Active = false
+		items[i].Deletable = false
+		items[i].Missing = state.State == themefs.ActiveMissing
+		items[i].Broken = state.State == themefs.ActiveBroken
+		return items
+	}
+
+	if state.State == themefs.ActiveMissing {
+		return append(items, missingView(state.ConfiguredID))
+	}
+	return append(items, brokenView(state.ConfiguredID))
 }

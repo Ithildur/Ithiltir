@@ -60,6 +60,16 @@ func PackDir(sourceDir string) (Manifest, []byte, error) {
 	if _, err := buildActiveCSS(manifest.ID, tokens, recipes); err != nil {
 		return Manifest{}, nil, err
 	}
+	if preview, ok := files["preview.png"]; ok {
+		if err := validatePreview(preview); err != nil {
+			return Manifest{}, nil, err
+		}
+	}
+	if readme, ok := files["README.md"]; ok {
+		if err := validateReadme(readme); err != nil {
+			return Manifest{}, nil, err
+		}
+	}
 
 	archive, err := buildThemeArchive(files)
 	if err != nil {
@@ -94,11 +104,11 @@ func buildThemeArchive(files map[string][]byte) ([]byte, error) {
 		}
 
 		header := &zip.FileHeader{
-			Name:   name,
-			Method: zip.Deflate,
+			Name:     name,
+			Method:   zip.Deflate,
+			Modified: packZipFixedTime,
 		}
 		header.SetMode(0o644)
-		header.SetModTime(packZipFixedTime)
 
 		w, err := zw.CreateHeader(header)
 		if err != nil {
@@ -110,6 +120,9 @@ func buildThemeArchive(files map[string][]byte) ([]byte, error) {
 	}
 	if err := zw.Close(); err != nil {
 		return nil, fmt.Errorf("close zip writer: %w", err)
+	}
+	if int64(buf.Len()) > ArchiveMaxBytes {
+		return nil, errors.New("theme package exceeds archive size limit")
 	}
 	return buf.Bytes(), nil
 }

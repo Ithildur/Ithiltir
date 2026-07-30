@@ -21,8 +21,8 @@ export const ThemeRow: React.FC<{
 }> = ({ item, busy, applying, onApply, onDelete }) => {
   const { t } = useI18n();
   const badges = themeBadgeLabels(item, t);
-  const missing = Boolean(item.missing);
-  const broken = Boolean(item.broken);
+  const missing = item.missing;
+  const broken = item.broken;
   const unavailable = missing || broken;
   const version = unavailable ? '—' : item.version || '—';
   const author = unavailable ? '—' : item.author || '—';

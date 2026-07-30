@@ -1,14 +1,24 @@
 package theme
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"regexp"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 )
 
 const DefaultID = "default"
+
+const maxManifestBytes = 64 << 10
+
+// PackageFormatV1 is the frozen legacy theme package format. Existing v1
+// packages remain supported, but new theme capabilities require a later format.
+const PackageFormatV1 = 1
 
 const (
 	AdminShellSidebar = "sidebar"
@@ -59,9 +69,17 @@ func IsReservedID(id string) bool {
 }
 
 func ParseManifest(raw []byte) (Manifest, error) {
+	if len(raw) == 0 || len(raw) > maxManifestBytes || !utf8.Valid(raw) {
+		return Manifest{}, errors.New("theme manifest must be valid UTF-8 up to 64 KiB")
+	}
 	var m Manifest
-	if err := json.Unmarshal(raw, &m); err != nil {
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&m); err != nil {
 		return Manifest{}, fmt.Errorf("decode theme manifest: %w", err)
+	}
+	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+		return Manifest{}, errors.New("theme manifest must contain one JSON object")
 	}
 	m.ID = strings.TrimSpace(m.ID)
 	m.Name = strings.TrimSpace(m.Name)
@@ -79,10 +97,36 @@ func ParseManifest(raw []byte) (Manifest, error) {
 	if m.Version == "" {
 		return Manifest{}, errors.New("theme version is required")
 	}
+	for _, field := range []struct {
+		name  string
+		value string
+		limit int
+	}{
+		{"name", m.Name, 128},
+		{"version", m.Version, 64},
+		{"author", m.Author, 128},
+		{"description", m.Description, 2000},
+	} {
+		if err := validateManifestText(field.name, field.value, field.limit); err != nil {
+			return Manifest{}, err
+		}
+	}
 	if err := m.validate(); err != nil {
 		return Manifest{}, err
 	}
 	return m, nil
+}
+
+func validateManifestText(name, value string, limit int) error {
+	if utf8.RuneCountInString(value) > limit {
+		return fmt.Errorf("theme %s exceeds %d characters", name, limit)
+	}
+	for _, r := range value {
+		if unicode.IsControl(r) {
+			return fmt.Errorf("theme %s contains control characters", name)
+		}
+	}
+	return nil
 }
 
 func ValidateID(id string) error {
@@ -128,12 +172,8 @@ func (m Manifest) validate() error {
 }
 
 func (s *AdminSkin) normalize() {
-	if strings.TrimSpace(s.Shell) == "" {
-		s.Shell = AdminShellSidebar
-	}
-	if strings.TrimSpace(s.Frame) == "" {
-		s.Frame = AdminFrameLayered
-	}
+	s.Shell = strings.TrimSpace(s.Shell)
+	s.Frame = strings.TrimSpace(s.Frame)
 }
 
 func (s AdminSkin) validate() error {
@@ -152,12 +192,8 @@ func (s AdminSkin) validate() error {
 }
 
 func (s *DashboardSkin) normalize() {
-	if strings.TrimSpace(s.Summary) == "" {
-		s.Summary = DashboardSummaryCards
-	}
-	if strings.TrimSpace(s.Density) == "" {
-		s.Density = DashboardDensityComfortable
-	}
+	s.Summary = strings.TrimSpace(s.Summary)
+	s.Density = strings.TrimSpace(s.Density)
 }
 
 func (s DashboardSkin) validate() error {

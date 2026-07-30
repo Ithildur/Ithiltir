@@ -23,6 +23,8 @@ func (h *handler) applyHandler(w http.ResponseWriter, r *http.Request, rawID str
 		return
 	}
 
+	h.mu.Lock()
+	defer h.mu.Unlock()
 	exists, err := h.themes.ThemeExists(id)
 	if err != nil {
 		httperr.Write(w, http.StatusServiceUnavailable, "theme_unavailable", "failed to validate theme")

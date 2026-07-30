@@ -32,6 +32,8 @@ func (h *handler) deleteHandler(w http.ResponseWriter, r *http.Request, rawID st
 		return
 	}
 
+	h.mu.Lock()
+	defer h.mu.Unlock()
 	exists, err := h.themes.CustomExists(id)
 	if err != nil {
 		httperr.Write(w, http.StatusInternalServerError, "theme_storage_unavailable", "failed to inspect theme storage")

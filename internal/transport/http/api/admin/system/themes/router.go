@@ -1,6 +1,8 @@
 package themes
 
 import (
+	"sync"
+
 	"dash/internal/infra"
 	systemstore "dash/internal/store/system"
 	themefs "dash/internal/theme"
@@ -12,6 +14,7 @@ type handler struct {
 	store  *systemstore.Store
 	themes *themefs.Store
 	logger *kitlog.Helper
+	mu     sync.RWMutex
 }
 
 // Router returns admin/system/themes routes.

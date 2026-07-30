@@ -7,11 +7,13 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 )
 
 type Store struct {
 	root string
+	mu   sync.RWMutex
 }
 
 type CustomTheme struct {
@@ -36,13 +38,6 @@ func NewStore(root string) (*Store, error) {
 	return &Store{root: root}, nil
 }
 
-func (s *Store) Root() string {
-	if s == nil {
-		return ""
-	}
-	return s.root
-}
-
 func (s *Store) rootDir() (string, error) {
 	if s == nil || strings.TrimSpace(s.root) == "" {
 		return "", ErrThemeStorage
@@ -62,7 +57,7 @@ func (s *Store) themeDir(id string) (string, error) {
 	return filepath.Join(root, id), nil
 }
 
-func (s *Store) LoadCustomManifest(id string) (Manifest, error) {
+func (s *Store) loadCustomManifest(id string) (Manifest, error) {
 	dir, err := s.themeDir(id)
 	if err != nil {
 		return Manifest{}, err
@@ -74,7 +69,7 @@ func (s *Store) LoadCustomManifest(id string) (Manifest, error) {
 	return ParseManifest(raw)
 }
 
-func (s *Store) LoadCustomCSS(id string) ([]byte, error) {
+func (s *Store) loadCustomCSS(id string) ([]byte, error) {
 	dir, err := s.themeDir(id)
 	if err != nil {
 		return nil, err
@@ -94,6 +89,15 @@ func (s *Store) LoadCustomCSS(id string) ([]byte, error) {
 }
 
 func (s *Store) LoadCustomPreview(id string) ([]byte, error) {
+	if s == nil {
+		return nil, ErrThemeStorage
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.loadCustomPreview(id)
+}
+
+func (s *Store) loadCustomPreview(id string) ([]byte, error) {
 	dir, err := s.themeDir(id)
 	if err != nil {
 		return nil, err
@@ -106,6 +110,11 @@ func (s *Store) LoadCustomPreview(id string) ([]byte, error) {
 }
 
 func (s *Store) RemoveCustom(id string) error {
+	if s == nil {
+		return ErrThemeStorage
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	dir, err := s.themeDir(id)
 	if err != nil {
 		return err
@@ -121,6 +130,15 @@ func (s *Store) RemoveCustom(id string) error {
 }
 
 func (s *Store) CustomExists(id string) (bool, error) {
+	if s == nil {
+		return false, ErrThemeStorage
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.customExists(id)
+}
+
+func (s *Store) customExists(id string) (bool, error) {
 	dir, err := s.themeDir(id)
 	if err != nil {
 		return false, err
@@ -139,12 +157,12 @@ func dirExists(dir string) (bool, error) {
 	return info.IsDir(), nil
 }
 
-func (s *Store) ListCustom() ([]CustomTheme, error) {
-	items, _, err := s.ListCustomWithWarnings()
-	return items, err
-}
-
 func (s *Store) ListCustomWithWarnings() ([]CustomTheme, []CustomThemeWarning, error) {
+	if s == nil {
+		return nil, nil, ErrThemeStorage
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	root, err := s.rootDir()
 	if err != nil {
 		return nil, nil, err
@@ -158,19 +176,23 @@ func (s *Store) ListCustomWithWarnings() ([]CustomTheme, []CustomThemeWarning, e
 	warnings := make([]CustomThemeWarning, 0)
 	for _, entry := range entries {
 		if !entry.IsDir() {
+			warnings = append(warnings, CustomThemeWarning{
+				ID:  entry.Name(),
+				Err: errors.New("theme entry is not a directory"),
+			})
 			continue
 		}
 
-		id := strings.TrimSpace(entry.Name())
+		id := entry.Name()
 		if err := ValidateID(id); err != nil {
 			warnings = append(warnings, CustomThemeWarning{
-				ID:  entry.Name(),
+				ID:  id,
 				Err: fmt.Errorf("invalid theme id: %w", err),
 			})
 			continue
 		}
 
-		manifest, err := s.LoadCustomManifest(id)
+		manifest, err := s.loadCustomManifest(id)
 		if err != nil {
 			warnings = append(warnings, CustomThemeWarning{
 				ID:  id,
@@ -185,7 +207,7 @@ func (s *Store) ListCustomWithWarnings() ([]CustomTheme, []CustomThemeWarning, e
 			})
 			continue
 		}
-		if _, err := s.LoadCustomCSS(id); err != nil {
+		if _, err := s.loadCustomCSS(id); err != nil {
 			warnings = append(warnings, CustomThemeWarning{
 				ID:  id,
 				Err: fmt.Errorf("load theme css: %w", err),
@@ -193,10 +215,27 @@ func (s *Store) ListCustomWithWarnings() ([]CustomTheme, []CustomThemeWarning, e
 			continue
 		}
 
+		hasPreview, err := s.previewExists(id)
+		if err != nil {
+			warnings = append(warnings, CustomThemeWarning{
+				ID:  id,
+				Err: fmt.Errorf("inspect theme preview: %w", err),
+			})
+			hasPreview = false
+		}
+		updatedAt, err := dirUpdatedAt(entry)
+		if err != nil {
+			warnings = append(warnings, CustomThemeWarning{
+				ID:  id,
+				Err: fmt.Errorf("inspect theme directory: %w", err),
+			})
+			updatedAt = nil
+		}
+
 		items = append(items, CustomTheme{
 			Manifest:   manifest,
-			HasPreview: s.hasPreview(id),
-			UpdatedAt:  dirUpdatedAt(entry),
+			HasPreview: hasPreview,
+			UpdatedAt:  updatedAt,
 		})
 	}
 	sort.Slice(items, func(i, j int) bool {
@@ -208,20 +247,29 @@ func (s *Store) ListCustomWithWarnings() ([]CustomTheme, []CustomThemeWarning, e
 	return items, warnings, nil
 }
 
-func (s *Store) hasPreview(id string) bool {
+func (s *Store) previewExists(id string) (bool, error) {
 	dir, err := s.themeDir(id)
 	if err != nil {
-		return false
+		return false, err
 	}
-	_, err = os.Stat(filepath.Join(dir, "preview.png"))
-	return err == nil
+	info, err := os.Stat(filepath.Join(dir, "preview.png"))
+	if errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	if !info.Mode().IsRegular() {
+		return false, fmt.Errorf("preview.png is not a regular file")
+	}
+	return true, nil
 }
 
-func dirUpdatedAt(entry os.DirEntry) *time.Time {
+func dirUpdatedAt(entry os.DirEntry) (*time.Time, error) {
 	info, err := entry.Info()
 	if err != nil {
-		return nil
+		return nil, err
 	}
 	updatedAt := info.ModTime()
-	return &updatedAt
+	return &updatedAt, nil
 }

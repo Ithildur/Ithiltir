@@ -5,18 +5,23 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"image/png"
 	"io"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
+	"unicode/utf8"
 )
 
 const (
 	ArchiveMaxBytes   int64 = 20 << 20
 	ExtractedMaxBytes int64 = 50 << 20
 
-	zipEntryLimit int64 = 20 << 20
+	zipEntryLimit       int64 = 20 << 20
+	maxZipEntries             = 32
+	maxPreviewDimension       = 4096
+	maxReadmeBytes            = 256 << 10
 )
 
 var allowedFiles = []string{
@@ -28,8 +33,9 @@ var allowedFiles = []string{
 }
 
 type Installed struct {
-	Manifest   Manifest
-	HasPreview bool
+	Manifest       Manifest
+	HasPreview     bool
+	CleanupWarning error
 }
 
 var (
@@ -105,6 +111,19 @@ func (s *Store) InstallZip(archive []byte) (Installed, error) {
 	if _, err := buildActiveCSS(manifest.ID, files["tokens.css"], files["recipes.css"]); err != nil {
 		return Installed{}, invalidPackage(err)
 	}
+	if preview, ok := files["preview.png"]; ok {
+		if err := validatePreview(preview); err != nil {
+			return Installed{}, invalidPackage(err)
+		}
+	}
+	if readme, ok := files["README.md"]; ok {
+		if err := validateReadme(readme); err != nil {
+			return Installed{}, invalidPackage(err)
+		}
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
 
 	dir, err := s.themeDir(manifest.ID)
 	if err != nil {
@@ -131,47 +150,54 @@ func (s *Store) InstallZip(archive []byte) (Installed, error) {
 		}
 	}
 
-	if err := replaceThemeDir(root, manifest.ID, tmpDir, dir); err != nil {
+	cleanupWarning, err := replaceThemeDir(root, manifest.ID, tmpDir, dir)
+	if err != nil {
 		return Installed{}, themeStorageError(fmt.Errorf("install theme: %w", err))
 	}
 	cleanup = false
 
 	return Installed{
-		Manifest:   manifest,
-		HasPreview: len(files["preview.png"]) > 0,
+		Manifest:       manifest,
+		HasPreview:     len(files["preview.png"]) > 0,
+		CleanupWarning: cleanupWarning,
 	}, nil
 }
 
-func replaceThemeDir(root, id, nextDir, targetDir string) error {
+func replaceThemeDir(root, id, nextDir, targetDir string) (cleanupWarning, err error) {
 	info, err := os.Stat(targetDir)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return os.Rename(nextDir, targetDir)
+			return nil, os.Rename(nextDir, targetDir)
 		}
-		return fmt.Errorf("stat current theme: %w", err)
+		return nil, fmt.Errorf("stat current theme: %w", err)
 	}
 	if !info.IsDir() {
-		return fmt.Errorf("current theme path is not a directory: %s", targetDir)
+		return nil, fmt.Errorf("current theme path is not a directory: %s", targetDir)
 	}
 
 	backupDir, err := reserveBackupDir(root, id)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if err := os.Rename(targetDir, backupDir); err != nil {
-		return fmt.Errorf("backup current theme: %w", err)
+		return nil, fmt.Errorf("backup current theme: %w", err)
 	}
 
 	if err := os.Rename(nextDir, targetDir); err != nil {
 		_ = os.RemoveAll(targetDir)
 		if rollbackErr := os.Rename(backupDir, targetDir); rollbackErr != nil {
-			return fmt.Errorf("%w (rollback failed: %v)", err, rollbackErr)
+			return nil, errors.Join(
+				fmt.Errorf("install new theme: %w", err),
+				fmt.Errorf("restore previous theme: %w", rollbackErr),
+			)
 		}
-		return err
+		return nil, err
 	}
 
-	_ = os.RemoveAll(backupDir)
-	return nil
+	if err := os.RemoveAll(backupDir); err != nil {
+		return fmt.Errorf("remove previous theme backup %q: %w", backupDir, err), nil
+	}
+	return nil, nil
 }
 
 func reserveBackupDir(root, id string) (string, error) {
@@ -189,6 +215,9 @@ func readZip(archive []byte) (map[string][]byte, error) {
 	reader, err := zip.NewReader(bytes.NewReader(archive), int64(len(archive)))
 	if err != nil {
 		return nil, fmt.Errorf("read theme archive: %w", err)
+	}
+	if len(reader.File) > maxZipEntries {
+		return nil, fmt.Errorf("theme package contains too many entries")
 	}
 
 	files := make(map[string][]byte, len(reader.File))
@@ -251,6 +280,33 @@ func readZip(archive []byte) (map[string][]byte, error) {
 		files[name] = raw
 	}
 	return files, nil
+}
+
+func validatePreview(raw []byte) error {
+	if len(raw) == 0 {
+		return errors.New("preview.png is empty")
+	}
+	cfg, err := png.DecodeConfig(bytes.NewReader(raw))
+	if err != nil {
+		return fmt.Errorf("decode preview.png: %w", err)
+	}
+	if cfg.Width <= 0 || cfg.Height <= 0 || cfg.Width > maxPreviewDimension || cfg.Height > maxPreviewDimension {
+		return fmt.Errorf("preview.png dimensions must be between 1 and %d pixels", maxPreviewDimension)
+	}
+	if _, err := png.Decode(bytes.NewReader(raw)); err != nil {
+		return fmt.Errorf("decode complete preview.png: %w", err)
+	}
+	return nil
+}
+
+func validateReadme(raw []byte) error {
+	if len(raw) > maxReadmeBytes {
+		return fmt.Errorf("README.md exceeds 256 KiB")
+	}
+	if !utf8.Valid(raw) {
+		return errors.New("README.md must be valid UTF-8")
+	}
+	return nil
 }
 
 type archivePath struct {
