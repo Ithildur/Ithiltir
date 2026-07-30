@@ -20,6 +20,7 @@ import (
 
 const (
 	secretLength   = 16
+	secretMinChars = 8
 	secretMaxChars = 128
 	secretAlphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
 )
@@ -258,7 +259,8 @@ func needsMetaRefresh(upd NodeUpdate) bool {
 
 func normalizeSecret(value string) (string, error) {
 	value = strings.TrimSpace(value)
-	if value == "" || utf8.RuneCountInString(value) > secretMaxChars {
+	n := utf8.RuneCountInString(value)
+	if n < secretMinChars || n > secretMaxChars {
 		return "", ErrInvalidSecret
 	}
 	return value, nil

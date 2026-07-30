@@ -1656,7 +1656,8 @@ admin_password_valid() {
 	local LC_ALL=C
 	local s="$1"
 	[[ -n "$s" ]] || return 1
-	[[ "$s" =~ ^[!-~]+$ ]]
+	[[ "$s" =~ ^[!-~]+$ ]] || return 1
+	(( ${#s} >= 8 ))
 }
 
 run_db_migrations() {
@@ -2266,7 +2267,7 @@ main() {
 		admin_pwd="$(prompt_secret_confirm "$(txt "请设置 Dash 管理员登录密码（环境变量 monitor_dash_pwd）" "Dash admin password (env monitor_dash_pwd)")")"
 		admin_pwd="$(trim_spaces "$admin_pwd")"
 		if ! admin_password_valid "$admin_pwd"; then
-			say_err "Dash 管理员密码仅允许大小写英文、数字和常见符号；会自动忽略输入前后的空格；中间不能包含空格或其他空白字符。" "Dash admin password must use only ASCII letters, digits, and common symbols; leading and trailing spaces are ignored; inner whitespace is not allowed."
+			say_err "Dash 管理员密码至少需要 8 个字符，仅允许大小写英文、数字和常见符号；会自动忽略输入前后的空格；中间不能包含空格或其他空白字符。" "Dash admin password must contain at least 8 characters using only ASCII letters, digits, and common symbols; leading and trailing spaces are ignored; inner whitespace is not allowed."
 			continue
 		fi
 		break

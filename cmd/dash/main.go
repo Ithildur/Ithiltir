@@ -22,7 +22,6 @@ import (
 	transporthttp "dash/internal/transport/http"
 	httpapi "dash/internal/transport/http/api"
 	"dash/internal/version"
-	authhttp "github.com/Ithildur/EiluneKit/auth/http"
 	authjwt "github.com/Ithildur/EiluneKit/auth/jwt"
 	authstore "github.com/Ithildur/EiluneKit/auth/store"
 	"github.com/Ithildur/EiluneKit/auth/store/redissession"
@@ -83,7 +82,7 @@ func main() {
 	}
 	logger := infra.Log()
 	adminPassword := cfg.Auth.Password
-	if err := authhttp.ValidateStaticPassword(adminPassword); err != nil {
+	if err := config.ValidateAdminPassword(adminPassword); err != nil {
 		infra.Fatal("admin password is invalid for admin login", err, slog.String("env", config.EnvAdminPassword))
 	}
 

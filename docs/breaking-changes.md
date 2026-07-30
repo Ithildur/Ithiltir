@@ -4,6 +4,7 @@
 
 ### Runtime configuration
 
+- `monitor_dash_pwd` must contain at least 8 visible ASCII characters without whitespace. Existing installations with a shorter admin password must replace it before starting the upgraded Dash binary.
 - `app.public_url` now accepts only IP literals or ASCII DNS names with ports from 1 through 65535. Internationalized domains must be configured in IDNA/punycode form.
 - Unknown YAML fields and explicitly invalid duration values are rejected during startup instead of being ignored or replaced with defaults. Omitted duration fields still use their documented defaults.
 
@@ -31,7 +32,7 @@
 ### Node and group metadata
 
 - Node names are limited to 64 Unicode characters and cannot contain control characters.
-- Submitted node secrets are trimmed and limited to 128 Unicode characters.
+- Newly submitted node secrets are trimmed and must contain 8 to 128 Unicode characters. Existing shorter stored secrets remain valid until they are rotated.
 - Node report identifiers are now rejected before persistence when they exceed their documented PostgreSQL bounds; oversized metric/static payloads return `422` instead of surfacing as a database failure. Hostnames and disk identities have wider bounds, while operating-system paths, mountpoints, and hardware descriptions use `TEXT`.
 - The upgrade migration temporarily decompresses retained disk metric chunks and rebuilds their disposable continuous aggregates before changing these column types. Operators should leave temporary database headroom; existing compression policies are restored and recompress eligible chunks after the migration.
 - Group names are required and limited to 64 Unicode characters. Group remarks are limited to 255 Unicode characters. Neither field accepts control characters.

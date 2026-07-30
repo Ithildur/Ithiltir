@@ -32,7 +32,7 @@ Ithiltir Dash is a single-instance, self-hosted server monitoring dashboard. One
 
 1. Copy `configs/config.example.yaml` to `config.local.yaml`.
 2. Replace every `__...__` placeholder in `config.local.yaml`.
-3. Set the admin password in `monitor_dash_pwd`.
+3. Set an admin password of at least 8 characters in `monitor_dash_pwd`.
 4. Run database migrations.
 5. Start the server.
 
@@ -56,7 +56,7 @@ Minimum config fields:
 - `redis.addr`
 - `auth.jwt_signing_key`
 
-The admin login password is read only from the `monitor_dash_pwd` environment variable.
+The admin login password is read only from the `monitor_dash_pwd` environment variable. It must contain at least 8 visible ASCII characters without whitespace.
 `auth.jwt_signing_key` must be at least 32 bytes and must not contain surrounding whitespace. The Linux installer generates a 32-byte random alphanumeric key.
 When a supported environment variable is present, its value overrides YAML even when it is empty. Required fields then reject the empty value; optional fields apply their documented empty/default semantics, and credential fields may be explicitly cleared. An empty integer environment variable means zero; a non-empty value that is not an integer is a configuration error.
 Database pool sizes must be non-negative. A positive `database.max_open_conns` must be at least `database.max_idle_conns`; zero keeps the existing default/unlimited semantics. `database.conn_max_lifetime` must be non-negative, and zero disables age-based expiry.

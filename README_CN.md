@@ -32,7 +32,7 @@ Ithiltir Dash 是单实例、自托管的服务器监控面板。一个 Dash 进
 
 1. 复制 `configs/config.example.yaml` 为 `config.local.yaml`。
 2. 替换 `config.local.yaml` 里的 `__...__` 占位符。
-3. 设置管理员密码环境变量 `monitor_dash_pwd`。
+3. 在环境变量 `monitor_dash_pwd` 中设置至少 8 个字符的管理员密码。
 4. 执行数据库迁移。
 5. 启动服务。
 
@@ -56,7 +56,7 @@ go run ./cmd/dash -debug
 - `redis.addr`
 - `auth.jwt_signing_key`
 
-管理员登录密码只从环境变量 `monitor_dash_pwd` 读取，不写入配置文件。
+管理员登录密码只从环境变量 `monitor_dash_pwd` 读取，不写入配置文件；密码至少包含 8 个可见 ASCII 字符，且不得包含空白字符。
 `auth.jwt_signing_key` 至少为 32 字节，且不能带首尾空白。Linux 安装器会生成 32 字节的随机字母数字密钥。
 受支持的环境变量只要存在，就会覆盖 YAML，即使其值为空。必填字段会在后续校验中拒绝空值；可选字段按各自的空值/默认语义处理；凭据字段可以被显式清空。整数环境变量为空时表示 0；非空但无法解析为整数时属于配置错误。
 数据库连接池数值必须非负；`database.max_open_conns` 为正数时不得小于 `database.max_idle_conns`，零值保留既有默认/不限语义。`database.conn_max_lifetime` 不得为负，零表示不按连接年龄淘汰。

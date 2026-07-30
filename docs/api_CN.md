@@ -24,6 +24,7 @@
 | `upgrade_token` query                  | 只给旧 Agent 自动升级使用的临时 deploy 资产下载授权 |
 
 Bearer 可选端点会把缺失、格式错误、过期、已撤销或其他非法 Bearer token 当作匿名请求处理。这是有意设计：它们是提供可选管理员视图的公开端点，不是带游客兜底的鉴权端点。Refresh cookie 使用 `SameSite=Strict`，refresh/logout 还必须提交匹配的 `X-CSRF-Token`。
+管理员密码通过 `monitor_dash_pwd` 提供，至少包含 8 个可见 ASCII 字符，且不得包含空白字符。
 
 ## 命名空间
 
@@ -69,7 +70,7 @@ Bearer 可选端点会把缺失、格式错误、过期、已撤销或其他非�
 - `GET /api/admin/nodes/` 包含 `traffic_p95_enabled`、`traffic_cycle_mode`、`traffic_billing_start_day`、`traffic_billing_anchor_date`、`traffic_billing_timezone`、`traffic_direction_mode`、`tags` 和 `version`。`tags` 始终是字符串数组。
 - `version.version` 是 Agent 最后上报版本；缺失、非法或低于受支持节点版本下限时，`version.is_outdated` 为 true。上报的 Agent 版本支持自动更新协议时，`version.supports_auto_update` 为 true；平台支持和打包更新资产是否可用会在请求升级时继续校验。
 - `PATCH /api/admin/nodes/{id}` 接受 `traffic_p95_enabled`、`tags` 和节点流量字段。非账期字段未提交时保持不变。节点账期字段是原子组：只要提交 `traffic_cycle_mode`、`traffic_billing_start_day`、`traffic_billing_anchor_date` 或 `traffic_billing_timezone` 中任意一个字段，就必须同时提交 `traffic_cycle_mode` 和该模式使用的全部字段，否则返回 `400 invalid_traffic_cycle_settings`。账期和统计方向变更立即生效；账期改变时，该节点受影响的月度派生数据会失效，并在后台从新旧当前账期较早的起点局部重算仍在保留期内的原始数据。局部重算期间只暂停该节点的 Lite 实时累计，不会回退全局进度或阻塞其他节点；受影响节点在追平前可能暂时没有当前账期统计或只显示部分覆盖。`calendar_month` 使用 `traffic_billing_timezone`；`clamp_to_month_end` 使用 `traffic_billing_start_day` 和 `traffic_billing_timezone`；`whmcs_compatible` 使用 `traffic_billing_anchor_date` 和 `traffic_billing_timezone`，`traffic_billing_start_day` 由锚点日期推导。兼容旧客户端的输入别名 `default` 仍可在不带账期字段时提交，但会保存为从 1 号开始的显式 `calendar_month`。`tags` 接受字符串数组；值会 trim，空值和重复值会被删除，`[]` 表示清空标签。响应中的 `traffic_cycle_mode` 只包含 `calendar_month`、`whmcs_compatible`、`clamp_to_month_end`；`traffic_direction_mode` 允许 `default`、`out`、`both`、`max`。
-- `PATCH /api/admin/nodes/{id}` 会 trim `secret`；字段必须包含 1–128 个 Unicode 字符，否则返回 `400 invalid_secret`。提交的 `secret` 已属于其他节点时返回 `409 duplicate_secret`。
+- `PATCH /api/admin/nodes/{id}` 会 trim `secret`；字段必须包含 8–128 个 Unicode 字符，否则返回 `400 invalid_secret`。提交的 `secret` 已属于其他节点时返回 `409 duplicate_secret`。
 - 提交的节点 `name` 会 trim，必须包含 1 到 64 个 Unicode 字符且不得含控制字符；非法值返回 `400 invalid_name`。
 - `GET /api/admin/nodes/deploy` 在 `scripts` 下返回各平台的 `url` 和 `command_prefix`；把节点 secret 追加到 `command_prefix` 后就是可直接执行的一行安装命令。
 - `PATCH /api/admin/nodes/traffic-p95` 接受 `ids` 和 `enabled`。`enabled` 必填。`ids` 必须是非空正整数数组，不能重复，最多 10000 项。该命令先校验所有节点 ID，再在一个事务中更新全部选中节点。成功返回 `204`；任一节点不存在或已删除时返回 `404 not_found`，且不会更新任何节点。

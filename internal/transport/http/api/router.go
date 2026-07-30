@@ -140,6 +140,9 @@ func Register(router chi.Router, cfg *config.Config, deps Dependencies) error {
 }
 
 func newAuthHandler(password string, auth authhttp.TokenManager, trustedProxies []netip.Prefix) (*authhttp.Handler, error) {
+	if err := config.ValidateAdminPassword(password); err != nil {
+		return nil, fmt.Errorf("api: invalid admin password: %w", err)
+	}
 	authenticator, err := authhttp.NewStaticPassword(passwordOnlyAuthUserID, password)
 	if err != nil {
 		return nil, fmt.Errorf("api: invalid admin password: %w", err)
