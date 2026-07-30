@@ -1,9 +1,18 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Lifecycle contract: run this installer once on a fresh Dash host. It is not
+# a reinstall, repair, rollback, or version-update entrypoint. After the first
+# successful installation, every version change uses the dash update subcommand
+# directly or through the compatibility wrapper update_dash_linux.sh. Installation and
+# update workflows are never run concurrently.
+
 APP="dash"
 
 INSTALL_DIR="/opt/Ithiltir-dash"
+RELEASES_DIR="${INSTALL_DIR}/releases"
+CURRENT_LINK="${INSTALL_DIR}/current"
+LAYOUT_MARKER="${INSTALL_DIR}/.release-layout-v1"
 BIN_DIR="${INSTALL_DIR}/bin"
 BIN_PATH="${BIN_DIR}/dash"
 
@@ -12,12 +21,26 @@ CONFIG_EXAMPLE="${CONFIG_DIR}/config.example.yaml"
 CONFIG_LOCAL="${CONFIG_DIR}/config.local.yaml"
 
 SERVICE_FILE="/etc/systemd/system/${APP}.service"
+MANUAL_RUN_FILE="${INSTALL_DIR}/run_dash.sh"
 
 REDIS_INSTALL_METHOD="${REDIS_INSTALL_METHOD:-package}"
+REDIS_TAKEOVER_CONFIRMED="0"
+SERVICE_MANAGER_MODE="${SERVICE_MANAGER_MODE:-auto}"
+SERVICE_MANAGER=""
+INSTALL_RELEASE=""
+INSTALL_RECOVERY_ROOT=""
+INSTALL_PREVIOUS_LAYOUT=""
+INSTALL_PREVIOUS_TARGET=""
+INSTALL_PREVIOUS_MARKER="0"
+INSTALL_PREVIOUS_CONFIG="0"
+INSTALL_SYSTEMD_WAS_ACTIVE="0"
+INSTALL_ROLLBACK_READY="0"
+INSTALL_MIGRATION_STARTED="0"
 
 OS_ID=""
 OS_VERSION_ID=""
-OS_VERSION_CODENAME=""
+APT_REPO_ID=""
+APT_REPO_CODENAME=""
 OS_FAMILY=""
 PKG_MANAGER=""
 PKG_MANAGER_LABEL=""
@@ -28,7 +51,7 @@ INSTALL_LANG="${INSTALL_LANG:-}"
 
 usage() {
 	cat <<EOF
-Usage: $0 [--lang zh|en]
+Usage: $0 [--lang zh|en] [--service-manager auto|systemd|none]
 EOF
 }
 
@@ -42,6 +65,15 @@ parse_args() {
 			;;
 		--lang=*)
 			INSTALL_LANG="${1#--lang=}"
+			shift
+			;;
+		--service-manager)
+			[[ $# -ge 2 ]] || die "missing value for --service-manager"
+			SERVICE_MANAGER_MODE="$2"
+			shift 2
+			;;
+		--service-manager=*)
+			SERVICE_MANAGER_MODE="${1#--service-manager=}"
 			shift
 			;;
 		-h | --help)
@@ -127,7 +159,7 @@ die() {
 }
 
 print_config_summary() {
-	local dash_ip="$1" listen_port="$2" public_url="$3" db_user="$4" db_pass="$5" db_name="$6" retention_days="$7" redis_addr="$8" offline_threshold="$9" language="${10}" trusted_proxies="${11}"
+	local dash_ip="$1" listen_port="$2" public_url="$3" db_user="$4" db_pass="$5" db_name="$6" retention_days="$7" redis_addr="$8" redis_password="$9" offline_threshold="${10}" language="${11}" trusted_proxies="${12}"
 	local retention_label="default (45 days)"
 	if [[ "$retention_days" != "default" ]]; then
 		retention_label="${retention_days} days"
@@ -144,6 +176,11 @@ print_config_summary() {
 	echo "  database.retention_days: ${retention_label}"
 	echo "  app.node_offline_threshold: ${offline_threshold}"
 	echo "  redis.addr: ${redis_addr}"
+	if [[ -n "$redis_password" ]]; then
+		say "  redis.password: (已配置并隐藏)" "  redis.password: (configured and hidden)"
+	else
+		say "  redis.password: (空)" "  redis.password: (empty)"
+	fi
 	echo "  http.trusted_proxies: ${trusted_proxies}"
 }
 
@@ -186,9 +223,60 @@ prompt_yes_no() {
 	done
 }
 
-systemd_unit_exists() {
-	need_cmd systemctl || return 1
-	systemctl cat "${APP}.service" >/dev/null 2>&1
+systemd_available() {
+	need_cmd systemctl && [[ -d /run/systemd/system ]]
+}
+
+detect_service_manager() {
+	if systemd_available; then
+		printf '%s\n' systemd
+		return 0
+	fi
+	printf '%s\n' none
+}
+
+select_service_manager() {
+	local detected
+	detected="$(detect_service_manager)"
+	case "$SERVICE_MANAGER_MODE" in
+	auto)
+		[[ "$detected" != "none" ]] || die "$(txt "未检测到受支持的服务管理器；如需手动安装，请使用 --service-manager=none" "No supported service manager was detected; use --service-manager=none for a manual installation")"
+		SERVICE_MANAGER="$detected"
+		;;
+	systemd)
+		[[ "$detected" == "$SERVICE_MANAGER_MODE" ]] || die "$(txt "请求的服务管理器不可用：${SERVICE_MANAGER_MODE}" "Requested service manager is unavailable: ${SERVICE_MANAGER_MODE}")"
+		SERVICE_MANAGER="$SERVICE_MANAGER_MODE"
+		;;
+	none)
+		SERVICE_MANAGER="none"
+		;;
+	*)
+		die "$(txt "无效的服务管理器：${SERVICE_MANAGER_MODE}（支持 auto/systemd/none）" "Invalid service manager: ${SERVICE_MANAGER_MODE} (supported: auto/systemd/none)")"
+		;;
+	esac
+}
+
+ensure_process_control() {
+	need_cmd pgrep || die "$(txt "需要 pgrep 检查并停止现有 Dash 进程" "pgrep is required to detect and stop an existing Dash process")"
+}
+
+stop_manual_processes() {
+	local -a pids=()
+	mapfile -t pids < <(pgrep -f -- "$BIN_PATH" 2>/dev/null || true)
+	((${#pids[@]} > 0)) || return 0
+
+	say "停止现有手动 Dash 进程" "Stopping existing manually started Dash process"
+	as_root kill -TERM "${pids[@]}" >/dev/null 2>&1 || true
+	for _ in {1..50}; do
+		mapfile -t pids < <(pgrep -f -- "$BIN_PATH" 2>/dev/null || true)
+		((${#pids[@]} == 0)) && return 0
+		sleep 0.1
+	done
+	as_root kill -KILL "${pids[@]}" >/dev/null 2>&1 || true
+	sleep 0.1
+	if pgrep -f -- "$BIN_PATH" >/dev/null 2>&1; then
+		die "$(txt "无法停止现有 Dash 进程" "Failed to stop the existing Dash process")"
+	fi
 }
 
 enable_time_sync() {
@@ -200,12 +288,17 @@ enable_time_sync() {
 	fi
 
 	local unit
-	for unit in systemd-timesyncd.service chronyd.service ntpd.service ntp.service; do
-		if as_root systemctl enable --now "$unit" >/dev/null 2>&1; then
-			say "系统时间同步服务已启动：${unit}" "System time sync service started: ${unit}"
-			return 0
-		fi
-	done
+	case "$SERVICE_MANAGER" in
+	systemd)
+		for unit in systemd-timesyncd.service chronyd.service ntpd.service ntp.service; do
+			if as_root systemctl enable --now "$unit" >/dev/null 2>&1; then
+				say "系统时间同步服务已启动：${unit}" "System time sync service started: ${unit}"
+				return 0
+			fi
+		done
+		;;
+	none) ;;
+	esac
 
 	say_err "警告：未能自动启用系统时间同步，请手动检查 NTP/chrony/systemd-timesyncd。" "WARNING: Could not enable system time sync automatically; please check NTP/chrony/systemd-timesyncd manually."
 	return 0
@@ -297,6 +390,30 @@ prompt_secret_confirm() {
 	done
 }
 
+prompt_secret_optional() {
+	local prompt="$1" a b
+	while true; do
+		IFS= read -r -s -p "${prompt}: " a
+		printf '\n' >&2
+		if [[ -z "$a" ]]; then
+			printf '\n'
+			return 0
+		fi
+		if [[ "$a" =~ [[:cntrl:]] ]]; then
+			say_err "Redis 密码不能包含控制字符，请重试" "Redis password cannot contain control characters, please retry"
+			continue
+		fi
+		IFS= read -r -s -p "$(txt "请再次输入确认: " "Confirm again: ")" b
+		printf '\n' >&2
+		[[ "$a" == "$b" ]] || {
+			say_err "两次输入不一致，请重试" "Passwords do not match, please retry"
+			continue
+		}
+		printf '%s\n' "$a"
+		return 0
+	done
+}
+
 version_ge() {
 	local a="$1" b="$2"
 	local IFS=.
@@ -375,6 +492,24 @@ port_has_redis_listener() {
 	return 1
 }
 
+confirm_redis_takeover() {
+	if [[ "$REDIS_TAKEOVER_CONFIRMED" == "1" ]]; then
+		return 0
+	fi
+
+	local pids
+	pids="$(find_listening_pids_on_port 6379)"
+	if [[ ! -e /etc/redis/redis.conf && ! -e /etc/systemd/system/redis-server.service && ! -e /etc/init.d/redis && ! -e /etc/init.d/redis-server && -z "$pids" ]]; then
+		REDIS_TAKEOVER_CONFIRMED="1"
+		return 0
+	fi
+
+	if ! prompt_yes_no "$(txt "安装器将备份并覆盖现有 Redis 配置/服务，并停止 6379 端口上的旧进程。是否继续？" "The installer will back up and replace the existing Redis configuration/service and stop the old process on port 6379. Continue?")" "Y"; then
+		return 1
+	fi
+	REDIS_TAKEOVER_CONFIRMED="1"
+}
+
 kill_listeners_on_port() {
 	local port="$1"
 	local pids
@@ -388,8 +523,13 @@ kill_listeners_on_port() {
 		say "检测到端口 ${port} 已被占用，尝试结束占用进程：${pids}" "Port ${port} is in use; terminating listeners: ${pids}"
 	fi
 
-	as_root systemctl stop redis-server.service >/dev/null 2>&1 || true
-	as_root systemctl stop redis.service >/dev/null 2>&1 || true
+	case "$SERVICE_MANAGER" in
+	systemd)
+		as_root systemctl stop redis-server.service >/dev/null 2>&1 || true
+		as_root systemctl stop redis.service >/dev/null 2>&1 || true
+		;;
+	none) ;;
+	esac
 
 	for pid in $pids; do
 		as_root kill -TERM "$pid" >/dev/null 2>&1 || true
@@ -425,6 +565,12 @@ systemd_escape_env_value() {
 	printf "%s" "$s"
 }
 
+shell_quote_arg() {
+	local s="$1"
+	s="${s//\'/\'\\\'\'}"
+	printf "'%s'" "$s"
+}
+
 sed_escape_repl() {
 	local s="$1"
 	s="${s//\\/\\\\}"
@@ -434,6 +580,7 @@ sed_escape_repl() {
 }
 
 write_redis_conf() {
+	[[ "$REDIS_TAKEOVER_CONFIRMED" == "1" ]] || die "$(txt "内部错误：覆盖 Redis 配置前未确认" "Internal error: Redis takeover was not confirmed")"
 	as_root install -d -m 0755 /etc/redis /var/lib/redis /var/log/redis
 	as_root chown -R redis:redis /var/lib/redis /var/log/redis >/dev/null 2>&1 || true
 
@@ -442,7 +589,9 @@ write_redis_conf() {
 		as_root cp -f /etc/redis/redis.conf "$bak"
 	fi
 
-	as_root bash -c "cat > /etc/redis/redis.conf <<'EOF'
+	local supervised="no"
+	[[ "$SERVICE_MANAGER" != "systemd" ]] || supervised="systemd"
+	as_root bash -c "cat > /etc/redis/redis.conf <<EOF
 
 bind 127.0.0.1 -::1
 protected-mode yes
@@ -452,7 +601,7 @@ timeout 0
 tcp-keepalive 300
 
 daemonize no
-supervised systemd
+supervised ${supervised}
 pidfile /run/redis/redis-server.pid
 
 loglevel notice
@@ -486,7 +635,6 @@ detect_os() {
 
 	OS_ID="${ID:-}"
 	OS_VERSION_ID="${VERSION_ID:-}"
-	OS_VERSION_CODENAME="${VERSION_CODENAME:-${UBUNTU_CODENAME:-${DEBIAN_CODENAME:-}}}"
 
 	case "${OS_ID}" in
 	debian)
@@ -494,6 +642,8 @@ detect_os() {
 		[[ "$major" =~ ^[0-9]+$ ]] || die "$(txt "无法解析 Debian VERSION_ID=${OS_VERSION_ID:-}" "Cannot parse Debian VERSION_ID=${OS_VERSION_ID:-}")"
 		((major >= 11)) || die "$(txt "仅支持 Debian 11+，当前 VERSION_ID=${OS_VERSION_ID}" "Only Debian 11+ is supported (current VERSION_ID=${OS_VERSION_ID})")"
 		OS_FAMILY="debian"
+		APT_REPO_ID="debian"
+		APT_REPO_CODENAME="${DEBIAN_CODENAME:-${VERSION_CODENAME:-}}"
 		PKG_MANAGER="apt-get"
 		PKG_MANAGER_LABEL="apt-get"
 		;;
@@ -502,6 +652,8 @@ detect_os() {
 		[[ "$major" =~ ^[0-9]+$ ]] || die "$(txt "无法解析 Ubuntu VERSION_ID=${OS_VERSION_ID:-}" "Cannot parse Ubuntu VERSION_ID=${OS_VERSION_ID:-}")"
 		((major >= 22)) || die "$(txt "仅支持 Ubuntu 22+，当前 VERSION_ID=${OS_VERSION_ID}" "Only Ubuntu 22+ is supported (current VERSION_ID=${OS_VERSION_ID})")"
 		OS_FAMILY="debian"
+		APT_REPO_ID="ubuntu"
+		APT_REPO_CODENAME="${UBUNTU_CODENAME:-${VERSION_CODENAME:-}}"
 		PKG_MANAGER="apt-get"
 		PKG_MANAGER_LABEL="apt-get"
 		;;
@@ -538,10 +690,28 @@ detect_os() {
 		PKG_MANAGER="pacman"
 		PKG_MANAGER_LABEL="pacman"
 		;;
+	alpine)
+		OS_FAMILY="manual"
+		PKG_MANAGER=""
+		PKG_MANAGER_LABEL="manual"
+		say_err "警告：Alpine 上的 Dash 仅支持显式手动模式；PostgreSQL 16+、匹配其主版本的 TimescaleDB 和 Redis 必须预先安装并运行。" "WARNING: Dash supports only explicit manual mode on Alpine; PostgreSQL 16+, TimescaleDB for that PostgreSQL major, and Redis must already be installed and running."
+		return 0
+		;;
 	*)
 		case " ${ID_LIKE:-} " in
-		*" debian "* | *" ubuntu "*)
+		*" ubuntu "*)
 			OS_FAMILY="debian"
+			APT_REPO_ID="ubuntu"
+			APT_REPO_CODENAME="${UBUNTU_CODENAME:-}"
+			[[ -n "$APT_REPO_CODENAME" ]] || die "$(txt "无法确定 ${OS_ID} 对应的 Ubuntu 基础版本代号（UBUNTU_CODENAME）" "Cannot determine the Ubuntu base codename for ${OS_ID} (UBUNTU_CODENAME)")"
+			PKG_MANAGER="apt-get"
+			PKG_MANAGER_LABEL="apt-get"
+			;;
+		*" debian "*)
+			OS_FAMILY="debian"
+			APT_REPO_ID="debian"
+			APT_REPO_CODENAME="${DEBIAN_CODENAME:-}"
+			[[ -n "$APT_REPO_CODENAME" ]] || die "$(txt "无法确定 ${OS_ID} 对应的 Debian 基础版本代号（DEBIAN_CODENAME）" "Cannot determine the Debian base codename for ${OS_ID} (DEBIAN_CODENAME)")"
 			PKG_MANAGER="apt-get"
 			PKG_MANAGER_LABEL="apt-get"
 			;;
@@ -562,13 +732,17 @@ detect_os() {
 			PKG_MANAGER_LABEL="pacman"
 			;;
 		*)
-			die "$(txt "仅支持 Debian/Ubuntu、RHEL/Rocky/Alma/Oracle/Fedora、Arch/Manjaro 等 systemd 发行版，当前系统 ID=${OS_ID:-unknown}" "Only systemd-based Debian/Ubuntu, RHEL/Rocky/Alma/Oracle/Fedora, and Arch/Manjaro families are supported (current ID=${OS_ID:-unknown})")"
+			if [[ "$SERVICE_MANAGER" == "none" ]]; then
+				OS_FAMILY="manual"
+				PKG_MANAGER=""
+				PKG_MANAGER_LABEL="manual"
+				return 0
+			fi
+			die "$(txt "仅支持 Debian/Ubuntu、RHEL/Rocky/Alma/Oracle/Fedora、Arch/Manjaro；当前系统 ID=${OS_ID:-unknown}" "Only Debian/Ubuntu, RHEL/Rocky/Alma/Oracle/Fedora, and Arch/Manjaro are supported (current ID=${OS_ID:-unknown})")"
 			;;
 		esac
 		;;
 	esac
-
-	need_cmd systemctl || die "$(txt "安装脚本依赖 systemd（未检测到 systemctl）" "This installer requires systemd (systemctl not found)")"
 }
 
 pkg_update() {
@@ -641,17 +815,30 @@ ensure_pkg_prereqs() {
 }
 
 ensure_postgres_binaries_on_path() {
+	local current_major=""
 	if need_cmd psql; then
-		return 0
+		current_major="$(psql --version 2>/dev/null | sed -nE 's/.* ([0-9]+)(\.[0-9]+)?.*/\1/p')"
 	fi
 
-	local dir
-	for dir in /usr/pgsql-16/bin /usr/lib/postgresql/16/bin /usr/bin; do
-		if [[ -x "${dir}/psql" ]]; then
-			export PATH="${dir}:${PATH}"
-			return 0
+	local dir major best_dir="" best_major=0
+	if [[ "$current_major" =~ ^[0-9]+$ ]] && ((current_major >= 16)); then
+		best_major="$current_major"
+	fi
+	local -a dirs=()
+	shopt -s nullglob
+	dirs=(/usr/pgsql-*/bin /usr/lib/postgresql/*/bin)
+	shopt -u nullglob
+	for dir in "${dirs[@]}"; do
+		[[ -x "${dir}/psql" ]] || continue
+		major="$("${dir}/psql" --version 2>/dev/null | sed -nE 's/.* ([0-9]+)(\.[0-9]+)?.*/\1/p')"
+		if [[ "$major" =~ ^[0-9]+$ ]] && ((major >= 16 && major > best_major)); then
+			best_dir="$dir"
+			best_major="$major"
 		fi
 	done
+	if [[ -n "$best_dir" ]]; then
+		export PATH="${best_dir}:${PATH}"
+	fi
 }
 
 systemd_enable_now_first() {
@@ -675,19 +862,49 @@ systemd_restart_first() {
 }
 
 enable_postgres_service() {
-	systemd_enable_now_first postgresql-16.service postgresql.service
+	local pg_major
+	pg_major="$(postgres_major_version)"
+	[[ "$pg_major" =~ ^[0-9]+$ ]] || pg_major="16"
+	case "$SERVICE_MANAGER" in
+	systemd)
+		case "${OS_FAMILY}" in
+		debian | arch) as_root systemctl enable --now postgresql.service ;;
+		rhel | fedora) as_root systemctl enable --now "postgresql-${pg_major}.service" ;;
+		*) die "$(txt "未知系统族：${OS_FAMILY:-unknown}" "Unknown OS family: ${OS_FAMILY:-unknown}")" ;;
+		esac
+		;;
+	none) return 0 ;;
+	esac
 }
 
 restart_postgres_service() {
-	systemd_restart_first postgresql-16.service postgresql.service
+	local pg_major
+	pg_major="$(postgres_major_version)"
+	[[ "$pg_major" =~ ^[0-9]+$ ]] || die "$(txt "无法确定 PostgreSQL 主版本" "Cannot determine PostgreSQL major version")"
+	case "$SERVICE_MANAGER" in
+	systemd)
+		case "${OS_FAMILY}" in
+		debian | arch) as_root systemctl restart postgresql.service ;;
+		rhel | fedora) as_root systemctl restart "postgresql-${pg_major}.service" ;;
+		*) die "$(txt "未知系统族：${OS_FAMILY:-unknown}" "Unknown OS family: ${OS_FAMILY:-unknown}")" ;;
+		esac
+		;;
+	none) return 0 ;;
+	esac
 }
 
 enable_restart_redis_service() {
-	systemd_enable_now_first redis-server.service redis.service >/dev/null 2>&1 || true
-	systemd_restart_first redis-server.service redis.service >/dev/null 2>&1 || true
+	case "$SERVICE_MANAGER" in
+	systemd)
+		systemd_enable_now_first redis-server.service redis6.service redis.service >/dev/null 2>&1 || true
+		systemd_restart_first redis-server.service redis6.service redis.service >/dev/null 2>&1 || true
+		;;
+	none) return 0 ;;
+	esac
 }
 
-write_redis_service() {
+write_systemd_redis_service() {
+	[[ "$REDIS_TAKEOVER_CONFIRMED" == "1" ]] || die "$(txt "内部错误：覆盖 Redis 服务前未确认" "Internal error: Redis takeover was not confirmed")"
 	local unit="/etc/systemd/system/redis-server.service"
 	as_root install -d -m 0755 /etc/systemd/system
 	if [[ -e "$unit" || -L "$unit" ]]; then
@@ -719,22 +936,64 @@ WantedBy=multi-user.target
 EOF"
 }
 
+write_redis_service() {
+	[[ "$REDIS_TAKEOVER_CONFIRMED" == "1" ]] || die "$(txt "内部错误：覆盖 Redis 服务前未确认" "Internal error: Redis takeover was not confirmed")"
+	case "$SERVICE_MANAGER" in
+	systemd) write_systemd_redis_service ;;
+	none) return 0 ;;
+	esac
+}
+
+install_repo_key() {
+	local url="$1" fingerprints="$2" destination="$3" format="${4:-armored}"
+	local tmp actual expected
+	tmp="$(mktemp -d)"
+	if ! curl --proto '=https' --proto-redir '=https' --tlsv1.2 -fsSL -o "${tmp}/key" "$url"; then
+		rm -rf "$tmp"
+		die "$(txt "下载仓库签名密钥失败：${url}" "Failed to download repository signing key: ${url}")"
+	fi
+	if ! actual="$(gpg --batch --with-colons --show-keys "${tmp}/key" 2>/dev/null |
+		awk -F: '$1 == "pub" {primary=1; next} primary && $1 == "fpr" {print $10; primary=0}' |
+		sort -u)"; then
+		rm -rf "$tmp"
+		die "$(txt "无法读取仓库签名密钥：${url}" "Failed to inspect repository signing key: ${url}")"
+	fi
+	expected="$(printf '%s\n' "$fingerprints" | tr ',' '\n' | sort -u)"
+	if [[ -z "$actual" || "$actual" != "$expected" ]]; then
+		rm -rf "$tmp"
+		die "$(txt "仓库签名密钥指纹不匹配：${url}" "Repository signing-key fingerprint mismatch: ${url}")"
+	fi
+
+	local source="${tmp}/key"
+	if [[ "$format" == "gpg" ]]; then
+		if ! gpg --batch --yes --dearmor --output "${tmp}/key.gpg" "${tmp}/key"; then
+			rm -rf "$tmp"
+			die "$(txt "转换仓库签名密钥失败" "Failed to convert repository signing key")"
+		fi
+		source="${tmp}/key.gpg"
+	fi
+	as_root install -D -m 0644 "$source" "$destination"
+	rm -rf "$tmp"
+}
+
 setup_postgresql_repo() {
 	local arch
 	arch="$(uname -m)"
 
 	case "${OS_FAMILY}" in
 	debian)
-		if [[ -z "${OS_VERSION_CODENAME}" ]] && need_cmd lsb_release; then
-			OS_VERSION_CODENAME="$(lsb_release -cs 2>/dev/null || true)"
+		if [[ -z "${APT_REPO_CODENAME}" && "$OS_ID" == "$APT_REPO_ID" ]] && need_cmd lsb_release; then
+			APT_REPO_CODENAME="$(lsb_release -cs 2>/dev/null || true)"
 		fi
-		[[ -n "${OS_VERSION_CODENAME}" ]] || die "$(txt "无法确定 Debian/Ubuntu 代号（VERSION_CODENAME）" "Cannot determine Debian/Ubuntu codename (VERSION_CODENAME)")"
+		[[ -n "${APT_REPO_CODENAME}" ]] || die "$(txt "无法确定 Debian/Ubuntu 基础版本代号" "Cannot determine the Debian/Ubuntu base codename")"
 		local keyring="/usr/share/keyrings/postgresql-archive-keyring.gpg"
-		if [[ ! -f "$keyring" ]]; then
-			curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc | gpg --dearmor | as_root tee "$keyring" >/dev/null
-		fi
+		install_repo_key \
+			https://www.postgresql.org/media/keys/ACCC4CF8.asc \
+			B97B0AFCAA1A47F044F244A07FCC7D46ACCC4CF8 \
+			"$keyring" \
+			gpg
 		as_root bash -c "cat > /etc/apt/sources.list.d/pgdg.list <<EOF
-deb [signed-by=${keyring}] http://apt.postgresql.org/pub/repos/apt ${OS_VERSION_CODENAME}-pgdg main
+deb [signed-by=${keyring}] https://apt.postgresql.org/pub/repos/apt ${APT_REPO_CODENAME}-pgdg main
 EOF"
 		;;
 	rhel)
@@ -783,21 +1042,25 @@ init_postgres_cluster_if_needed() {
 	postgres_cluster_initialized && return 0
 
 	ensure_postgres_binaries_on_path
-
-	if [[ -x /usr/pgsql-16/bin/postgresql-16-setup ]]; then
-		as_root /usr/pgsql-16/bin/postgresql-16-setup initdb >/dev/null 2>&1 || true
-	fi
-
-	if need_cmd postgresql-setup; then
-		as_root postgresql-setup --initdb >/dev/null 2>&1 || \
-			as_root postgresql-setup --initdb --unit postgresql >/dev/null 2>&1 || \
-			as_root postgresql-setup --initdb --unit postgresql-16 >/dev/null 2>&1 || true
-	fi
-
-	if ! postgres_cluster_initialized && [[ "${OS_FAMILY}" == "arch" ]] && need_cmd initdb; then
+	case "${OS_FAMILY}" in
+	debian)
+		need_cmd pg_createcluster || die "$(txt "缺少 pg_createcluster，无法初始化 PostgreSQL 16" "pg_createcluster is required to initialize PostgreSQL 16")"
+		as_root pg_createcluster 16 main
+		;;
+	rhel | fedora)
+		[[ -x /usr/pgsql-16/bin/postgresql-16-setup ]] || die "$(txt "缺少 postgresql-16-setup" "postgresql-16-setup is missing")"
+		as_root /usr/pgsql-16/bin/postgresql-16-setup initdb
+		;;
+	arch)
+		need_cmd initdb || die "$(txt "缺少 initdb" "initdb is missing")"
 		as_root install -d -m 0700 -o postgres -g postgres /var/lib/postgres/data
-		as_postgres initdb -D /var/lib/postgres/data >/dev/null 2>&1 || true
-	fi
+		as_postgres initdb -D /var/lib/postgres/data
+		;;
+	*)
+		die "$(txt "未知系统族：${OS_FAMILY:-unknown}" "Unknown OS family: ${OS_FAMILY:-unknown}")"
+		;;
+	esac
+	postgres_cluster_initialized || die "$(txt "PostgreSQL 数据目录初始化失败" "PostgreSQL data directory was not initialized")"
 }
 
 install_postgresql16() {
@@ -822,7 +1085,7 @@ install_postgresql16() {
 
 	ensure_postgres_binaries_on_path
 	init_postgres_cluster_if_needed
-	enable_postgres_service || true
+	enable_postgres_service
 }
 
 postgres_major_version() {
@@ -831,7 +1094,12 @@ postgres_major_version() {
 		echo ""
 		return 0
 	fi
-	local v
+	local server_num v
+	server_num="$(as_postgres psql -d postgres -tAc 'SHOW server_version_num' 2>/dev/null | tr -d '[:space:]' || true)"
+	if [[ "$server_num" =~ ^[0-9]+$ ]] && ((server_num >= 10000)); then
+		echo "$((server_num / 10000))"
+		return 0
+	fi
 	v="$(psql --version 2>/dev/null | awk '{print $3}' || true)"
 	echo "${v%%.*}"
 }
@@ -867,45 +1135,76 @@ ensure_postgresql16_and_password() {
 
 timescaledb_installed() {
 	ensure_postgres_binaries_on_path
-
-	if need_cmd pg_config; then
+	local pg_major
+	pg_major="$(postgres_major_version)"
+	[[ "$pg_major" =~ ^[0-9]+$ ]] || return 1
+	case "${OS_FAMILY}" in
+	debian) [[ -f "/usr/share/postgresql/${pg_major}/extension/timescaledb.control" ]] ;;
+	rhel | fedora) [[ -f "/usr/pgsql-${pg_major}/share/extension/timescaledb.control" ]] ;;
+	arch)
+		need_cmd pg_config || return 1
 		local sharedir
-		sharedir="$(pg_config --sharedir 2>/dev/null || true)"
-		if [[ -n "$sharedir" && -f "${sharedir}/extension/timescaledb.control" ]]; then
-			return 0
-		fi
-	fi
-
-	local control
-	for control in \
-		/usr/pgsql-16/share/extension/timescaledb.control \
-		/usr/share/postgresql/16/extension/timescaledb.control \
-		/usr/share/postgresql/extension/timescaledb.control \
-		/usr/share/postgresql/17/extension/timescaledb.control \
-		/usr/share/postgresql/18/extension/timescaledb.control; do
-		if [[ -f "$control" ]]; then
-			return 0
-		fi
-	done
-
-	return 1
+		sharedir="$(pg_config --sharedir)" || return 1
+		[[ -f "${sharedir}/extension/timescaledb.control" ]]
+		;;
+	manual)
+		need_cmd pg_config || return 1
+		local sharedir
+		sharedir="$(pg_config --sharedir)" || return 1
+		[[ -f "${sharedir}/extension/timescaledb.control" ]]
+		;;
+	*) return 1 ;;
+	esac
 }
 
-install_timescaledb_for_pg16() {
+install_timescaledb_for_postgres() {
 	ensure_pkg_prereqs
+	local pg_major
+	pg_major="$(postgres_major_version)"
+	[[ "$pg_major" =~ ^[0-9]+$ ]] && ((pg_major >= 16)) || die "$(txt "无法确定受支持的 PostgreSQL 主版本" "Cannot determine a supported PostgreSQL major version")"
 
 	case "${OS_FAMILY}" in
 	debian)
-		curl -fsSL https://packagecloud.io/install/repositories/timescale/timescaledb/script.deb.sh | as_root bash
-		pkg_install timescaledb-2-postgresql-16
+		[[ -n "${APT_REPO_ID}" && -n "${APT_REPO_CODENAME}" ]] || die "$(txt "无法确定 Debian/Ubuntu 基础仓库身份" "Cannot determine the Debian/Ubuntu base repository identity")"
+		local keyring="/etc/apt/keyrings/timescale_timescaledb-archive-keyring.gpg"
+		install_repo_key \
+			https://packagecloud.io/timescale/timescaledb/gpgkey \
+			1005FB68604CE9B8F6879CF759F18EDF47F24417,0641009A8366FDE4444A7B62E7391C94080429FF \
+			"$keyring" \
+			gpg
+		as_root bash -c "cat > /etc/apt/sources.list.d/timescale_timescaledb.list <<EOF
+deb [signed-by=${keyring}] https://packagecloud.io/timescale/timescaledb/${APT_REPO_ID} ${APT_REPO_CODENAME} main
+EOF"
+		pkg_update
+		pkg_install "timescaledb-2-postgresql-${pg_major}"
 		;;
 	rhel | fedora)
-		curl -fsSL https://packagecloud.io/install/repositories/timescale/timescaledb/script.rpm.sh | as_root bash
-		pkg_install timescaledb-2-postgresql-16
+		local repo_os="fedora"
+		if [[ "${OS_FAMILY}" == "rhel" ]]; then
+			repo_os="el"
+		fi
+		local os_major="${OS_VERSION_ID%%.*}"
+		local key="/etc/pki/rpm-gpg/timescale-timescaledb.asc"
+		install_repo_key \
+			https://packagecloud.io/timescale/timescaledb/gpgkey \
+			1005FB68604CE9B8F6879CF759F18EDF47F24417,0641009A8366FDE4444A7B62E7391C94080429FF \
+			"$key"
+		as_root bash -c "cat > /etc/yum.repos.d/timescale_timescaledb.repo <<EOF
+[timescale_timescaledb]
+name=timescale_timescaledb
+baseurl=https://packagecloud.io/timescale/timescaledb/${repo_os}/${os_major}/\$basearch
+repo_gpgcheck=1
+gpgcheck=0
+enabled=1
+gpgkey=file://${key}
+sslverify=1
+metadata_expire=300
+EOF"
+		pkg_update
+		pkg_install "timescaledb-2-postgresql-${pg_major}"
 		;;
 	arch)
 		pkg_install timescaledb
-		pkg_install timescaledb-tune >/dev/null 2>&1 || true
 		;;
 	*)
 		die "$(txt "未知系统族：${OS_FAMILY:-unknown}" "Unknown OS family: ${OS_FAMILY:-unknown}")"
@@ -914,20 +1213,23 @@ install_timescaledb_for_pg16() {
 }
 
 ensure_timescaledb_enabled() {
+	local pg_major
+	pg_major="$(postgres_major_version)"
+	[[ "$pg_major" =~ ^[0-9]+$ ]] || die "$(txt "无法确定 PostgreSQL 主版本" "Cannot determine PostgreSQL major version")"
 	if timescaledb_installed; then
 		return 0
 	fi
 
-	if prompt_yes_no "$(txt "未检测到 TimescaleDB（PostgreSQL 16），是否安装并配置？" "TimescaleDB (for PostgreSQL 16) not detected. Install and configure it?")"; then
-		install_timescaledb_for_pg16
+	if prompt_yes_no "$(txt "未检测到匹配 PostgreSQL ${pg_major} 的 TimescaleDB，是否安装并配置？" "TimescaleDB for PostgreSQL ${pg_major} was not detected. Install and configure it?")"; then
+		install_timescaledb_for_postgres
 	else
 		die "$(txt "TimescaleDB 未安装，无法继续" "TimescaleDB is required")"
 	fi
 
 	if need_cmd timescaledb-tune; then
-		as_root timescaledb-tune --quiet --yes >/dev/null 2>&1 || true
+		as_root timescaledb-tune --quiet --yes
 	fi
-	restart_postgres_service || true
+	restart_postgres_service
 }
 
 redis_version() {
@@ -971,18 +1273,23 @@ install_redis_via_package_manager() {
 	if ! id -u redis >/dev/null 2>&1; then
 		as_root useradd --system --no-create-home --shell /usr/sbin/nologin redis
 	fi
-
-	write_redis_conf
-	enable_restart_redis_service
 }
 
 install_redis_build_deps() {
 	case "${OS_FAMILY}" in
 	debian)
-		pkg_install build-essential pkg-config tcl libsystemd-dev
+		if [[ "$SERVICE_MANAGER" == "systemd" ]]; then
+			pkg_install build-essential pkg-config tcl libsystemd-dev
+		else
+			pkg_install build-essential pkg-config tcl
+		fi
 		;;
 	rhel | fedora)
-		pkg_install gcc make pkgconf-pkg-config tcl systemd-devel
+		if [[ "$SERVICE_MANAGER" == "systemd" ]]; then
+			pkg_install gcc make pkgconf-pkg-config tcl systemd-devel
+		else
+			pkg_install gcc make pkgconf-pkg-config tcl
+		fi
 		;;
 	arch)
 		pkg_install base-devel pkgconf tcl
@@ -995,33 +1302,46 @@ install_redis_build_deps() {
 
 install_redis_from_source() {
 	local ver="${1:-8.2.5}"
+	if ! confirm_redis_takeover; then
+		return 1
+	fi
+
 	ensure_pkg_prereqs
 	install_redis_build_deps
 
-	local tmp
-	tmp="$(mktemp -d)"
-	trap "rm -rf \"${tmp}\"" EXIT
+	(
+		local tmp tgz
+		tmp="$(mktemp -d)"
+		trap 'rm -rf "$tmp"' EXIT
 
-	local tgz="${tmp}/redis-${ver}.tar.gz"
-	curl -fsSL -o "$tgz" "https://download.redis.io/releases/redis-${ver}.tar.gz"
-	tar -C "$tmp" -xzf "$tgz"
-	pushd "${tmp}/redis-${ver}" >/dev/null
-	make USE_SYSTEMD=yes -j"$(nproc)"
-	as_root make install
-	hash -r || true
-	popd >/dev/null
+		tgz="${tmp}/redis-${ver}.tar.gz"
+		curl -fsSL -o "$tgz" "https://download.redis.io/releases/redis-${ver}.tar.gz"
+		tar -C "$tmp" -xzf "$tgz"
+		pushd "${tmp}/redis-${ver}" >/dev/null
+		if [[ "$SERVICE_MANAGER" == "systemd" ]]; then
+			make USE_SYSTEMD=yes -j"$(nproc)"
+		else
+			make -j"$(nproc)"
+		fi
+		as_root make install
+		hash -r || true
+		popd >/dev/null
 
-	if ! id -u redis >/dev/null 2>&1; then
-		as_root useradd --system --no-create-home --shell /usr/sbin/nologin redis
-	fi
-	write_redis_conf
+		if ! id -u redis >/dev/null 2>&1; then
+			as_root useradd --system --no-create-home --shell /usr/sbin/nologin redis
+		fi
+		write_redis_conf
+		write_redis_service
+		kill_listeners_on_port 6379
 
-	write_redis_service
-
-	kill_listeners_on_port 6379
-
-	as_root systemctl daemon-reload
-	as_root systemctl enable --now redis-server.service
+		case "$SERVICE_MANAGER" in
+		systemd)
+			as_root systemctl daemon-reload
+			as_root systemctl enable --now redis-server.service
+			;;
+		none) ;;
+		esac
+	)
 }
 
 ensure_redis_82plus() {
@@ -1045,13 +1365,17 @@ ensure_redis_82plus() {
 		fi
 
 		if [[ -n "$v" ]] && version_ge "$v" "$want"; then
-			write_redis_conf
-			enable_restart_redis_service
+			if confirm_redis_takeover; then
+				write_redis_conf
+				enable_restart_redis_service
+			else
+				say "保留现有 Redis ${v} 的配置和服务，不执行覆盖。" "Keeping the existing Redis ${v} configuration and service; no replacement was performed."
+			fi
 			return 0
 		fi
 
 		if [[ -n "$v" ]]; then
-			say "检测到 Redis ${v}，但需要 >=8.2。" "Detected Redis ${v}, but >=8.2 is required."
+			say "检测到 Redis ${v}，但需要 >=8.2.3。" "Detected Redis ${v}, but >=8.2.3 is required."
 		elif [[ "$tried_pkg" -eq 1 ]]; then
 			say "系统包管理器安装后仍未检测到可用的 redis-server。" "A usable redis-server binary is still not available after the package-manager attempt."
 		else
@@ -1065,10 +1389,10 @@ ensure_redis_82plus() {
 		fi
 		local target_ver_pkg
 		target_ver_pkg="$(prompt_string "$(txt "请输入要源码安装的 Redis 版本" "Redis version to install from source")" "8.2.5")"
-		install_redis_from_source "$target_ver_pkg"
+		install_redis_from_source "$target_ver_pkg" || die "$(txt "已取消覆盖现有 Redis，无法完成源码安装/升级" "Redis takeover was declined; the source install/upgrade cannot continue")"
 		v="$(redis_version)"
 		[[ -n "$v" ]] || die "$(txt "Redis 安装失败：未检测到 redis-server" "Redis install failed: redis-server not found")"
-		version_ge "$v" "$want" || die "$(txt "Redis 版本仍不足（当前 ${v}，需要 >=8.2）" "Redis version still too old (current ${v}, need >=8.2)")"
+		version_ge "$v" "$want" || die "$(txt "Redis 版本仍不足（当前 ${v}，需要 >=8.2.3）" "Redis version still too old (current ${v}, need >=8.2.3)")"
 		;;
 	source)
 		v="$(redis_version)"
@@ -1081,23 +1405,51 @@ ensure_redis_82plus() {
 				die "$(txt "Redis 未安装，无法继续" "Redis is required")"
 			fi
 		else
-			if ! prompt_yes_no "$(txt "检测到 Redis ${v}，需要 >=8.2。是否源码安装/升级？" "Detected Redis ${v}. Need >=8.2. Install/upgrade from source?")"; then
+			if ! prompt_yes_no "$(txt "检测到 Redis ${v}，需要 >=8.2.3。是否源码安装/升级？" "Detected Redis ${v}. Need >=8.2.3. Install/upgrade from source?")"; then
 				die "$(txt "Redis 版本不足，无法继续" "Redis version too old")"
 			fi
 		fi
 
 		local target_ver
 		target_ver="$(prompt_string "$(txt "请输入要源码安装的 Redis 版本" "Redis version to install (source build)")" "8.2.5")"
-		install_redis_from_source "$target_ver"
+		install_redis_from_source "$target_ver" || die "$(txt "已取消覆盖现有 Redis，无法完成源码安装/升级" "Redis takeover was declined; the source install/upgrade cannot continue")"
 
 		v="$(redis_version)"
 		[[ -n "$v" ]] || die "$(txt "Redis 安装失败：未检测到 redis-server" "Redis install failed: redis-server not found")"
-		version_ge "$v" "$want" || die "$(txt "Redis 版本仍不足（当前 ${v}，需要 >=8.2）" "Redis version still too old (current ${v}, need >=8.2)")"
+		version_ge "$v" "$want" || die "$(txt "Redis 版本仍不足（当前 ${v}，需要 >=8.2.3）" "Redis version still too old (current ${v}, need >=8.2.3)")"
 		;;
 	*)
 		die "$(txt "未知 REDIS_INSTALL_METHOD=${REDIS_INSTALL_METHOD}（支持：package/source；apt 仍可作为兼容别名）" "Unknown REDIS_INSTALL_METHOD=${REDIS_INSTALL_METHOD} (supported: package/source; apt remains a compatibility alias)")"
 		;;
 	esac
+}
+
+check_preinstalled_dependencies() {
+	local major
+	major="$(postgres_major_version)"
+	[[ "$major" =~ ^[0-9]+$ ]] && ((major >= 16)) || die "$(txt "手动依赖模式要求已安装 PostgreSQL 16+" "Manual dependency mode requires PostgreSQL 16+")"
+	timescaledb_installed || die "$(txt "手动依赖模式要求已安装与当前 PostgreSQL 匹配的 TimescaleDB" "Manual dependency mode requires TimescaleDB for the installed PostgreSQL")"
+	as_postgres psql -d postgres -tAc 'SELECT 1' >/dev/null || die "$(txt "无法连接本机 PostgreSQL；请先启动服务" "Cannot connect to local PostgreSQL; start it before continuing")"
+}
+
+check_redis_endpoint() {
+	local addr="$1" password="${2:-}"
+	local checker="${SCRIPT_DIR}/bin/dash"
+	[[ -x "$checker" ]] || die "$(txt "安装包缺少可执行的 ${checker}" "The package is missing executable ${checker}")"
+	if [[ -z "$password" ]]; then
+		"$checker" check-redis --addr "$addr"
+		return
+	fi
+
+	(
+		local password_file
+		umask 077
+		password_file="$(mktemp -t dash-redis-password-XXXXXX)"
+		trap 'rm -f "$password_file"' EXIT
+		chmod 0600 "$password_file"
+		printf '%s' "$password" >"$password_file"
+		"$checker" check-redis --addr "$addr" --password-file "$password_file"
+	)
 }
 
 validate_ident() {
@@ -1114,14 +1466,14 @@ create_db_and_user() {
 	pass_sql="$(sql_escape_literal "$db_pass")"
 
 	local role_exists db_exists
-	role_exists="$(as_postgres psql -tAc "SELECT 1 FROM pg_roles WHERE rolname='${db_user}'" | tr -d '[:space:]' || true)"
+	role_exists="$(as_postgres psql -tAc "SELECT 1 FROM pg_roles WHERE rolname='${db_user}'" | tr -d '[:space:]')"
 	if [[ "$role_exists" != "1" ]]; then
 		as_postgres psql -v ON_ERROR_STOP=1 -c "CREATE USER ${db_user} WITH PASSWORD '${pass_sql}';" >/dev/null
 	else
 		as_postgres psql -v ON_ERROR_STOP=1 -c "ALTER USER ${db_user} WITH PASSWORD '${pass_sql}';" >/dev/null
 	fi
 
-	db_exists="$(as_postgres psql -tAc "SELECT 1 FROM pg_database WHERE datname='${db_name}'" | tr -d '[:space:]' || true)"
+	db_exists="$(as_postgres psql -tAc "SELECT 1 FROM pg_database WHERE datname='${db_name}'" | tr -d '[:space:]')"
 	if [[ "$db_exists" != "1" ]]; then
 		as_postgres psql -v ON_ERROR_STOP=1 -c "CREATE DATABASE ${db_name} OWNER ${db_user};" >/dev/null
 	fi
@@ -1148,9 +1500,10 @@ render_config_local() {
 	local dash_ip="$1" listen_port="$2" public_url="$3" db_user="$4" db_pass="$5" db_name="$6"
 	local retention_days="${7:-default}"
 	local redis_addr="$8"
-	local offline_threshold="${9:-14s}"
-	local language="${10:-${INSTALL_LANG:-zh}}"
-	local trusted_proxies_yaml="${11:-[]}"
+	local redis_password="$9"
+	local offline_threshold="${10:-14s}"
+	local language="${11:-${INSTALL_LANG:-zh}}"
+	local trusted_proxies_yaml="${12:-[]}"
 
 	as_root install -d -m 0755 "$CONFIG_DIR"
 	[[ -f "$CONFIG_EXAMPLE" ]] || die "$(txt "缺少模板 ${CONFIG_EXAMPLE}（请在安装目录放置 config.example.yaml）" "Missing template ${CONFIG_EXAMPLE}")"
@@ -1165,6 +1518,7 @@ render_config_local() {
 	db_name="$(one_line "$db_name")"
 	retention_days="$(one_line "$retention_days")"
 	redis_addr="$(one_line "$redis_addr")"
+	redis_password="$(one_line "$redis_password")"
 	offline_threshold="$(one_line "$offline_threshold")"
 	offline_threshold="${offline_threshold:-14s}"
 	language="$(one_line "$language")"
@@ -1184,7 +1538,7 @@ render_config_local() {
 		retention_line="retention_days: ${retention_days}"
 	fi
 
-	local dash_ip_esc listen_esc public_url_esc db_user_esc db_pass_esc db_name_esc retention_line_esc redis_addr_esc offline_th_esc language_esc
+	local dash_ip_esc listen_esc public_url_esc db_user_esc db_pass_esc db_name_esc retention_line_esc redis_addr_esc redis_password_esc offline_th_esc language_esc
 	dash_ip_esc="$(yaml_dq_escape "$dash_ip")"
 	listen_esc="$(yaml_dq_escape "$listen")"
 	public_url_esc="$(yaml_dq_escape "$public_url")"
@@ -1193,6 +1547,7 @@ render_config_local() {
 	db_name_esc="$(yaml_dq_escape "$db_name")"
 	retention_line_esc="$(yaml_dq_escape "$retention_line")"
 	redis_addr_esc="$(yaml_dq_escape "$redis_addr")"
+	redis_password_esc="$(yaml_dq_escape "$redis_password")"
 	offline_th_esc="$(yaml_dq_escape "$offline_threshold")"
 	language_esc="$(yaml_dq_escape "$language")"
 
@@ -1205,17 +1560,29 @@ render_config_local() {
 	tmp="$(mktemp -t dash-config-local-XXXXXX)"
 	trap "rm -f \"${tmp}\" >/dev/null 2>&1 || true" RETURN
 
-	if ! grep -q '__APP_DASH_IP__\|__APP_LISTEN__\|__APP_PUBLIC_URL__\|__APP_LANGUAGE__\|__APP_NODE_OFFLINE_THRESHOLD__\|__HTTP_TRUSTED_PROXIES__\|__DB_USER__\|__DB_PASS__\|__DB_NAME__\|__DB_RETENTION_DAYS_LINE__\|__REDIS_ADDR__\|__JWT_SIGNING_KEY__' "$CONFIG_EXAMPLE"; then
-		die "$(txt "写入配置失败：模板缺少占位符（请更新 ${CONFIG_EXAMPLE}）" "Failed to write config: template missing placeholders (please update ${CONFIG_EXAMPLE})")"
-	fi
-	if ! grep -q '__APP_LANGUAGE__' "$CONFIG_EXAMPLE"; then
-		die "$(txt "写入配置失败：模板缺少 __APP_LANGUAGE__（请更新 ${CONFIG_EXAMPLE}）" "Failed to write config: template missing __APP_LANGUAGE__ (please update ${CONFIG_EXAMPLE})")"
-	fi
-	if ! grep -q '__APP_NODE_OFFLINE_THRESHOLD__' "$CONFIG_EXAMPLE"; then
-		die "$(txt "写入配置失败：模板缺少 __APP_NODE_OFFLINE_THRESHOLD__（请更新 ${CONFIG_EXAMPLE}）" "Failed to write config: template missing __APP_NODE_OFFLINE_THRESHOLD__ (please update ${CONFIG_EXAMPLE})")"
-	fi
+	local placeholder
+	local -a required_placeholders=(
+		__APP_DASH_IP__
+		__APP_LISTEN__
+		__APP_PUBLIC_URL__
+		__APP_LANGUAGE__
+		__APP_NODE_OFFLINE_THRESHOLD__
+		__HTTP_TRUSTED_PROXIES__
+		__DB_USER__
+		__DB_PASS__
+		__DB_NAME__
+		__DB_RETENTION_DAYS_LINE__
+		__REDIS_ADDR__
+		__REDIS_PASSWORD__
+		__JWT_SIGNING_KEY__
+	)
+	for placeholder in "${required_placeholders[@]}"; do
+		if ! grep -qF "$placeholder" "$CONFIG_EXAMPLE"; then
+			die "$(txt "写入配置失败：模板缺少 ${placeholder}（请更新 ${CONFIG_EXAMPLE}）" "Failed to write config: template missing ${placeholder} (please update ${CONFIG_EXAMPLE})")"
+		fi
+	done
 
-	local r_dash_ip r_listen r_public_url r_language r_offline_th r_http_trusted_proxies r_db_user r_db_pass r_db_name r_db_retention_line r_redis_addr r_jwt_signing_key
+	local r_dash_ip r_listen r_public_url r_language r_offline_th r_http_trusted_proxies r_db_user r_db_pass r_db_name r_db_retention_line r_redis_addr r_redis_password r_jwt_signing_key
 	r_dash_ip="$(sed_escape_repl "$dash_ip_esc")"
 	r_listen="$(sed_escape_repl "$listen_esc")"
 	r_public_url="$(sed_escape_repl "$public_url_esc")"
@@ -1227,6 +1594,7 @@ render_config_local() {
 	r_db_name="$(sed_escape_repl "$db_name_esc")"
 	r_db_retention_line="$(sed_escape_repl "$retention_line_esc")"
 	r_redis_addr="$(sed_escape_repl "$redis_addr_esc")"
+	r_redis_password="$(sed_escape_repl "$redis_password_esc")"
 	r_jwt_signing_key="$(sed_escape_repl "$jwt_signing_key_esc")"
 
 	sed \
@@ -1241,12 +1609,15 @@ render_config_local() {
 		-e "s|__DB_NAME__|${r_db_name}|g" \
 		-e "s|__DB_RETENTION_DAYS_LINE__|${r_db_retention_line}|g" \
 		-e "s|__REDIS_ADDR__|${r_redis_addr}|g" \
+		-e "s|__REDIS_PASSWORD__|${r_redis_password}|g" \
 		-e "s|__JWT_SIGNING_KEY__|${r_jwt_signing_key}|g" \
 		"$CONFIG_EXAMPLE" >"$tmp"
 
-	if grep -q '__APP_DASH_IP__\|__APP_LISTEN__\|__APP_PUBLIC_URL__\|__APP_LANGUAGE__\|__APP_NODE_OFFLINE_THRESHOLD__\|__HTTP_TRUSTED_PROXIES__\|__DB_USER__\|__DB_PASS__\|__DB_NAME__\|__DB_RETENTION_DAYS_LINE__\|__REDIS_ADDR__\|__JWT_SIGNING_KEY__' "$tmp"; then
-		die "$(txt "写入配置失败：模板占位符未被替换（请确认 config.example.yaml 版本与安装脚本一致）" "Failed to write config: placeholders were not replaced (template/script mismatch)")"
-	fi
+	for placeholder in "${required_placeholders[@]}"; do
+		if grep -qF "$placeholder" "$tmp"; then
+			die "$(txt "写入配置失败：模板占位符 ${placeholder} 未被替换（请确认 config.example.yaml 版本与安装脚本一致）" "Failed to write config: placeholder ${placeholder} was not replaced (template/script mismatch)")"
+		fi
+	done
 
 	as_root install -o root -g root -m 0600 "$tmp" "$CONFIG_LOCAL"
 	say "已写入配置：${CONFIG_LOCAL}" "Wrote config: ${CONFIG_LOCAL}"
@@ -1254,10 +1625,10 @@ render_config_local() {
 
 is_ip_literal() {
 	local host="$1"
-	if [[ "$host" =~ ^\\[[0-9a-fA-F:]+\\]$ ]]; then
+	if [[ "$host" =~ ^\[[0-9a-fA-F:]+\]$ ]]; then
 		return 0
 	fi
-	[[ "$host" =~ ^([0-9]{1,3}\\.){3}[0-9]{1,3}$ ]]
+	[[ "$host" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]]
 }
 
 yaml_dq_escape() {
@@ -1286,12 +1657,6 @@ admin_password_valid() {
 	local s="$1"
 	[[ -n "$s" ]] || return 1
 	[[ "$s" =~ ^[!-~]+$ ]]
-}
-
-yaml_sq_escape() {
-	local s="$1"
-	s="${s//\'/\'\'}"
-	printf "%s" "$s"
 }
 
 run_db_migrations() {
@@ -1324,13 +1689,16 @@ normalize_public_url() {
 	if [[ "$hostport" == \[* ]]; then
 		ip_probe="${hostport%%]*}"
 		ip_probe="${ip_probe}]"
+	elif [[ "$hostport" == *:*:* && "$hostport" =~ ^[0-9a-fA-F:]+$ ]]; then
+		in="[${hostport}]${in:${#hostport}}"
+		ip_probe="[${hostport}]"
 	else
 		ip_probe="${hostport%%:*}"
 	fi
 
-	local scheme="https"
-	if is_ip_literal "$ip_probe"; then
-		scheme="http"
+	local scheme="http"
+	if ! is_ip_literal "$ip_probe"; then
+		scheme="https"
 	fi
 
 	local out="${scheme}://${in}"
@@ -1360,25 +1728,286 @@ warn_if_domain_public_url() {
 
 require_root_public_url() {
 	local public_url="$1"
+	if [[ ! "$public_url" =~ ^([hH][tT][tT][pP]|[hH][tT][tT][pP][sS]):// ]]; then
+		die "$(txt "public_url 只支持 HTTP 或 HTTPS" "public_url supports only HTTP or HTTPS")"
+	fi
 	local rest="${public_url#*://}"
-	[[ "$rest" == */* ]] || return 0
+	[[ -n "$rest" ]] || die "$(txt "public_url 缺少主机名" "public_url is missing a host")"
+	[[ "$rest" != *"@"* ]] || die "$(txt "public_url 不支持用户信息" "public_url must not include user information")"
+	[[ "$rest" != *"?"* ]] || die "$(txt "public_url 不支持查询参数" "public_url must not include a query")"
+	[[ "$rest" != *"#"* ]] || die "$(txt "public_url 不支持片段" "public_url must not include a fragment")"
 
-	local path_part="/${rest#*/}"
-	path_part="${path_part%%\?*}"
-	path_part="${path_part%%#*}"
-	[[ -n "$path_part" && "$path_part" != "/" ]] || return 0
-
-	die "$(txt "public_url 不支持路径前缀（${path_part}）。请改为根路径 URL，例如 http://127.0.0.1:8080/ 或 https://dash.example.com/" "public_url does not support path prefixes (${path_part}). Use a root URL such as http://127.0.0.1:8080/ or https://dash.example.com/")"
+	local hostport="${rest%%/*}"
+	local path_part="${rest:${#hostport}}"
+	[[ -n "$hostport" ]] || die "$(txt "public_url 缺少主机名" "public_url is missing a host")"
+	local host="$hostport"
+	if [[ "$hostport" == \[* ]]; then
+		[[ "$hostport" == *"]"* ]] || die "$(txt "public_url 的 IPv6 主机格式无效" "public_url has an invalid IPv6 host")"
+		host="${hostport#\[}"
+		host="${host%%]*}"
+	else
+		host="${hostport%%:*}"
+	fi
+	[[ -n "$host" ]] || die "$(txt "public_url 缺少主机名" "public_url is missing a host")"
+	[[ -z "$path_part" || "$path_part" == "/" ]] || die "$(txt "public_url 不支持路径前缀（${path_part}）。请改为根路径 URL，例如 http://127.0.0.1:8080/ 或 https://dash.example.com/" "public_url does not support path prefixes (${path_part}). Use a root URL such as http://127.0.0.1:8080/ or https://dash.example.com/")"
 }
 
-install_app_files_from_cwd() {
+stage_app_files_from_cwd() {
+	# Full installation always consumes the files beside this script. A release
+	# here is only the local immutable directory selected by current.
+	need_cmd mv || die "$(txt "缺少命令：mv" "Missing command: mv")"
+	mv --version 2>/dev/null | grep -q 'GNU coreutils' || die "$(txt "安装器需要 GNU coreutils 的 mv 以保证原子切换" "The installer requires GNU coreutils mv for atomic cutover")"
 	[[ -f "${SCRIPT_DIR}/bin/dash" ]] || die "$(txt "未找到可执行文件 ${SCRIPT_DIR}/bin/dash" "Missing executable: ${SCRIPT_DIR}/bin/dash")"
+	[[ -d "${SCRIPT_DIR}/dist" && -d "${SCRIPT_DIR}/deploy" && -d "${SCRIPT_DIR}/configs" ]] || die "$(txt "安装包缺少 dist、deploy 或 configs 目录" "Package is missing the dist, deploy, or configs directory")"
 
-	as_root install -d -m 0755 "$INSTALL_DIR"
-	as_root bash -c "cp -a \"${SCRIPT_DIR}/.\" \"${INSTALL_DIR}/\""
+	local stage
+	stage="$(as_root mktemp -d "${INSTALL_DIR}.stage.XXXXXX")"
+	as_root chown "$(id -u):$(id -g)" "$stage"
+	if ! as_root cp -a \
+		"${SCRIPT_DIR}/bin" \
+		"${SCRIPT_DIR}/configs" \
+		"${SCRIPT_DIR}/dist" \
+		"${SCRIPT_DIR}/deploy" \
+		"${SCRIPT_DIR}/install_dash_linux.sh" \
+		"${SCRIPT_DIR}/update_dash_linux.sh" \
+		"${SCRIPT_DIR}/release.env" \
+		"$stage/"; then
+		as_root rm -rf "$stage"
+		die "$(txt "暂存安装包失败" "Failed to stage package files")"
+	fi
+	[[ -f "${stage}/bin/dash" ]] || {
+		as_root rm -rf "$stage"
+		die "$(txt "暂存后未找到 Dash 二进制" "Dash binary is missing from the staged package")"
+	}
+	as_root chmod 0755 "${stage}/bin/dash"
+	if ! as_root "${stage}/bin/dash" --version >/dev/null 2>&1; then
+		as_root rm -rf "$stage"
+		die "$(txt "Dash 二进制无法在当前系统运行；Alpine 需要静态或 musl 兼容产物" "The Dash binary cannot run on this system; Alpine requires a static or musl-compatible artifact")"
+	fi
+	printf '%s\n' "$stage"
+}
 
-	[[ -f "$BIN_PATH" ]] || die "$(txt "安装后未找到可执行文件 ${BIN_PATH}" "Missing executable after install: ${BIN_PATH}")"
-	as_root chmod 0755 "$BIN_PATH" || true
+prepare_staged_release() {
+	local stage="$1" version release
+	version="$(as_root "${stage}/bin/dash" --version)" || return
+	version="${version//$'\r'/}"
+	version="${version//$'\n'/}"
+	[[ "$version" =~ ^[0-9A-Za-z][0-9A-Za-z.+-]{0,127}$ ]] || return 1
+	need_cmd mv || return 1
+	mv --version 2>/dev/null | grep -q 'GNU coreutils' || return 1
+
+	release="${RELEASES_DIR}/${version}-$(date -u +%Y%m%dT%H%M%SZ)-$$"
+	as_root install -d -m 0755 "$INSTALL_DIR" "$RELEASES_DIR" "${INSTALL_DIR}/configs" || return
+	[[ ! -e "$release" ]] || return 1
+	as_root mv "$stage" "$release" || return
+	if ! as_root chown -R root:root "$release" ||
+		! as_root chmod 0755 "${release}/bin/dash" ||
+		! as_root find "$release" -maxdepth 1 -type f -name '*.sh' -exec chmod 0755 {} +; then
+		as_root rm -rf "$release"
+		return 1
+	fi
+	printf '%s\n' "$release"
+}
+
+switch_current_target() {
+	local target="$1" link
+	[[ ! -e "$CURRENT_LINK" || -L "$CURRENT_LINK" ]] || return 1
+	link="${INSTALL_DIR}/.current.$$.$RANDOM"
+	as_root rm -f "$link" || return
+	as_root ln -s "$target" "$link" || return
+	as_root mv -Tf "$link" "$CURRENT_LINK" || {
+		as_root rm -f "$link"
+		return 1
+	}
+}
+
+switch_current_release() {
+	local release="$1"
+	[[ -d "$release" ]] || return 1
+	switch_current_target "releases/$(basename "$release")"
+}
+
+install_compat_alias() {
+	local path="$1" target="$2" link
+	link="${path}.new.$$.$RANDOM"
+	as_root rm -f "$link" || return
+	as_root ln -s "$target" "$link" || return
+	if [[ -d "$path" && ! -L "$path" ]]; then
+		if ! as_root rm -rf "$path"; then
+			as_root rm -f "$link"
+			return 1
+		fi
+	fi
+	as_root mv -Tf "$link" "$path" || {
+		as_root rm -f "$link"
+		return 1
+	}
+}
+
+install_compat_aliases() {
+	as_root install -d -m 0755 "${INSTALL_DIR}/configs" || return
+
+	# Compatibility bridge for the legacy flat layout. Remove these aliases
+	# after the next breaking-release migration window.
+	install_compat_alias "${INSTALL_DIR}/bin" "current/bin" || return
+	install_compat_alias "${INSTALL_DIR}/dist" "current/dist" || return
+	install_compat_alias "${INSTALL_DIR}/deploy" "current/deploy" || return
+	install_compat_alias "${INSTALL_DIR}/install_dash_linux.sh" "current/install_dash_linux.sh" || return
+	install_compat_alias "${INSTALL_DIR}/update_dash_linux.sh" "current/update_dash_linux.sh" || return
+	install_compat_alias "${INSTALL_DIR}/release.env" "current/release.env" || return
+
+	install_compat_alias "${INSTALL_DIR}/configs/config.example.yaml" "../current/configs/config.example.yaml" || return
+}
+
+backup_legacy_install() {
+	local backup_dir="$1" rel
+	as_root install -d -m 0700 "$backup_dir" || return
+	for rel in bin configs dist deploy install_dash_linux.sh update_dash_linux.sh release.env; do
+		[[ -e "${INSTALL_DIR}/${rel}" || -L "${INSTALL_DIR}/${rel}" ]] || continue
+		as_root cp -a "${INSTALL_DIR}/${rel}" "$backup_dir/" || return
+	done
+}
+
+restore_legacy_install() {
+	local backup_dir="$1"
+	[[ -d "$backup_dir" ]] || return 1
+	as_root install -d -m 0755 "$INSTALL_DIR" || return
+	as_root rm -rf \
+		"${INSTALL_DIR}/bin" \
+		"${INSTALL_DIR}/configs" \
+		"${INSTALL_DIR}/dist" \
+		"${INSTALL_DIR}/deploy" \
+		"$CURRENT_LINK" || return
+	as_root rm -f \
+		"${INSTALL_DIR}/install_dash_linux.sh" \
+		"${INSTALL_DIR}/update_dash_linux.sh" \
+		"${INSTALL_DIR}/release.env" \
+		"$LAYOUT_MARKER" || return
+	as_root cp -a "${backup_dir}/." "$INSTALL_DIR/" || return
+	tighten_sensitive_file_permissions || return
+}
+
+legacy_install_present() {
+	local rel
+	for rel in bin/dash dist deploy install_dash_linux.sh update_dash_linux.sh release.env configs/config.local.yaml configs/config.yaml configs/config.example.yaml; do
+		[[ -e "${INSTALL_DIR}/${rel}" || -L "${INSTALL_DIR}/${rel}" ]] && return 0
+	done
+	return 1
+}
+
+prepare_install_recovery() {
+	[[ ! -e "$CURRENT_LINK" || -L "$CURRENT_LINK" ]] || return 1
+	INSTALL_RECOVERY_ROOT="$(as_root mktemp -d "${INSTALL_DIR}.recovery.XXXXXX")" || return
+	as_root chown "$(id -u):$(id -g)" "$INSTALL_RECOVERY_ROOT" || return
+	INSTALL_PREVIOUS_LAYOUT="fresh"
+	INSTALL_PREVIOUS_TARGET=""
+	INSTALL_PREVIOUS_MARKER="0"
+	INSTALL_PREVIOUS_CONFIG="0"
+	INSTALL_SYSTEMD_WAS_ACTIVE="0"
+
+	if [[ -L "$CURRENT_LINK" ]]; then
+		INSTALL_PREVIOUS_LAYOUT="release"
+		INSTALL_PREVIOUS_TARGET="$(readlink "$CURRENT_LINK")"
+		[[ -f "$LAYOUT_MARKER" ]] && INSTALL_PREVIOUS_MARKER="1"
+		if [[ -f "$CONFIG_LOCAL" ]]; then
+			as_root cp -a "$CONFIG_LOCAL" "${INSTALL_RECOVERY_ROOT}/config.local.yaml" || return
+			INSTALL_PREVIOUS_CONFIG="1"
+		fi
+	elif legacy_install_present; then
+		INSTALL_PREVIOUS_LAYOUT="legacy"
+		backup_legacy_install "${INSTALL_RECOVERY_ROOT}/legacy" || return
+	else
+		as_root install -d -m 0700 "${INSTALL_RECOVERY_ROOT}/legacy" || return
+	fi
+
+	if systemd_available && [[ -f "$SERVICE_FILE" ]] && as_root systemctl is-active --quiet "${APP}.service"; then
+		INSTALL_SYSTEMD_WAS_ACTIVE="1"
+	fi
+	INSTALL_ROLLBACK_READY="1"
+}
+
+restore_release_install() {
+	[[ -n "$INSTALL_PREVIOUS_TARGET" ]] || return 1
+	switch_current_target "$INSTALL_PREVIOUS_TARGET" || return
+	install_compat_aliases || return
+	if [[ "$INSTALL_PREVIOUS_MARKER" == "1" ]]; then
+		as_root touch "$LAYOUT_MARKER" || return
+	else
+		as_root rm -f "$LAYOUT_MARKER" || return
+	fi
+	if [[ "$INSTALL_PREVIOUS_CONFIG" == "1" ]]; then
+		as_root install -o root -g root -m 0600 "${INSTALL_RECOVERY_ROOT}/config.local.yaml" "$CONFIG_LOCAL" || return
+	else
+		as_root rm -f "$CONFIG_LOCAL" || return
+	fi
+}
+
+rollback_install() {
+	local restored="true"
+	say_err "安装提交前失败，正在恢复原文件入口和服务。" "Installation failed before commit; restoring the previous file entrypoint and service."
+	case "$INSTALL_PREVIOUS_LAYOUT" in
+		release) restore_release_install || restored="false" ;;
+		legacy|fresh) restore_legacy_install "${INSTALL_RECOVERY_ROOT}/legacy" || restored="false" ;;
+		*) restored="false" ;;
+	esac
+	if [[ "$restored" == "true" && -n "$INSTALL_RELEASE" ]] && ! install_release_is_current; then
+		as_root rm -rf "$INSTALL_RELEASE" || restored="false"
+		[[ "$restored" != "true" ]] || INSTALL_RELEASE=""
+	fi
+	if [[ "$restored" == "true" && "$INSTALL_SYSTEMD_WAS_ACTIVE" == "1" ]]; then
+		as_root systemctl start "${APP}.service" || restored="false"
+	fi
+	if [[ "$restored" == "true" ]]; then
+		as_root rm -rf "$INSTALL_RECOVERY_ROOT"
+		INSTALL_RECOVERY_ROOT=""
+		return 0
+	fi
+	return 1
+}
+
+activate_release() {
+	local release="$1"
+	switch_current_release "$release" || return
+	install_compat_aliases || return
+	as_root touch "$LAYOUT_MARKER" || return
+}
+
+prune_inactive_releases() {
+	[[ -L "$CURRENT_LINK" && -d "$RELEASES_DIR" ]] || return 0
+	local current entry entries
+	current="$(readlink "$CURRENT_LINK")"
+	current="${current##*/}"
+	entries="$(mktemp)" || return
+	if ! find "$RELEASES_DIR" -mindepth 1 -maxdepth 1 -type d -print0 >"$entries"; then
+		rm -f "$entries"
+		return 1
+	fi
+	while IFS= read -r -d '' entry; do
+		[[ "$(basename "$entry")" == "$current" ]] && continue
+		if ! as_root rm -rf "$entry"; then
+			rm -f "$entries"
+			return 1
+		fi
+	done <"$entries"
+	rm -f "$entries" || return
+}
+
+prepare_staged_app_files() {
+	local stage="$1" release=""
+	[[ -d "$stage" && -x "${stage}/bin/dash" ]] || die "$(txt "暂存安装包无效" "Invalid staged package")"
+	INSTALL_RELEASE=""
+	if ! release="$(prepare_staged_release "$stage")"; then
+		as_root rm -rf "$stage"
+		die "$(txt "准备不可变 release 目录失败；线上文件和进程未改动" "Failed to prepare the immutable release directory; live files and processes were not changed")"
+	fi
+	INSTALL_RELEASE="$release"
+}
+
+install_staged_app_files() {
+	[[ -n "$INSTALL_RELEASE" && -d "$INSTALL_RELEASE" ]] || die "$(txt "尚未准备可切换的 release" "No prepared release is available for cutover")"
+	activate_release "$INSTALL_RELEASE" || die "$(txt "强制覆盖 Dash 文件入口失败" "Failed to replace the managed Dash file entrypoints")"
+
+	[[ -x "$BIN_PATH" ]] || die "$(txt "安装后未找到可执行文件 ${BIN_PATH}" "Missing executable after install: ${BIN_PATH}")"
 }
 
 tighten_sensitive_file_permissions() {
@@ -1390,6 +2019,10 @@ tighten_sensitive_file_permissions() {
 		as_root chown root:root "$SERVICE_FILE"
 		as_root chmod 0600 "$SERVICE_FILE"
 	fi
+	if [[ -f "$MANUAL_RUN_FILE" ]]; then
+		as_root chown root:root "$MANUAL_RUN_FILE"
+		as_root chmod 0700 "$MANUAL_RUN_FILE"
+	fi
 }
 
 write_systemd_service() {
@@ -1397,12 +2030,20 @@ write_systemd_service() {
 	admin_password="$(one_line "$admin_password")"
 	local pwd_escaped
 	pwd_escaped="$(systemd_escape_env_value "$admin_password")"
+	local pg_major pg_units="postgresql.service"
+	pg_major="$(postgres_major_version)"
+	if [[ "$pg_major" =~ ^[0-9]+$ ]]; then
+		pg_units+=" postgresql-${pg_major}.service"
+	fi
+	local tmp
+	tmp="$(mktemp)"
 
-	as_root bash -c "cat > '${SERVICE_FILE}' <<EOF
+	cat >"$tmp" <<EOF
 [Unit]
 Description=Dash Server Monitor
-After=network-online.target postgresql.service postgresql-16.service redis-server.service redis.service
+After=network-online.target ${pg_units}
 Wants=network-online.target
+ConditionPathExists=!${INSTALL_DIR}/runtime/dash-update/update.block
 
 [Service]
 Type=simple
@@ -1410,8 +2051,8 @@ User=root
 Group=root
 WorkingDirectory=${INSTALL_DIR}
 
-Environment=\"DASH_HOME=${INSTALL_DIR}\"
-Environment=\"monitor_dash_pwd=${pwd_escaped}\"
+Environment="DASH_HOME=${INSTALL_DIR}"
+Environment="monitor_dash_pwd=${pwd_escaped}"
 
 ExecStart=${BIN_PATH}
 
@@ -1420,53 +2061,149 @@ RestartSec=2
 
 [Install]
 WantedBy=multi-user.target
-EOF"
+EOF
+	as_root install -m 0600 "$tmp" "$SERVICE_FILE"
+	rm -f "$tmp"
 
 	tighten_sensitive_file_permissions
 	as_root systemctl daemon-reload
-	as_root systemctl enable --now "${APP}.service"
+}
+
+write_manual_runner() {
+	local admin_password="$1"
+	admin_password="$(one_line "$admin_password")"
+	local pwd_quoted
+	pwd_quoted="$(shell_quote_arg "$admin_password")"
+	local tmp
+	tmp="$(mktemp)"
+	cat >"$tmp" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+export DASH_HOME=$(shell_quote_arg "$INSTALL_DIR")
+export monitor_dash_pwd=${pwd_quoted}
+cd $(shell_quote_arg "$INSTALL_DIR")
+exec $(shell_quote_arg "$BIN_PATH")
+EOF
+	as_root install -m 0700 "$tmp" "$MANUAL_RUN_FILE"
+	rm -f "$tmp"
+	tighten_sensitive_file_permissions
+}
+
+service_install() {
+	case "$SERVICE_MANAGER" in
+	systemd) write_systemd_service "$1" ;;
+	none) write_manual_runner "$1" ;;
+	esac
+}
+
+service_enable() {
+	case "$SERVICE_MANAGER" in
+	systemd) as_root systemctl enable "${APP}.service" ;;
+	none) return 0 ;;
+	esac
+}
+
+service_start() {
+	case "$SERVICE_MANAGER" in
+	systemd) as_root systemctl start "${APP}.service" ;;
+	none) return 0 ;;
+	esac
+}
+
+service_status() {
+	case "$SERVICE_MANAGER" in
+	systemd) say "状态：systemctl status ${APP}.service；日志：journalctl -u ${APP}.service -f" "Status: systemctl status ${APP}.service; logs: journalctl -u ${APP}.service -f" ;;
+	none) say "手动模式未启动服务。运行：${MANUAL_RUN_FILE}" "Manual mode did not start a service. Run: ${MANUAL_RUN_FILE}" ;;
+	esac
+}
+
+stop_installed_services() {
+	if systemd_available && [[ -f "$SERVICE_FILE" ]]; then
+		if ! as_root systemctl stop "${APP}.service"; then
+			die "$(txt "停止已安装的 ${APP} 服务失败" "Failed to stop the installed ${APP} service")"
+		fi
+	fi
+	stop_manual_processes
+}
+
+install_release_is_current() {
+	[[ -n "$INSTALL_RELEASE" && -L "$CURRENT_LINK" ]] || return 1
+	[[ "$(readlink "$CURRENT_LINK")" == "releases/$(basename "$INSTALL_RELEASE")" ]]
+}
+
+finish_dash_install() {
+	local status=$?
+	trap - EXIT
+	set +e
+	if ((status != 0)) && [[ "$INSTALL_ROLLBACK_READY" == "1" && "$INSTALL_MIGRATION_STARTED" != "1" ]]; then
+		if ! rollback_install; then
+			say_err "自动恢复失败；恢复文件保留在 ${INSTALL_RECOVERY_ROOT}" "Automatic recovery failed; recovery files were preserved at ${INSTALL_RECOVERY_ROOT}"
+		fi
+	elif ((status != 0)) && [[ -n "$INSTALL_RELEASE" ]] && ! install_release_is_current; then
+		as_root rm -rf "$INSTALL_RELEASE"
+		INSTALL_RELEASE=""
+	fi
+	if ((status != 0)) && [[ "$INSTALL_ROLLBACK_READY" != "1" && "$INSTALL_MIGRATION_STARTED" != "1" && -n "$INSTALL_RECOVERY_ROOT" ]]; then
+		as_root rm -rf "$INSTALL_RECOVERY_ROOT"
+		INSTALL_RECOVERY_ROOT=""
+	fi
+	if ((status != 0)) && [[ "$INSTALL_MIGRATION_STARTED" == "1" && -n "$INSTALL_RECOVERY_ROOT" ]]; then
+		say_err "数据库迁移已开始，不能自动恢复旧程序；恢复文件保留在 ${INSTALL_RECOVERY_ROOT}" "Database migration had started, so the old program was not restored; recovery files were preserved at ${INSTALL_RECOVERY_ROOT}"
+	fi
+	if ((status == 0)) && ! prune_inactive_releases; then
+		say_err "安装已完成，但旧 release 清理失败" "Installation completed, but old release cleanup failed"
+	fi
+	if ((status == 0)) && [[ -n "$INSTALL_RECOVERY_ROOT" ]]; then
+		as_root rm -rf "$INSTALL_RECOVERY_ROOT"
+		INSTALL_RECOVERY_ROOT=""
+	fi
+	exit "$status"
+}
+
+cleanup_other_service_managers() {
+	case "$SERVICE_MANAGER" in
+	systemd)
+		as_root rm -f "$MANUAL_RUN_FILE"
+		;;
+	none)
+		if systemd_available; then
+			as_root systemctl disable --now "${APP}.service" >/dev/null 2>&1 || true
+		fi
+		as_root rm -f "$SERVICE_FILE"
+		;;
+	esac
 }
 
 main() {
-	if [[ -f "${CONFIG_LOCAL}" ]] && systemd_unit_exists; then
-		say "检测到已有安装：" "Existing installation detected:"
-		say "  - 配置文件已存在：${CONFIG_LOCAL}" "  - Config file exists: ${CONFIG_LOCAL}"
-		say "  - systemd 服务已存在：${APP}.service" "  - systemd unit exists: ${APP}.service"
-		echo ""
-
-		if prompt_yes_no "$(txt "是否覆盖配置文件？（将重新生成 config.local.yaml，并更新 systemd 环境密码等）" "Overwrite config file? (Will regenerate config.local.yaml and update systemd env password, etc.)")" "N"; then
-			say "选择：覆盖配置（继续完整安装流程）" "Choice: overwrite config (continue full install flow)"
-		else
-			say "选择：仅更新文件（复制当前目录到 ${INSTALL_DIR}）并重启 ${APP}.service" "Choice: update files only (copy current dir to ${INSTALL_DIR}) and restart ${APP}.service"
-			as_root systemctl stop "${APP}.service"
-			install_app_files_from_cwd
-			tighten_sensitive_file_permissions
-			run_db_migrations "$CONFIG_LOCAL"
-			as_root systemctl start "${APP}.service"
-			say "完成：已更新并重启 ${APP}.service" "Done: updated and restarted ${APP}.service"
-			return 0
-		fi
-	fi
+	local stage=""
+	select_service_manager
+	ensure_process_control
 
 	detect_os
 
-	if [[ -z "${PKG_MANAGER}" ]] || ! need_cmd "${PKG_MANAGER}"; then
-		die "$(txt "未检测到系统包管理器（当前需要 ${PKG_MANAGER_LABEL:-unknown}）" "System package manager not found (expected ${PKG_MANAGER_LABEL:-unknown})")"
+	if [[ "$OS_FAMILY" != "manual" && "$SERVICE_MANAGER" != "none" ]]; then
+		if [[ -z "${PKG_MANAGER}" ]] || ! need_cmd "${PKG_MANAGER}"; then
+			die "$(txt "未检测到系统包管理器（当前需要 ${PKG_MANAGER_LABEL:-unknown}）" "System package manager not found (expected ${PKG_MANAGER_LABEL:-unknown})")"
+		fi
 	fi
 
-	enable_time_sync
+	if [[ "$SERVICE_MANAGER" != "none" ]]; then
+		enable_time_sync
+	fi
 
-	say "1) 检测并准备依赖（PostgreSQL 16+ / TimescaleDB / Redis；默认使用系统包管理器安装：${PKG_MANAGER_LABEL}）" "1) Checking dependencies (PostgreSQL 16+ / TimescaleDB / Redis; default system package manager: ${PKG_MANAGER_LABEL})"
-	ensure_postgresql16_and_password
-	ensure_timescaledb_enabled
-	ensure_redis_82plus
+	say "1) 检测并准备数据库依赖（PostgreSQL 16+ / 匹配主版本的 TimescaleDB；Redis 地址将在配置后校验；模式：${PKG_MANAGER_LABEL}）" "1) Checking database dependencies (PostgreSQL 16+ / matching TimescaleDB major; the configured Redis endpoint is validated next; mode: ${PKG_MANAGER_LABEL})"
+	if [[ "$OS_FAMILY" == "manual" || "$SERVICE_MANAGER" == "none" ]]; then
+		check_preinstalled_dependencies
+	else
+		ensure_postgresql16_and_password
+		ensure_timescaledb_enabled
+		ensure_redis_82plus
+	fi
 
-	say "2) 安装 Dash 文件到 ${INSTALL_DIR}" "2) Installing Dash files into ${INSTALL_DIR}"
-	install_app_files_from_cwd
+	say "2) 交互式生成配置 ${CONFIG_LOCAL}" "2) Interactive configuration: ${CONFIG_LOCAL}"
+	local dash_ip listen_port public_url db_user db_pass db_name retention_days redis_addr redis_password offline_threshold language admin_pwd trusted_proxies_yaml
 
-	say "3) 交互式生成配置 ${CONFIG_LOCAL}" "3) Interactive configuration: ${CONFIG_LOCAL}"
-	local dash_ip listen_port public_url db_user db_pass db_name retention_days redis_addr offline_threshold language admin_pwd trusted_proxies_yaml
-
+	while true; do
 	while true; do
 		dash_ip="$(prompt_string "$(txt "请输入 Dash 服务端 IP（回车查看本机IP：ip addr）" "Dash server IP (press Enter to show local IPs via: ip addr)")")"
 		dash_ip="$(trim_spaces "$(one_line "$dash_ip")")"
@@ -1484,36 +2221,47 @@ main() {
 	listen_port="$(prompt_string "$(txt "请输入监听端口" "Listen port")" "8080")"
 	listen_port="${listen_port#:}"
 	[[ "$listen_port" =~ ^[0-9]+$ ]] || die "$(txt "监听端口必须是数字：${listen_port}" "Listen port must be numeric (got: ${listen_port})")"
+	((10#$listen_port >= 1 && 10#$listen_port <= 65535)) || die "$(txt "监听端口必须在 1 到 65535 之间：${listen_port}" "Listen port must be between 1 and 65535 (got: ${listen_port})")"
 	public_url="$(prompt_string "$(txt "请输入 public_url（用于生成安装脚本/外网访问，必须是根路径 URL）" "public_url (external access URL, root URL only)")" "http://127.0.0.1:${listen_port}/")"
 	public_url="$(normalize_public_url "$public_url")"
 	[[ -n "$public_url" ]] || die "$(txt "public_url 不能为空" "public_url is required")"
 	require_root_public_url "$public_url"
 	trusted_proxies_yaml="[]"
-	if prompt_yes_no "$(txt "是否通过本机反向代理（如同机 Nginx/Caddy/Traefik）对外暴露 Dash？启用后仅信任来自本机代理的转发头。" "Is Dash exposed through a local reverse proxy on the same host (for example Nginx/Caddy/Traefik)? This will trust forwarded headers only from that local proxy.")" "N"; then
+	if prompt_yes_no "$(txt "是否通过本机反向代理（如同机 Nginx/Caddy/Traefik）对外暴露 Dash？IP 部署请选择否；启用后仅信任来自本机代理的转发头。" "Is Dash exposed through a local reverse proxy on the same host (for example Nginx/Caddy/Traefik)? Choose no for a direct IP deployment; enabling this trusts forwarded headers only from that local proxy.")" "N"; then
 		trusted_proxies_yaml='["127.0.0.1/32", "::1/128"]'
 	fi
 	db_user="$(prompt_string "$(txt "请输入数据库账号（database.user）" "database.user")" "monitor")"
 	db_pass="$(prompt_secret_confirm "$(txt "请输入数据库密码（database.password）" "database.password")")"
 	db_name="$(prompt_string "$(txt "请输入数据库名（database.name）" "database.name")" "monitor")"
 	retention_days="$(prompt_retention_days 1)"
-	redis_addr="$(prompt_string "$(txt "请输入 Redis 地址（redis.addr）" "redis.addr")" "127.0.0.1:6379")"
+	while true; do
+		redis_addr="$(prompt_string "$(txt "请输入 Redis 地址（redis.addr）" "redis.addr")" "127.0.0.1:6379")"
+		redis_addr="$(trim_spaces "$(one_line "$redis_addr")")"
+		redis_password="$(prompt_secret_optional "$(txt "请输入 Redis 密码（redis.password；无密码直接回车）" "redis.password (press Enter when authentication is disabled)")")"
+		if check_redis_endpoint "$redis_addr" "$redis_password"; then
+			break
+		fi
+		say_err "无法使用该 Redis 地址，请确认服务可达、允许 PING/INFO server，且版本不低于 8.2.3。" "Cannot use this Redis endpoint. Ensure it is reachable, permits PING and INFO server, and runs Redis 8.2.3 or newer."
+	done
 	offline_threshold="$(prompt_string "$(txt "请输入离线判定阈值（app.node_offline_threshold，例如：14s/30s/1m）" "app.node_offline_threshold (e.g. 14s/30s/1m)")" "14s")"
 	language="$(prompt_language)"
 
 	echo ""
-	say "3.1) 配置摘要（写入前确认）" "3.1) Configuration summary (confirm before writing)"
+	say "2.1) 配置摘要（写入前确认）" "2.1) Configuration summary (confirm before writing)"
 
-	print_config_summary "$dash_ip" "$listen_port" "$public_url" "$db_user" "$db_pass" "$db_name" "$retention_days" "$redis_addr" "$offline_threshold" "$language" "$trusted_proxies_yaml"
+	print_config_summary "$dash_ip" "$listen_port" "$public_url" "$db_user" "$db_pass" "$db_name" "$retention_days" "$redis_addr" "$redis_password" "$offline_threshold" "$language" "$trusted_proxies_yaml"
 	echo ""
+	if prompt_yes_no "$(txt "确认写入以上配置并继续？" "Write the configuration above and continue?")" "Y"; then
+		break
+	fi
+	say "已取消本次配置，请重新填写。" "Configuration was not written; please enter it again."
+	echo ""
+	done
 
-	render_config_local "$dash_ip" "$listen_port" "$public_url" "$db_user" "$db_pass" "$db_name" "$retention_days" "$redis_addr" "$offline_threshold" "$language" "$trusted_proxies_yaml"
-
-	say "4) 初始化数据库（创建用户/库 + 启用 timescaledb 扩展）" "4) Initializing database (user/db + timescaledb extension)"
+	say "3) 初始化数据库用户和数据库" "3) Initializing database user and database"
 	create_db_and_user "$db_user" "$db_pass" "$db_name"
-	run_db_migrations "$CONFIG_LOCAL"
-	grant_db_privileges "$db_user" "$db_name"
 
-	say "5) 写入 systemd 并开机自启" "5) Installing systemd unit and enabling autostart"
+	say "4) 配置运行方式：${SERVICE_MANAGER}" "4) Configuring runtime mode: ${SERVICE_MANAGER}"
 	while true; do
 		admin_pwd="$(prompt_secret_confirm "$(txt "请设置 Dash 管理员登录密码（环境变量 monitor_dash_pwd）" "Dash admin password (env monitor_dash_pwd)")")"
 		admin_pwd="$(trim_spaces "$admin_pwd")"
@@ -1523,12 +2271,30 @@ main() {
 		fi
 		break
 	done
-	write_systemd_service "$admin_pwd"
+
+	say "5) 安装 Dash 文件到 ${INSTALL_DIR}" "5) Installing Dash files into ${INSTALL_DIR}"
+	stage="$(stage_app_files_from_cwd)"
+	prepare_staged_app_files "$stage"
+	prepare_install_recovery || die "$(txt "准备旧安装恢复现场失败；线上文件和进程未改动" "Failed to prepare recovery for the previous installation; live files and processes were not changed")"
+	stop_installed_services
+	install_staged_app_files
+	render_config_local "$dash_ip" "$listen_port" "$public_url" "$db_user" "$db_pass" "$db_name" "$retention_days" "$redis_addr" "$redis_password" "$offline_threshold" "$language" "$trusted_proxies_yaml"
+	INSTALL_MIGRATION_STARTED="1"
+	run_db_migrations "$CONFIG_LOCAL"
+	grant_db_privileges "$db_user" "$db_name"
+
+	cleanup_other_service_managers
+	service_install "$admin_pwd"
+	if [[ "$SERVICE_MANAGER" != "none" ]]; then
+		service_enable
+		service_start
+	fi
 
 	warn_if_domain_public_url "$public_url"
-	say "完成：systemd 服务 ${APP}.service 已启动" "Done. systemd service ${APP}.service is running."
+	service_status
 }
 
 parse_args "$@"
 choose_install_lang
+trap finish_dash_install EXIT
 main
