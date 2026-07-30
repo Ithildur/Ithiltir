@@ -1,11 +1,12 @@
 # API
 
-本文档汇总稳定 HTTP 契约。公开路径、方法和字段语义属于兼容边界：既有语义不在原路径上硬改，新行为通过新增端点或追加字段提供。
+本文定义当前 HTTP 契约。
 
 ## 基础
 
 - API 基础路径：`/api`
 - Dash 只支持根路径部署，不支持在 `app.public_url` 中配置路径前缀
+- `app.public_url` 接受 HTTP 和 HTTPS且必须包含非空主机名；裸 IP 默认使用 HTTP，裸域名默认使用 HTTPS
 - JSON 错误包装：
 
 ```json
@@ -14,15 +15,15 @@
 
 ## 鉴权模型
 
-| 方式                                   | 用途                                              |
-| -------------------------------------- | ------------------------------------------------- |
-| 管理员密码                             | `POST /api/auth/login`                            |
-| refresh cookie + `X-CSRF-Token`        | `POST /api/auth/refresh`、`POST /api/auth/logout` |
-| `Authorization: Bearer <access_token>` | 管理 API 和可选鉴权读取                           |
-| `X-Node-Secret`                        | Agent 上报、节点身份读取和 deploy 资产下载        |
+| 方式                                   | 用途                                                |
+| -------------------------------------- | --------------------------------------------------- |
+| 管理员密码                             | `POST /api/auth/login`                              |
+| refresh cookie + `X-CSRF-Token`        | `POST /api/auth/refresh`、`POST /api/auth/logout`   |
+| `Authorization: Bearer <access_token>` | 管理 API 和可选鉴权读取                             |
+| `X-Node-Secret`                        | Agent 上报、节点身份读取和 deploy 资产下载          |
 | `upgrade_token` query                  | 只给旧 Agent 自动升级使用的临时 deploy 资产下载授权 |
 
-Bearer 可选端点会把缺失、格式错误、过期、已撤销或其他无法通过校验的 Bearer token 当作匿名请求处理。这是有意保留的兼容行为：需要管理视图的客户端必须自行区分响应是已鉴权视图还是游客过滤视图。
+Bearer 可选端点会把缺失、格式错误、过期、已撤销或其他非法 Bearer token 当作匿名请求处理。这是有意设计：它们是提供可选管理员视图的公开端点，不是带游客兜底的鉴权端点。Refresh cookie 使用 `SameSite=Strict`，refresh/logout 还必须提交匹配的 `X-CSRF-Token`。
 
 ## 命名空间
 
@@ -37,7 +38,7 @@ Bearer 可选端点会把缺失、格式错误、过期、已撤销或其他无�
 | `/api/node`                                   | `X-Node-Secret`                                                                        | `POST /identity`、`POST /metrics`、`POST /static`                                                                                                                                       |
 | `/api/admin/groups`                           | Bearer                                                                                 | `GET /`、`GET /map`、`POST /`、`PATCH /{id}`、`DELETE /{id}`                                                                                                                            |
 | `/api/admin/nodes`                            | Bearer                                                                                 | `GET /`、`GET /deploy`、`POST /`、`PUT /display-order`、`PATCH /traffic-p95`、`PATCH /{id}`、`POST /{id}/upgrade`、`GET /traffic/rebuild`、`POST /{id}/traffic/rebuild`、`DELETE /{id}` |
-| `/api/admin/alerts/events`                    | Bearer                                                                                 | `GET /`、`GET /summary`、`GET /servers`                                                                                                                                                |
+| `/api/admin/alerts/events`                    | Bearer                                                                                 | `GET /`、`GET /summary`、`GET /servers`                                                                                                                                                 |
 | `/api/admin/alerts/rules`                     | Bearer                                                                                 | `GET /`、`POST /`、`PATCH /{id}`、`DELETE /{id}`                                                                                                                                        |
 | `/api/admin/alerts/mounts`                    | Bearer                                                                                 | `GET /`、`PUT /`                                                                                                                                                                        |
 | `/api/admin/alerts/settings`                  | Bearer                                                                                 | `GET /`、`PUT /`                                                                                                                                                                        |
@@ -59,6 +60,7 @@ Bearer 可选端点会把缺失、格式错误、过期、已撤销或其他无�
 
 ## 认证会话
 
+- 默认 Redis 模式下，认证会话保存在 Redis 中，在过期或被撤销前可跨 Dash 重启和原地升级继续有效；使用 `--no-redis` 时，会话只存在于当前进程，并在 Dash 重启后失效。
 - `GET /api/auth/sessions/` 返回当前 Bearer token 用户的 `{ "sessions": [...] }`。每项包含 `id`、`expires_at`、`session_only` 和 `current`。
 - `DELETE /api/auth/sessions/current`、`DELETE /api/auth/sessions/` 和 `DELETE /api/auth/sessions/{sid}` 成功时返回 `204`。
 
@@ -66,16 +68,24 @@ Bearer 可选端点会把缺失、格式错误、过期、已撤销或其他无�
 
 - `GET /api/admin/nodes/` 包含 `traffic_p95_enabled`、`traffic_cycle_mode`、`traffic_billing_start_day`、`traffic_billing_anchor_date`、`traffic_billing_timezone`、`traffic_direction_mode`、`tags` 和 `version`。`tags` 始终是字符串数组。
 - `version.version` 是 Agent 最后上报版本；缺失、非法或低于受支持节点版本下限时，`version.is_outdated` 为 true。上报的 Agent 版本支持自动更新协议时，`version.supports_auto_update` 为 true；平台支持和打包更新资产是否可用会在请求升级时继续校验。
-- `PATCH /api/admin/nodes/{id}` 接受 `traffic_p95_enabled`、`tags` 和节点流量覆盖字段。非账期字段未提交时保持不变。节点账期覆盖字段是原子组：只要提交 `traffic_cycle_mode`、`traffic_billing_start_day`、`traffic_billing_anchor_date` 或 `traffic_billing_timezone` 中任意一个字段，就必须同时提交 `traffic_cycle_mode` 和该模式使用的全部字段，否则返回 `400 invalid_traffic_cycle_settings`。`default` 不使用账期字段；`calendar_month` 使用 `traffic_billing_timezone`；`clamp_to_month_end` 使用 `traffic_billing_start_day` 和 `traffic_billing_timezone`；`whmcs_compatible` 使用 `traffic_billing_anchor_date` 和 `traffic_billing_timezone`，`traffic_billing_start_day` 由锚点日期推导。`tags` 接受字符串数组；值会 trim，空值和重复值会被删除，`[]` 表示清空标签。`traffic_cycle_mode` 允许 `default`、`calendar_month`、`whmcs_compatible`、`clamp_to_month_end`；`traffic_direction_mode` 允许 `default`、`out`、`both`、`max`。
-- `PATCH /api/admin/nodes/{id}` 提交空 `secret` 时返回 `400 invalid_secret`；提交的 `secret` 已属于其他节点时返回 `409 duplicate_secret`。
+- `PATCH /api/admin/nodes/{id}` 接受 `traffic_p95_enabled`、`tags` 和节点流量字段。非账期字段未提交时保持不变。节点账期字段是原子组：只要提交 `traffic_cycle_mode`、`traffic_billing_start_day`、`traffic_billing_anchor_date` 或 `traffic_billing_timezone` 中任意一个字段，就必须同时提交 `traffic_cycle_mode` 和该模式使用的全部字段，否则返回 `400 invalid_traffic_cycle_settings`。账期和统计方向变更立即生效；账期改变时，该节点受影响的月度派生数据会失效，并在后台从新旧当前账期较早的起点局部重算仍在保留期内的原始数据。局部重算期间只暂停该节点的 Lite 实时累计，不会回退全局进度或阻塞其他节点；受影响节点在追平前可能暂时没有当前账期统计或只显示部分覆盖。`calendar_month` 使用 `traffic_billing_timezone`；`clamp_to_month_end` 使用 `traffic_billing_start_day` 和 `traffic_billing_timezone`；`whmcs_compatible` 使用 `traffic_billing_anchor_date` 和 `traffic_billing_timezone`，`traffic_billing_start_day` 由锚点日期推导。兼容旧客户端的输入别名 `default` 仍可在不带账期字段时提交，但会保存为从 1 号开始的显式 `calendar_month`。`tags` 接受字符串数组；值会 trim，空值和重复值会被删除，`[]` 表示清空标签。响应中的 `traffic_cycle_mode` 只包含 `calendar_month`、`whmcs_compatible`、`clamp_to_month_end`；`traffic_direction_mode` 允许 `default`、`out`、`both`、`max`。
+- `PATCH /api/admin/nodes/{id}` 会 trim `secret`；字段必须包含 1–128 个 Unicode 字符，否则返回 `400 invalid_secret`。提交的 `secret` 已属于其他节点时返回 `409 duplicate_secret`。
+- 提交的节点 `name` 会 trim，必须包含 1 到 64 个 Unicode 字符且不得含控制字符；非法值返回 `400 invalid_name`。
+- `GET /api/admin/nodes/deploy` 在 `scripts` 下返回各平台的 `url` 和 `command_prefix`；把节点 secret 追加到 `command_prefix` 后就是可直接执行的一行安装命令。
 - `PATCH /api/admin/nodes/traffic-p95` 接受 `ids` 和 `enabled`。`enabled` 必填。`ids` 必须是非空正整数数组，不能重复，最多 10000 项。该命令先校验所有节点 ID，再在一个事务中更新全部选中节点。成功返回 `204`；任一节点不存在或已删除时返回 `404 not_found`，且不会更新任何节点。
-- `GET /api/admin/nodes/traffic/rebuild` 返回最近一次进程内重建任务状态。还没有任务时返回 `status=idle`；运行中时包含 `server_id`、`running=true` 和 `started_at`；任务结束后可能继续返回 `completed` 或 `failed`，直到下一次任务替换。该状态不会跨进程重启持久化。失败状态只暴露稳定的 `code` 和 `error`，不会返回内部错误字符串。
-- `POST /api/admin/nodes/{id}/traffic/rebuild` 启动进程内任务，根据该节点当前保存的网卡原始指标，重建 `database.traffic_retention_days` 窗口内的 5 分钟流量事实。成功返回 `202` 和同样的状态体；节点不存在或已删除时返回 `404 not_found`；已有任意重建任务运行时返回 `409 traffic_rebuild_running`。该任务只重写 5 分钟事实，并在启动时让该节点保留窗口内重叠周期的月度快照失效；如果任务失败，受影响的月度历史会由后续常规快照维护重新生成，在没有可复用快照时由读取路径按保留事实计算，或通过重试重建恢复；超出保留窗口的数据不会由数据库自动补回。
+- `GET /api/admin/nodes/traffic/rebuild` 返回当前进程内的单例重建状态。没有任务时返回 `status=idle`；运行中包含 `server_id`、`running=true` 和 `started_at`；结束后保持 `completed` 或 `failed`，直到下一次任务替换。Dash 重启会终止运行中任务并把该状态重置为 `idle`。失败状态只暴露稳定的 `code` 和 `error`，不会返回内部错误字符串。
+- `POST /api/admin/nodes/{id}/traffic/rebuild` 启动 Billing 专用任务，根据保留期内的网卡原始指标重建该节点的 5 分钟流量事实。成功返回 `202` 和同样的状态体；节点不存在或已删除时返回 `404 not_found`；Lite 模式返回 `409 traffic_rebuild_requires_billing`；已有任意重建任务运行时返回 `409 traffic_rebuild_running`。重建范围取原始指标保留期与 `database.traffic_retention_days` 的交集。任务按 6 小时串行分块重写事实，并在同一事务中让重叠月度快照失效；分块之间释放流量写入门。运行中切换到 Lite 时，已开始的分块先完成，后续分块停止，任务以 `traffic_rebuild_requires_billing` 失败。超出保留窗口的数据不会被恢复。
 - 非法 `tags` 返回 `400 invalid_tags`。
-- 节点账期规范化语义稳定：`default` 继承全局账期并清空节点账期字段；`calendar_month` 保存 `traffic_billing_start_day=1`；非 `whmcs_compatible` 模式保存空 `traffic_billing_anchor_date`；非默认模式下空 `traffic_billing_timezone` 在读取时使用应用时区。
+- 每个节点都保存显式账期。新节点默认为 `calendar_month` 且 `traffic_billing_start_day=1`；非 `whmcs_compatible` 模式保存空 `traffic_billing_anchor_date`；空 `traffic_billing_timezone` 在读取时使用应用时区。
 - 节点统计方向规范化语义稳定：`default` 继承全局统计方向；`out`、`both`、`max` 覆盖该节点。
 - 非法节点流量字段返回 `400 invalid_traffic_cycle_mode`、`invalid_traffic_cycle_settings`、`invalid_traffic_billing_start_day`、`invalid_traffic_billing_anchor_date`、`invalid_traffic_billing_timezone` 或 `invalid_traffic_direction_mode`。
 - `POST /api/admin/nodes/{id}/upgrade` 成功返回 `204`；节点无法接收自动下发更新时返回 `409 node_upgrade_unsupported`；打包版本、平台或资产不可用时返回 `409`；Dash 无法生成旧 Agent 临时下载授权时返回 `503 node_upgrade_grant_error`。
+
+## 管理分组
+
+- `GET /api/admin/groups/` 返回分组列表；`GET /api/admin/groups/map` 返回节点管理客户端使用的分组查找表。
+- `POST /api/admin/groups/` 创建分组；`PATCH /api/admin/groups/{id}` 更新已提交字段；`DELETE /api/admin/groups/{id}` 删除分组。
+- 分组名会 trim，不能为空，最多 64 个 Unicode 字符，且不得含控制字符。备注会 trim，最多 255 个 Unicode 字符，且不得含控制字符。创建时分别返回 `400 invalid_name` 或 `invalid_remark`；更新时任一非法值返回 `400 invalid_fields`，两个字段都未提交时返回 `400 no_fields`。
 
 ## 管理告警事件
 
@@ -84,19 +94,51 @@ Bearer 可选端点会把缺失、格式错误、过期、已撤销或其他无�
 - `GET /api/admin/alerts/events/summary` 返回每台存在未恢复告警的节点摘要 `{ "items": [...] }`。每项包含 `server_id`、`open_count`、`last_trigger_at`、`metric`、`rule_name` 和 `metrics`，用于节点概览显示当前告警状态。`metric` 和 `rule_name` 表示最近一条未恢复事件；`metrics` 按最近触发时间倒序列出未恢复事件指标。摘要不按时间过滤。
 - `GET /api/admin/alerts/events/servers` 返回可用于筛选的活跃服务器选项 `{ "items": [{ "id": 1, "name": "..." }] }`。
 
+## 管理告警挂载
+
+- `GET /api/admin/alerts/mounts/` 返回规则、节点及每个节点的挂载状态。
+- `PUT /api/admin/alerts/mounts/` 接受非空 `rule_ids`、非空正整数 `server_ids` 和必填布尔值 `mounted`；重复 ID 会合并，未知规则或节点返回 `400 invalid_fields`。数据库更新成功后返回 `204`，后续告警评估在进程内排队；持久化或校验查询失败返回 `503 db_error`，不会返回缓存或告警运行时专用错误。
+
+## 管理告警通知渠道
+
+- `GET /api/admin/alerts/channels` 和 `GET /api/admin/alerts/channels/{id}` 返回脱敏后的渠道配置及投递健康状态。`delivery_status` 在首次成功投递前为 `unknown`；成功投递且当前无阻塞任务时为 `healthy`；存在投递失败或阻塞通知时为 `degraded`；渠道停用时为 `disabled`。
+- 投递健康字段包括 `last_success_at`、`last_failure_at`、`consecutive_failures`、`last_error_code`、`last_error`、`next_retry_at`、`next_probe_at`、`pending_count` 和 `blocked_count`。没有值的可选时间及错误字段为 `null`。`next_retry_at` 是最早的瞬时失败重试时间，管理端按本地时间显示为 `YYYYMMDD HH:mm:ss`；`next_probe_at` 是最早的阻塞恢复探测时间。`pending_count` 包含待发送、发送中、重试、阻塞和暂停通知；`blocked_count` 是其中等待低频恢复探测的通知数。
+- `updated_at` 表示最近一次渠道配置或启停状态变更；后台健康状态更新不会改变 API 返回的该时间。
+- 渠道名会 trim，不能为空，最多 64 个 Unicode 字符，且不得含控制字符。非法创建或全量替换请求返回 `400 invalid_fields`。
+- password、token、hash、session 和 Webhook secret 都是不透明凭据。兼容更新时，字段省略或严格为空字符串才继承存量值；强类型配置字段不接受 JSON `null`。通过校验的非空值不会 trim 或做其他规范化，首尾空白会保留。
+- Webhook `url` 必须是包含非空主机名的绝对 HTTP 或 HTTPS URL，不允许用户信息或 fragment。
+- `PUT /api/admin/alerts/channels/{id}` 全量替换渠道配置。保存同类型渠道后，处于重试、阻塞或暂停状态的通知会立即唤醒并重置重试次数预算；改变渠道类型会丢弃按旧类型创建的通知。如果请求读取当前 secret/session 后、提交前渠道已发生变化，请求会返回 `409 channel_changed`，不会覆盖更新的 revision。
+- `PUT /api/admin/alerts/channels/{id}/enabled` 接受 `{ "enabled": true|false }`。停用会暂停尚未发送的通知；重新启用会立即唤醒这些通知，并保留此前的降级状态直到真实投递成功；单纯重新启用不会把渠道标为健康。
+- `POST /api/admin/alerts/channels/{id}/test` 的远端发送窗口最长 10 秒。成功后会把本次受测配置标为健康并立即唤醒阻塞通知；测试失败会记录与后台 worker 相同的结构化投递错误。如果成功恢复状态或失败测试错误中的任一结果持久化失败，API 返回 `503 db_error`，不会返回尚未写入健康状态的测试结论。并发保存新配置时以新配置为准，旧 revision 的测试结果不会修改新配置的健康状态。
+- Telegram Bot 收到 HTTP `429` 时，会采用 HTTP `Retry-After` 响应头和 Bot API JSON `parameters.retry_after` 中较长的等待时间，并受 worker 的重试上限约束。
+- 通知 HTTP 客户端最多跟随五次重定向。每一跳都必须保持初始主机名和请求方法；同协议跳转必须保持有效端口，HTTP 可以升级到 HTTPS，HTTPS 降级、跨主机、含用户信息及同协议换端口都会被拒绝。通知请求是 POST，因此只跟随保留方法和请求体的 `307`/`308`，会把 POST 改成 GET 的 `301`/`302`/`303` 会被拒绝。Webhook 签名和渠道凭据只会在该跳通过检查后发送。重定向策略拒绝是确定性投递错误，会将渠道任务置为 `blocked` 并进入低频恢复探测，而不是按瞬时网络故障密集重试。
+- `/telegram/mtproto/code`、`/verify` 和 `/password` 的 MTProto 登录状态故障返回 `503 login_state_error`。完成登录时只修改发起流程时对应渠道 revision 的 session；渠道被并发替换时，`/verify` 或 `/password` 返回 `409 channel_changed`，必须重新开始登录。
+- 删除渠道会同时将其从告警设置中移除，并丢弃该渠道尚未发送的通知。
+
 ## 管理系统设置
 
 - `GET /api/admin/system/settings` 返回 `history_guest_access_mode`、`dash_update_channel`、`dash_update_mode`、`logo_url`、`page_title` 和 `topbar_text`。`dash_update_channel` 为 `release` 或 `prerelease`；`dash_update_mode` 为 `manual`、`notify` 或 `auto`。
-- `PATCH /api/admin/system/settings` 接受这些字段的局部更新。空更新返回 `400 no_fields`；非法值返回 `400 invalid_fields`。
+- `PATCH /api/admin/system/settings` 只校验并更新请求实际提交的字段，因此并发修改不同字段不会互相覆盖，未改动的旧 HTTP Logo 也不会阻断其他字段修改。空更新返回 `400 no_fields`；提交字段非法时返回 `400 invalid_fields`。
 - `PUT /api/admin/system/settings` 全量替换设置文档，必须提交 `history_guest_access_mode`、`dash_update_channel`、`dash_update_mode`、`logo_url`、`page_title` 和 `topbar_text`。
+- `logo_url` 可以是内置路径、同源绝对路径、base64 SVG、PNG、JPEG、GIF、WebP 或 ICO data URL，或外部 HTTPS URL；外部 HTTP URL 会被拒绝。
+- 旧版本已保存的外部 HTTP Logo 会为兼容继续读取。在 HTTPS 页面上，浏览器仍可能按混合内容（mixed content）规则拦截；此时 Logo 和 favicon 会回退到内置 Logo。
+
+## 管理主题
+
+- `GET /api/admin/system/themes/` 返回可读取的内置和自定义主题。每项包含 `id`、`name`、`version`、`author`、`description`、`skin`、`format_version`、`deprecated`、`built_in`、`active`、`deletable`、`missing`、`broken`、`has_preview`、`created_at` 和 `updated_at`。当前主题包均返回 `format_version=1` 和 `deprecated=true`。
+- 主题包格式 v1 已冻结并弃用，但没有移除日期；现有 v1 包继续支持上传、应用和运行。v1 不再增加新的 CSS 语法、文件类型或皮肤能力，后续能力必须使用新格式。
+- 主题 manifest 必须包含 `skin.admin.shell`、`skin.admin.frame`、`skin.dashboard.summary` 和 `skin.dashboard.density`；缺失或未知值会拒绝整个主题包。
+- 主题 CSS 只允许自定义属性声明。单文件不是有效 UTF-8、超过 1 MiB、声明总数超过 1024、自定义属性名超过 128 字节、值超过 4096 个 Unicode 字符，或值中含 `!important`、`url()`、`image-set()`、`src()`、`expression()` 等可加载资源的函数时，主题包会被拒绝。校验按 CSS 字符串、转义和函数 token 解析；这些单词在引号文本中仍合法，转义函数名也不能绕过限制。
+- `POST /api/admin/system/themes/upload` 接受一个 `file` part，其中 ZIP 内容最大 20 MiB；整个 multipart 请求最大 21 MiB，额外 1 MiB 用于边界、头部和其他 framing 开销。Dash 为该上传路由提供最长 5 分钟的请求读取和响应写入窗口。
+- 配置的当前主题 ID 即使对应主题包缺失或损坏也继续保留。运行时回退到前端内置默认皮肤；列表返回合成的 `missing` 或 `broken` 项，并通过 `X-Dash-Warning: theme_active_missing` 或 `X-Dash-Warning: theme_active_broken` 暴露状态，管理员仍可重新上传该主题包或选择其他皮肤。
 
 ## 管理 Dash 更新
 
-- `GET /api/admin/system/dash-update/status` 返回最近一次 Dash 更新任务状态。`status` 为 `idle`、`running`、`completed` 或 `failed`。响应包含 `available`，并可能包含 `id`、`action`、`channel`、`started_at`、`finished_at`、`exit_code`、`log_tail` 和 `unavailable_reason`。
-- `GET /api/admin/system/dash-update/check?channel=release|prerelease` 返回 `current_version`、`current_channel`、`target_channel`、`latest_version`、`version_status` 和 `bundled_node_version`。`version_status` 为 `available`、`current`、`ahead` 或 `unknown`。省略 `channel` 时默认使用 `release`；`prerelease` 只检查 prerelease tag；非法 `channel` 返回 `400 invalid_fields`；本机缺少更新器依赖返回 `503 dash_update_unavailable`；远端 tag 拉取失败返回 `502 dash_update_check_failed`。
-- `POST /api/admin/system/dash-update/run` 必须提交 `action=update|reinstall`、`channel=release|prerelease` 和 `lang=zh|en`。它会启动后台 Dash 更新任务，成功返回 `202` 和状态体。`prerelease` 只针对 prerelease tag 运行。已有任务运行时返回 `409` 和当前状态体。字段缺失或非法返回 `400 invalid_fields`；更新器不可用返回 `503 dash_update_unavailable`。
-- `dash_update_mode=notify` 会让 Dash 按配置通道定期检查更新，并通过已启用通知渠道发送可用更新提醒。`dash_update_mode=auto` 会定期检查、发现更高版本时自动启动更新，并发送开始和结果通知。
-- 已部署的 Dash 更新器基于 Linux/systemd，并通过打包内置的 `update_dash_linux.sh` 运行。更新任务可能重启 Dash，调用方收到 `202` 后必须容忍短暂断连。
+- `GET /api/admin/system/dash-update/status` 返回最近一次 Dash 更新任务状态。`status` 为 `idle`、`running`、`completed` 或 `failed`。响应包含 `available`，并可能包含 `id`、`action`、`channel`、`target_version`、`phase`、`failure_code`、`recovery_path`、`started_at`、`finished_at`、`exit_code`、`log_tail` 和 `unavailable_reason`。必须继续恢复的失败事务使用 `failure_code=recovery_required`；`recovery_path` 指向本机保留的恢复文件。成功向前恢复后任务改为 `completed`；迁移前成功回滚后任务保持 `failed`，使用 `failure_code=rolled_back` 并清空恢复路径。
+- `GET /api/admin/system/dash-update/check?channel=release|prerelease` 返回 `current_version`、`current_channel`、`target_channel`、`latest_version`、`install_revision`、`version_status` 和 `bundled_node_version`。`install_revision` 是用于固定后续执行计划的不透明 SHA-256 安装身份。`version_status` 为 `available`、`current`、`ahead` 或 `unknown`。省略 `channel` 时默认使用 `release`；`prerelease` 只检查 prerelease 发布。本机可用性、安装状态和 GitHub 查询在同一个有界响应预算内并行执行；非法 `channel` 返回 `400 invalid_fields`；本机更新器缺失或被恢复事务阻断时返回 `503 dash_update_unavailable`；GitHub Releases 查询失败或超时返回 `502 dash_update_check_failed`。
+- `POST /api/admin/system/dash-update/run` 必须提交 `action=update|reinstall`、`channel=release|prerelease` 和 `lang=zh|en`。当前客户端还会把前一次检查中的 `target_version`、`expected_current_version` 和 `expected_install_revision` 原样提交；这三个字段必须同时存在。为兼容旧客户端，三个字段都省略时，服务端会在入队前执行有界且无副作用的新检查；任务提交使用独立的有界窗口。任务一旦持久预留，即使 transient unit 的提交结果暂时不确定，也以其状态资源为权威结果。不可变计划在执行器启动前持久化；执行器取得跨进程锁后校验当前版本和安装修订号。过期计划仍作为任务接收，但最终以 `failure_code=install_changed` 失败，绝不会另选目标。普通 `update` 要求目标版本更高；目标相同时会在任务持久化前返回 `409 dash_update_current`，调用方必须显式使用 `reinstall` 才能重新应用同一 release。成功返回 `202` 和状态体；已有任务返回 `409`；字段非法返回 `400 invalid_fields`；更新器不可用返回 `503 dash_update_unavailable`。
+- `dash_update_mode=notify` 会让 Dash 按配置通道定期检查更新，并为每个已启用通知渠道入队可用更新提醒。`dash_update_mode=auto` 会定期检查并在发现更高版本时自动启动更新；无法启动更新器时入队失败通知，已启动任务进入终态后入队结果通知，成功启动本身不再单独通知。各渠道通过持久化通知 outbox 独立投递和重试。
+- 管理端控制器基于 Linux/systemd，通过 transient unit 启动打包 Dash 二进制中的 `dash update execute`；`update_dash_linux.sh` 只保留为手工兼容包装。Release 包必须使用格式 v1，包含匹配的 `release.env`、`bin/dash`、`dist/index.html`、`deploy` 下覆盖五个受支持平台/架构目标的全部七个 node/runner 资产、`configs/config.example.yaml` 和 Linux 安装/更新脚本，且这些必需文件不能为空、`Ithiltir-dash/` 下只能有普通文件和目录。`release.env` 以 SHA-256 绑定每个内置资产，候选 Dash 二进制必须同时报告 manifest 中的 Dash 版本和打包节点版本。压缩大小、解压大小和条目数都有硬限制。更新任务可能重启 Dash，调用方收到 `202` 后必须容忍短暂断连。迁移或服务启动需要恢复时，以 root 执行 `DASH_HOME/bin/dash update recover`。
 - `GET /api/admin/system/dash-update/release-notes?lang=zh|en` 从文档站返回 `{ "source_url": "...", "html": "..." }`；非法 `lang` 返回 `400 invalid_fields`；抓取失败返回 `502 release_notes_fetch_failed`。
 
 ## Agent 更新
@@ -110,6 +152,9 @@ Bearer 可选端点会把缺失、格式错误、过期、已撤销或其他无�
 ## 节点运行时指标字段
 
 - `POST /api/node/metrics` 接受可选的 `metrics.disk.smart`、`metrics.thermal` 和 `metrics.pressure`。旧 Agent 可以不带这些字段。
+- 持久化的字节数、容量、计数器和 uptime 必须是有符号 64 位范围内的非负 JSON 整数；进程数和连接数使用有符号 32 位范围；`/api/node/static` 的上报间隔使用有符号 32 位范围，CPU 拓扑计数使用有符号 16 位范围。普通正整数的 JSON 编码不变，因此现有 Agent 继续兼容。整数超出接收类型范围时返回 `400 invalid_request`；负数、非法比例或非法速率返回 `422 invalid_metrics` 或 `422 invalid_static_payload`。
+- 写入 PostgreSQL 定长标识列的文本会在持久化前校验：Node 版本 64 字符，hostname 和磁盘名称 255，磁盘 ref 320，磁盘 kind/role 与 RAID health 16，网卡名称 64，文件系统类型及逻辑盘 health/level 32。静态 OS/platform/arch 限 32 字符，platform/kernel 版本限 255。路径、挂载点和硬件描述使用不定长 TEXT。超长值返回 `422 invalid_metrics` 或 `422 invalid_static_payload`，不会静默截断。
+- 并发上报按服务端接收时间决定当前投影。因执行顺序倒置而较晚完成的旧接收样本仍写入指标历史，但不会覆盖当前指标、前台热点快照或触发新的告警评估；请求中的 `timestamp` 只作为 Agent 上报时间保存，不决定当前投影顺序。
 - `metrics.disk.smart` 是磁盘 SMART 运行时状态，进入独立热点缓存，不写入 PostgreSQL 指标快照。确认是物理盘的 SMART 温度可归约成按设备区分的 `disk.temp_c` 历史值。`metrics.thermal` 保存硬件温度传感器，位置在 metrics 根级；thermal 会写入 PostgreSQL 指标快照，但在前台缓存中作为独立字段缓存保存。
 - `metrics.pressure` 是 Linux PSI（Pressure Stall Information）。它可以包含 `cpu`、`memory`、`io`，每项可带 `some` 和 `full` 数值组。每个组包含 `avg10`、`avg60`、`avg300` 百分比和累计 `total` 微秒。Dashboard 会把这些值保存成固定数值时序列；采集状态/原因字符串不持久化。缺失的组保持 `NULL`，表示不可用，不会当成 0 压力。
 - `disk.smart.devices` 和 `thermal.sensors` 是数组。字段存在但结果为空时使用 `[]`，不是 `null`。
@@ -132,33 +177,33 @@ Bearer 可选端点会把缺失、格式错误、过期、已撤销或其他无�
 
 ## 流量统计
 
-- `GET /api/statistics/traffic/settings` 返回 `guest_access_mode`、`usage_mode`、`cycle_mode`、`billing_start_day`、`billing_anchor_date`、`billing_timezone` 和 `direction_mode`。
-- `PATCH /api/statistics/traffic/settings` 接受局部更新，未知值返回 `400 invalid_fields`。
-- 允许值：`guest_access_mode`: `disabled`、`by_node`；`usage_mode`: `lite`、`billing`；`cycle_mode`: `calendar_month`、`whmcs_compatible`、`clamp_to_month_end`；`direction_mode`: `out`、`both`、`max`。
-- 流量查询使用节点有效流量配置：节点 `traffic_cycle_mode=default` 时继承全局账期模式、月度起始日、账期锚点和账期时区；否则使用节点自己的 `traffic_*` 账期字段。节点 `traffic_direction_mode=default` 时继承全局统计方向；否则使用节点自己的方向覆盖。
+- `GET /api/statistics/traffic/settings` 返回 `guest_access_mode`、`usage_mode`、`cycle_mode`、`billing_start_day`、`billing_anchor_date`、`billing_timezone` 和 `direction_mode`。其中账期字段仅用于兼容旧响应结构，固定表示应用时区中从 1 号开始的自然月，不再是可修改的全局默认值。
+- `PATCH /api/statistics/traffic/settings` 只接受 `guest_access_mode`、`usage_mode` 和 `direction_mode` 的局部更新。提交任意账期字段返回 `400 billing_cycle_is_per_node`；账期必须通过节点接口修改。Lite 切换为 Billing 时，后台 Facts 物化器从最近 30 分钟开始，`204` 响应不会等待物化完成；Lite 期间更早且仍在保留期内的节点事实可通过节点重建接口按需补齐。Billing 切换为 Lite 不等待运行中的重建任务；该任务会在下一分块检查时停止。成功返回 `204`。
+- 可修改字段的允许值：`guest_access_mode`: `disabled`、`by_node`；`usage_mode`: `lite`、`billing`；`direction_mode`: `out`、`both`、`max`。
+- 流量查询使用每个节点显式保存的账期字段。只有 `traffic_direction_mode=default` 会继承全局统计方向；`out`、`both`、`max` 仍是节点自己的方向覆盖。
 - `lite` 和 `billing` 模式都会使用有效账期作为月度边界；`billing` 额外启用日统计、P95、覆盖率、5 分钟事实和月度计费快照。
 - `GET /daily` 要求 `usage_mode=billing`，否则返回 `409 traffic_daily_requires_billing`。`period` 可选，允许 `current`、`previous`，省略时为 `current`。
-- `GET /monthly` 支持 `months` 和 `period`。`months` 最大 24；`period=current` 从本账期开始，`period=previous` 从上账期开始，省略时为 `current`。响应字段 `includes_current` 在 `period=current` 时为 `true`，在 `period=previous` 时为 `false`。
+- `GET /monthly` 支持 `months` 和 `period`。`months` 必须在 1 到 24 之间，非法值返回 `400 invalid_request`；`period=current` 从本账期开始，`period=previous` 从上账期开始，省略时为 `current`。响应字段 `includes_current` 在 `period=current` 时为 `true`，在 `period=previous` 时为 `false`。
 - 统计方向用于选择计费视图：出站、入站加出站，或每项指标取入站/出站较大值。
 - 流量 summary、daily、monthly 响应保留原始 `in_*` 和 `out_*` 字段，并通过 `selected_bytes`、`selected_p95_bytes_per_sec`、`selected_peak_bytes_per_sec` 及其方向字段暴露当前计费视图。
-- 客户端应使用 `coverage_ratio` 展示样本覆盖率和准确性提示。`partial` 仅为兼容保留，新的展示逻辑不应依赖该字段。
+- 客户端使用 `coverage_ratio`、`data_complete`、`gap_count` 和 `reset_count` 展示样本覆盖率和准确性提示。
 - 只有 `p95_status` 为 `available` 时，P95 字段才不是 `null`。
 
 ## 非 API HTTP 路径
 
-| 路径                          | 作用                                    |
-| ----------------------------- | --------------------------------------- |
-| `/theme/active.css`           | 当前主题 CSS                            |
-| `/theme/active.json`          | 当前主题 manifest；默认主题可能返回 404 |
-| `/theme/preview/{id}.png`     | 主题预览图                              |
-| `/deploy/linux/install.sh`    | Linux Agent 安装脚本                    |
-| `/deploy/macos/install.sh`    | macOS Agent 安装脚本                    |
-| `/deploy/windows/install.ps1` | Windows Agent 安装脚本                  |
-| `/deploy/*`                   | 打包携带的节点发布资产；需要 `X-Node-Secret` 或临时 `upgrade_token` |
-| `/`                           | SPA                                     |
+| 路径                          | 作用                                                                       |
+| ----------------------------- | -------------------------------------------------------------------------- |
+| `/theme/active.css`           | 实际解析出的主题 CSS；配置主题缺失或损坏时返回用于前端默认皮肤的空覆盖 CSS |
+| `/theme/active.json`          | 实际解析出的主题 manifest；默认主题及回退到默认主题时返回 404              |
+| `/theme/preview/{id}.png`     | 主题预览图                                                                 |
+| `/deploy/linux/install.sh`    | Linux Agent 安装脚本                                                       |
+| `/deploy/macos/install.sh`    | macOS Agent 安装脚本                                                       |
+| `/deploy/windows/install.ps1` | Windows Agent 安装脚本                                                     |
+| `/deploy/*`                   | 打包携带的节点发布资产；需要 `X-Node-Secret` 或临时 `upgrade_token`        |
+| `/`                           | SPA                                                                        |
 
-## 兼容性规则
+## 契约规则
 
-- 既有路径、方法和字段语义保持稳定。
-- 新行为通过新端点或追加字段提供。
-- 需要废弃时先保留旧入口，再新增替代入口。
+- 未知或格式错误的值在边界直接拒绝，不会静默归一化成另一个合法请求。
+- JSON 请求超过路由 body 上限时返回 `413 body_too_large`；JSON 格式错误返回 `400 invalid_request`。
+- 核心持久化存储和必需依赖失败会明确返回错误。文档声明的可选边界保留降级语义：Bearer 可选读取转为匿名视图，当前主题不可用时使用前端默认皮肤并暴露 `missing` 或 `broken` 状态。
