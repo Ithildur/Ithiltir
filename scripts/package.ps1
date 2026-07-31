@@ -501,6 +501,7 @@ try {
 		}
 		New-Item -ItemType Directory -Path $pkgRoot | Out-Null
 		New-Item -ItemType Directory -Path (Join-Path $pkgRoot "bin") | Out-Null
+		New-Item -ItemType Directory -Path (Join-Path $pkgRoot "configs") | Out-Null
 		New-Item -ItemType Directory -Path (Join-Path $pkgRoot "logs") | Out-Null
 
 		$exeName = "dash"
@@ -532,7 +533,7 @@ try {
 			$utf8NoBom
 		)
 
-		Copy-Item -Recurse -Force (Join-Path $repoRoot "configs") (Join-Path $pkgRoot "configs")
+		Copy-Item -Force (Join-Path $repoRoot "configs/config.example.yaml") (Join-Path $pkgRoot "configs/config.example.yaml")
 		Copy-Item -Recurse -Force $frontendDistPath (Join-Path $pkgRoot "dist")
 		Copy-Item -Recurse -Force $nodeDeployPath (Join-Path $pkgRoot "deploy")
 		Copy-Item -Force (Join-Path $repoRoot "install_dash_linux.sh") $pkgRoot

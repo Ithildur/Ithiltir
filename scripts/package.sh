@@ -671,7 +671,7 @@ for t in "${target_list[@]}"; do
   pkg_root="$build_root/Ithiltir-dash"
   rm -rf "$pkg_root"
   mkdir -p "$build_root"
-  mkdir -p "$pkg_root/bin" "$pkg_root/logs"
+  mkdir -p "$pkg_root/bin" "$pkg_root/configs" "$pkg_root/logs"
 
   exe_name="dash"
   if [[ "$os" == "windows" ]]; then
@@ -691,7 +691,7 @@ for t in "${target_list[@]}"; do
     printf '%s\n' "${node_asset_sums[@]}"
   } >"$pkg_root/release.env"
 
-  cp -R "$repo_root/configs" "$pkg_root/configs"
+  cp "$repo_root/configs/config.example.yaml" "$pkg_root/configs/config.example.yaml"
   cp -R "$frontend_dist_dir" "$pkg_root/dist"
   cp -R "$node_deploy_dir" "$pkg_root/deploy"
   cp "$repo_root/install_dash_linux.sh" "$repo_root/update_dash_linux.sh" "$pkg_root/"
