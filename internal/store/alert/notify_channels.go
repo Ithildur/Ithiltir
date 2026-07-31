@@ -3,6 +3,7 @@ package alert
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
@@ -43,13 +44,25 @@ func (d ChannelDelivery) Status() ChannelDeliveryStatus {
 	return ChannelDeliveryUnknown
 }
 
+type notifyChannelRow struct {
+	model.NotifyChannel `gorm:"embedded"`
+	LegacyConfig        datatypes.JSON `gorm:"column:config;not null"`
+	ConfigSealed        []byte         `gorm:"column:config_sealed"`
+}
+
+func (notifyChannelRow) TableName() string {
+	return "notify_channels"
+}
+
 func (s *Store) ListChannels(ctx context.Context) ([]model.NotifyChannel, error) {
-	var items []model.NotifyChannel
-	err := s.db.WithContext(ctx).
+	var rows []notifyChannelRow
+	if err := s.db.WithContext(ctx).
 		Where("is_deleted = ?", false).
 		Order("id DESC").
-		Find(&items).Error
-	return items, err
+		Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	return s.openChannels(rows)
 }
 
 func (s *Store) ListChannelDeliveries(ctx context.Context) ([]ChannelDelivery, error) {
@@ -80,20 +93,28 @@ func (s *Store) ListChannelsByIDs(ctx context.Context, ids []int64) ([]model.Not
 	if len(ids) == 0 {
 		return []model.NotifyChannel{}, nil
 	}
-	var items []model.NotifyChannel
-	err := s.db.WithContext(ctx).
+	var rows []notifyChannelRow
+	if err := s.db.WithContext(ctx).
 		Where("id IN ? AND is_deleted = ?", ids, false).
 		Order("id ASC").
-		Find(&items).Error
-	return items, err
+		Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	return s.openChannels(rows)
 }
 
 func (s *Store) GetChannel(ctx context.Context, id int64) (*model.NotifyChannel, error) {
-	var item model.NotifyChannel
-	err := s.db.WithContext(ctx).
+	var row notifyChannelRow
+	if err := s.db.WithContext(ctx).
 		Where("id = ? AND is_deleted = ?", id, false).
-		First(&item).Error
-	return &item, err
+		First(&row).Error; err != nil {
+		return nil, err
+	}
+	item, err := s.openChannel(row)
+	if err != nil {
+		return nil, err
+	}
+	return &item, nil
 }
 
 func (s *Store) GetChannelDelivery(ctx context.Context, id int64) (ChannelDelivery, error) {
@@ -116,7 +137,37 @@ func (s *Store) GetChannelDelivery(ctx context.Context, id int64) (ChannelDelive
 }
 
 func (s *Store) CreateChannel(ctx context.Context, item *model.NotifyChannel) error {
-	return s.db.WithContext(ctx).Create(item).Error
+	if item == nil {
+		return errors.New("create notification channel: item is nil")
+	}
+	var created model.NotifyChannel
+	if err := s.WithTx(ctx, func(tx *Store) error {
+		var id int64
+		if err := tx.db.WithContext(ctx).
+			Raw("SELECT nextval(pg_get_serial_sequence('notify_channels', 'id'))").
+			Scan(&id).Error; err != nil {
+			return fmt.Errorf("allocate notification channel ID: %w", err)
+		}
+		sealed, err := tx.configCipher.Seal(id, item.Type, item.Config)
+		if err != nil {
+			return fmt.Errorf("encrypt notification channel config: %w", err)
+		}
+		row := notifyChannelRow{
+			NotifyChannel: *item,
+			LegacyConfig:  datatypes.JSON([]byte(`{}`)),
+			ConfigSealed:  sealed,
+		}
+		row.ID = id
+		if err := tx.db.WithContext(ctx).Create(&row).Error; err != nil {
+			return fmt.Errorf("create notification channel: %w", err)
+		}
+		created = row.NotifyChannel
+		return nil
+	}); err != nil {
+		return err
+	}
+	*item = created
+	return nil
 }
 
 func (s *Store) ReplaceChannel(ctx context.Context, id, revision int64, next model.NotifyChannel) error {
@@ -131,15 +182,20 @@ func (s *Store) ReplaceChannel(ctx context.Context, id, revision int64, next mod
 		if current.Revision != revision {
 			return ErrChannelVersionStale
 		}
+		sealed, err := tx.configCipher.Seal(id, next.Type, next.Config)
+		if err != nil {
+			return fmt.Errorf("encrypt notification channel config: %w", err)
+		}
 
 		now := time.Now().UTC()
 		if err := tx.db.WithContext(ctx).
-			Model(&model.NotifyChannel{}).
+			Model(&notifyChannelRow{}).
 			Where("id = ? AND is_deleted = ?", id, false).
 			Updates(map[string]any{
 				"name":                 next.Name,
 				"type":                 next.Type,
-				"config":               next.Config,
+				"config":               datatypes.JSON([]byte(`{}`)),
+				"config_sealed":        sealed,
 				"enabled":              next.Enabled,
 				"revision":             gorm.Expr("revision + 1"),
 				"last_success_at":      nil,
@@ -179,13 +235,18 @@ func (s *Store) UpdateChannelConfig(ctx context.Context, id, revision int64, con
 		if current.Revision != revision {
 			return ErrChannelVersionStale
 		}
+		sealed, err := tx.configCipher.Seal(id, current.Type, config)
+		if err != nil {
+			return fmt.Errorf("encrypt notification channel config: %w", err)
+		}
 
 		now := time.Now().UTC()
 		if err := tx.db.WithContext(ctx).
-			Model(&model.NotifyChannel{}).
+			Model(&notifyChannelRow{}).
 			Where("id = ? AND is_deleted = ?", id, false).
 			Updates(map[string]any{
-				"config":               config,
+				"config":               datatypes.JSON([]byte(`{}`)),
+				"config_sealed":        sealed,
 				"revision":             gorm.Expr("revision + 1"),
 				"last_success_at":      nil,
 				"last_failure_at":      nil,
@@ -401,6 +462,28 @@ func channelIDs(channels []model.NotifyChannel) []int64 {
 		ids = append(ids, channel.ID)
 	}
 	return ids
+}
+
+func (s *Store) openChannels(rows []notifyChannelRow) ([]model.NotifyChannel, error) {
+	items := make([]model.NotifyChannel, 0, len(rows))
+	for _, row := range rows {
+		item, err := s.openChannel(row)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, nil
+}
+
+func (s *Store) openChannel(row notifyChannelRow) (model.NotifyChannel, error) {
+	plain, err := s.configCipher.Open(row.ID, row.Type, row.ConfigSealed)
+	if err != nil {
+		return model.NotifyChannel{}, fmt.Errorf("decrypt notification channel %d config: %w", row.ID, err)
+	}
+	item := row.NotifyChannel
+	item.Config = datatypes.JSON(plain)
+	return item, nil
 }
 
 func (s *Store) lockChannel(ctx context.Context, id int64) (model.NotifyChannel, error) {

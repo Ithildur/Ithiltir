@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
@@ -13,6 +14,7 @@ import (
 	"dash/internal/config"
 	"dash/internal/infra"
 	"dash/internal/migrate"
+	"dash/internal/notify"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -22,6 +24,28 @@ import (
 const EnvDatabaseURL = "TEST_DATABASE_URL"
 
 func NewDB(t testing.TB) *gorm.DB {
+	t.Helper()
+	db, _ := newDB(t, nil)
+	return db
+}
+
+// NewDBAt creates a fresh database migrated through target and returns the key
+// path needed to advance it through the notification-config Go migration.
+func NewDBAt(t testing.TB, target int64) (*gorm.DB, string) {
+	t.Helper()
+	return newDB(t, &target)
+}
+
+func ConfigCipher(t testing.TB) *notify.ConfigCipher {
+	t.Helper()
+	configCipher, err := notify.NewConfigCipher(make([]byte, notify.ConfigKeySize))
+	if err != nil {
+		t.Fatalf("create test notification config cipher: %v", err)
+	}
+	return configCipher
+}
+
+func newDB(t testing.TB, target *int64) (*gorm.DB, string) {
 	t.Helper()
 
 	raw := strings.TrimSpace(os.Getenv(EnvDatabaseURL))
@@ -56,10 +80,19 @@ func NewDB(t testing.TB) *gorm.DB {
 	if err != nil {
 		t.Fatalf("open test database: %v", err)
 	}
-	if _, err := migrate.Run(ctx, db); err != nil {
+	keyPath := filepath.Join(t.TempDir(), "notify-config.key")
+	if err := os.WriteFile(keyPath, make([]byte, notify.ConfigKeySize), 0o600); err != nil {
+		t.Fatalf("create test notification config key: %v", err)
+	}
+	if target == nil {
+		_, err = migrate.Run(ctx, db, keyPath)
+	} else {
+		_, err = migrate.RunTo(ctx, db, keyPath, *target)
+	}
+	if err != nil {
 		t.Fatalf("run migrations: %v", err)
 	}
-	return db
+	return db, keyPath
 }
 
 func databaseName() string {

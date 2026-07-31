@@ -14,7 +14,7 @@ import (
 )
 
 func TestEnqueueDefaultSkipsWithoutTargets(t *testing.T) {
-	store := alertstore.New(nil)
+	store := alertstore.New(nil, testNotifyConfigCipher(t))
 	cache := newNotifyCache(store, time.Hour)
 	cache.current = notifyTargets{
 		Enabled:     true,
@@ -39,7 +39,7 @@ func TestEnqueueDefaultSkipsWithoutTargets(t *testing.T) {
 func TestIntegrationEnqueueDefaultResolvesTargetsAndPersistsOnce(t *testing.T) {
 	ctx := context.Background()
 	db := pgtest.NewDB(t)
-	store := alertstore.New(db)
+	store := alertstore.New(db, testNotifyConfigCipher(t))
 	service := &Service{
 		store:  store,
 		notify: newNotifyCache(store, 0),
@@ -95,4 +95,13 @@ func TestIntegrationEnqueueDefaultResolvesTargetsAndPersistsOnce(t *testing.T) {
 	if rows[0].EventID != nil || rows[0].Transition != "available" || rows[0].Status != model.OutboxStatusPending {
 		t.Fatalf("notification outbox row = %+v", rows[0])
 	}
+}
+
+func testNotifyConfigCipher(t *testing.T) *notify.ConfigCipher {
+	t.Helper()
+	configCipher, err := notify.NewConfigCipher(make([]byte, notify.ConfigKeySize))
+	if err != nil {
+		t.Fatalf("NewConfigCipher() error = %v", err)
+	}
+	return configCipher
 }

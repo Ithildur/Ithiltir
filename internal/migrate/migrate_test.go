@@ -12,7 +12,7 @@ import (
 
 func TestIntegrationNotificationMigrationRemovesDeletedChannelRefs(t *testing.T) {
 	ctx := context.Background()
-	db := pgtest.NewDB(t)
+	db, keyPath := pgtest.NewDBAt(t, 10)
 
 	var activeID int64
 	if err := db.Raw(`
@@ -57,10 +57,7 @@ func TestIntegrationNotificationMigrationRemovesDeletedChannelRefs(t *testing.T)
 	if activeRefs != 1 {
 		t.Fatalf("legacy channel ids = %s with %d active refs, want one", before, activeRefs)
 	}
-	if err := db.Exec("DELETE FROM goose_db_version WHERE version_id = 11").Error; err != nil {
-		t.Fatalf("mark notification migration pending: %v", err)
-	}
-	result, err := migrate.Run(ctx, db)
+	result, err := migrate.Run(ctx, db, keyPath)
 	if err != nil {
 		t.Fatalf("rerun notification migration: %v", err)
 	}
@@ -83,13 +80,13 @@ func TestIntegrationNotificationMigrationRemovesDeletedChannelRefs(t *testing.T)
 
 func TestIntegrationTrafficCycleMigrationPreservesEffectiveNodeCycles(t *testing.T) {
 	ctx := context.Background()
-	db := pgtest.NewDB(t)
+	db, keyPath := pgtest.NewDBAt(t, 10)
 
 	if err := db.Exec(`
 		ALTER TABLE traffic_settings
-		    DROP CONSTRAINT chk_traffic_settings_fixed_cycle;
+		    DROP CONSTRAINT IF EXISTS chk_traffic_settings_fixed_cycle;
 		ALTER TABLE servers
-		    DROP CONSTRAINT chk_servers_traffic_cycle_mode,
+		    DROP CONSTRAINT IF EXISTS chk_servers_traffic_cycle_mode,
 		    ALTER COLUMN traffic_cycle_mode SET DEFAULT 'default';
 		ALTER TABLE servers
 		    ADD CONSTRAINT chk_servers_traffic_cycle_mode
@@ -117,10 +114,7 @@ func TestIntegrationTrafficCycleMigrationPreservesEffectiveNodeCycles(t *testing
 	`).Error; err != nil {
 		t.Fatalf("seed legacy traffic cycles: %v", err)
 	}
-	if err := db.Exec("DELETE FROM goose_db_version WHERE version_id = 11").Error; err != nil {
-		t.Fatalf("mark traffic migration pending: %v", err)
-	}
-	result, err := migrate.Run(ctx, db)
+	result, err := migrate.Run(ctx, db, keyPath)
 	if err != nil {
 		t.Fatalf("rerun traffic migration: %v", err)
 	}
@@ -208,7 +202,7 @@ func TestIntegrationTrafficCycleMigrationPreservesEffectiveNodeCycles(t *testing
 
 func TestIntegrationReleaseMigrationWidensNaturalObservationFields(t *testing.T) {
 	ctx := context.Background()
-	db := pgtest.NewDB(t)
+	db, keyPath := pgtest.NewDBAt(t, 10)
 
 	if err := db.Exec(`
 		DROP MATERIALIZED VIEW disk_metrics_15m;
@@ -320,10 +314,7 @@ func TestIntegrationReleaseMigrationWidensNaturalObservationFields(t *testing.T)
 	`).Error; err != nil {
 		t.Fatalf("restore legacy observation field types: %v", err)
 	}
-	if err := db.Exec("DELETE FROM goose_db_version WHERE version_id = 11").Error; err != nil {
-		t.Fatalf("mark release migration pending: %v", err)
-	}
-	result, err := migrate.Run(ctx, db)
+	result, err := migrate.Run(ctx, db, keyPath)
 	if err != nil {
 		t.Fatalf("rerun release migration: %v", err)
 	}
@@ -463,7 +454,7 @@ func TestIntegrationReleaseMigrationWidensNaturalObservationFields(t *testing.T)
 
 func TestIntegrationSchemaVersionGuard(t *testing.T) {
 	ctx := context.Background()
-	db := pgtest.NewDB(t)
+	db, keyPath := pgtest.NewDBAt(t, 11)
 	if err := migrate.CheckVersion(ctx, db); err != nil {
 		t.Fatalf("CheckVersion(current) error = %v", err)
 	}
@@ -488,7 +479,7 @@ func TestIntegrationSchemaVersionGuard(t *testing.T) {
 	if err := migrate.CheckVersion(ctx, db); !errors.Is(err, migrate.ErrSchemaAhead) {
 		t.Fatalf("CheckVersion(ahead) error = %v, want ErrSchemaAhead", err)
 	}
-	if _, err := migrate.Run(ctx, db); !errors.Is(err, migrate.ErrSchemaAhead) {
+	if _, err := migrate.Run(ctx, db, keyPath); !errors.Is(err, migrate.ErrSchemaAhead) {
 		t.Fatalf("Run(ahead) error = %v, want ErrSchemaAhead", err)
 	}
 }

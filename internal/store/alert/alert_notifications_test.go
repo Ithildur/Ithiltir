@@ -70,7 +70,7 @@ func TestChannelDeliveryStatus(t *testing.T) {
 func TestIntegrationNotificationDeliveryState(t *testing.T) {
 	ctx := context.Background()
 	db := pgtest.NewDB(t)
-	st := New(db)
+	st := newTestStore(t, db)
 
 	t.Run("stale config patch cannot overwrite replacement", func(t *testing.T) {
 		channel, _ := createNotificationFixture(t, db, "config-version")
@@ -99,6 +99,24 @@ func TestIntegrationNotificationDeliveryState(t *testing.T) {
 		}
 		if got.Name != next.Name || gotConfig.URL != "https://replacement.example.test/hook" {
 			t.Fatalf("stored channel = %+v, want replacement", got)
+		}
+		var persisted struct {
+			Config       string `gorm:"column:config"`
+			ConfigSealed []byte `gorm:"column:config_sealed"`
+		}
+		if err := db.Raw(`
+			SELECT config::text AS config, config_sealed
+			FROM notify_channels
+			WHERE id = ?
+		`, channel.ID).Scan(&persisted).Error; err != nil {
+			t.Fatalf("load persisted channel config: %v", err)
+		}
+		if persisted.Config != "{}" || len(persisted.ConfigSealed) == 0 {
+			t.Fatalf(
+				"persisted channel config = %q sealed_bytes=%d, want ciphertext only",
+				persisted.Config,
+				len(persisted.ConfigSealed),
+			)
 		}
 
 		stale := channel
@@ -288,7 +306,7 @@ func TestIntegrationNotificationDeliveryState(t *testing.T) {
 func TestIntegrationBlockedDeliveryCoalescesChannelQueue(t *testing.T) {
 	ctx := context.Background()
 	db := pgtest.NewDB(t)
-	st := New(db)
+	st := newTestStore(t, db)
 	channel, event := createNotificationFixture(t, db, "coalesce")
 	now := notificationTestTime()
 	probe := createNotificationOutbox(t, db, event.ID, channel, model.OutboxStatusPending, now)
@@ -345,7 +363,7 @@ func TestIntegrationBlockedDeliveryCoalescesChannelQueue(t *testing.T) {
 func TestIntegrationTakeNotificationPreservesProbeAcrossCrash(t *testing.T) {
 	ctx := context.Background()
 	db := pgtest.NewDB(t)
-	st := New(db)
+	st := newTestStore(t, db)
 	channel, event := createNotificationFixture(t, db, "sending-recovery")
 	now := notificationTestTime()
 	row := createNotificationOutbox(t, db, event.ID, channel, model.OutboxStatusBlocked, now)
@@ -394,7 +412,7 @@ func TestIntegrationTakeNotificationPreservesProbeAcrossCrash(t *testing.T) {
 func TestIntegrationCompleteNotificationIsIdempotent(t *testing.T) {
 	ctx := context.Background()
 	db := pgtest.NewDB(t)
-	st := New(db)
+	st := newTestStore(t, db)
 	channel, event := createNotificationFixture(t, db, "idempotent-completion")
 	now := notificationTestTime()
 	row := createNotificationOutbox(t, db, event.ID, channel, model.OutboxStatusPending, now)
@@ -426,7 +444,7 @@ func TestIntegrationCompleteNotificationIsIdempotent(t *testing.T) {
 func TestIntegrationOperationalFailureDoesNotConsumeDeliveryBudget(t *testing.T) {
 	ctx := context.Background()
 	db := pgtest.NewDB(t)
-	st := New(db)
+	st := newTestStore(t, db)
 	channel, event := createNotificationFixture(t, db, "operational-failure")
 	now := notificationTestTime()
 	row := createNotificationOutbox(t, db, event.ID, channel, model.OutboxStatusPending, now)
@@ -511,7 +529,7 @@ func TestIntegrationOperationalFailureDoesNotConsumeDeliveryBudget(t *testing.T)
 func TestIntegrationEnqueueSystemNotificationIsDurableAndIdempotent(t *testing.T) {
 	ctx := context.Background()
 	db := pgtest.NewDB(t)
-	st := New(db)
+	st := newTestStore(t, db)
 	channel, _ := createNotificationFixture(t, db, "system")
 	payload := NotificationPayload{
 		Title: "Dash update available",
@@ -555,8 +573,8 @@ func createNotificationFixture(t *testing.T, db *gorm.DB, suffix string) (model.
 		Config:  datatypes.JSON(`{"url":"https://example.test/hook"}`),
 		Enabled: true,
 	}
-	if err := db.Create(&channel).Error; err != nil {
-		t.Fatalf("Create(channel) error = %v", err)
+	if err := newTestStore(t, db).CreateChannel(context.Background(), &channel); err != nil {
+		t.Fatalf("CreateChannel() error = %v", err)
 	}
 	channel = loadNotifyChannel(t, db, channel.ID)
 	if channel.Revision < 1 {
@@ -619,11 +637,11 @@ func loadNotificationOutbox(t *testing.T, db *gorm.DB, id int64) model.AlertNoti
 
 func loadNotifyChannel(t *testing.T, db *gorm.DB, id int64) model.NotifyChannel {
 	t.Helper()
-	var channel model.NotifyChannel
-	if err := db.First(&channel, id).Error; err != nil {
+	channel, err := newTestStore(t, db).GetChannel(context.Background(), id)
+	if err != nil {
 		t.Fatalf("load channel %d: %v", id, err)
 	}
-	return channel
+	return *channel
 }
 
 func deliveryByID(t *testing.T, deliveries []ChannelDelivery, id int64) ChannelDelivery {

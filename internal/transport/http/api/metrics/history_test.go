@@ -18,7 +18,7 @@ func newHistoryTestStore(t *testing.T) (*store.Stores, *gorm.DB) {
 	t.Helper()
 
 	db := pgtest.NewDB(t)
-	return store.New(db, nil, time.Local), db
+	return store.New(db, nil, time.Local, pgtest.ConfigCipher(t)), db
 }
 
 func TestIntegrationHistoryGuestAccessDisabledByDefault(t *testing.T) {

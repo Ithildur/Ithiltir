@@ -2,16 +2,22 @@ package migrate
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 
 	embeddedmigrations "dash/db"
+
 	"github.com/pressly/goose/v3"
 	gooselock "github.com/pressly/goose/v3/lock"
 	"gorm.io/gorm"
 )
 
-const advisoryLockID int64 = 749153421
+const (
+	advisoryLockID        int64 = 749153421
+	stateMigrationVersion int64 = 11
+)
 
 var (
 	ErrSchemaAhead  = errors.New("database schema is newer than this binary")
@@ -24,8 +30,18 @@ type Result struct {
 	Skipped int
 }
 
-func Run(ctx context.Context, db *gorm.DB) (Result, error) {
-	provider, err := migrationProvider(db)
+func Run(ctx context.Context, db *gorm.DB, notifyKeyPath string) (Result, error) {
+	return run(ctx, db, notifyKeyPath, nil)
+}
+
+// RunTo advances a database only through target. It exists for historical
+// migration fixtures; production migration should always call Run.
+func RunTo(ctx context.Context, db *gorm.DB, notifyKeyPath string, target int64) (Result, error) {
+	return run(ctx, db, notifyKeyPath, &target)
+}
+
+func run(ctx context.Context, db *gorm.DB, notifyKeyPath string, limit *int64) (Result, error) {
+	provider, err := migrationProvider(db, notifyKeyPath)
 	if err != nil {
 		return Result{}, err
 	}
@@ -37,7 +53,21 @@ func Run(ctx context.Context, db *gorm.DB) (Result, error) {
 	if current > target {
 		return Result{Total: total}, schemaVersionError(ErrSchemaAhead, current, target)
 	}
-	results, err := provider.Up(ctx)
+	if limit != nil && (*limit < current || *limit > target) {
+		return Result{Total: total}, fmt.Errorf(
+			"invalid migration target %d for database=%d embedded=%d",
+			*limit,
+			current,
+			target,
+		)
+	}
+
+	var results []*goose.MigrationResult
+	if limit == nil {
+		results, err = provider.Up(ctx)
+	} else {
+		results, err = provider.UpTo(ctx, *limit)
+	}
 	if err != nil {
 		return Result{Total: total}, fmt.Errorf("run goose migrations: %w", err)
 	}
@@ -53,7 +83,7 @@ func Run(ctx context.Context, db *gorm.DB) (Result, error) {
 // Schema upgrades belong to the explicit migrate command; application startup
 // must not run against either older or newer persisted data.
 func CheckVersion(ctx context.Context, db *gorm.DB) error {
-	provider, err := migrationProvider(db)
+	provider, err := migrationProvider(db, "")
 	if err != nil {
 		return err
 	}
@@ -77,7 +107,7 @@ func CheckVersion(ctx context.Context, db *gorm.DB) error {
 	return nil
 }
 
-func migrationProvider(db *gorm.DB) (*goose.Provider, error) {
+func migrationProvider(db *gorm.DB, notifyKeyPath string) (*goose.Provider, error) {
 	if db == nil {
 		return nil, errors.New("db is nil")
 	}
@@ -95,6 +125,7 @@ func migrationProvider(db *gorm.DB) (*goose.Provider, error) {
 		embeddedmigrations.Migrations,
 		goose.WithSessionLocker(locker),
 		goose.WithDisableGlobalRegistry(true),
+		goose.WithGoMigrations(stateMigration(notifyKeyPath)),
 	)
 	if err != nil {
 		if errors.Is(err, goose.ErrNoMigrations) {
@@ -103,6 +134,24 @@ func migrationProvider(db *gorm.DB) (*goose.Provider, error) {
 		return nil, fmt.Errorf("create goose provider: %w", err)
 	}
 	return provider, nil
+}
+
+func stateMigration(keyPath string) *goose.Migration {
+	return goose.NewGoMigration(
+		stateMigrationVersion,
+		&goose.GoFunc{
+			RunTx: func(ctx context.Context, tx *sql.Tx) error {
+				if strings.TrimSpace(keyPath) == "" {
+					return errors.New("notification config key path is empty")
+				}
+				if _, err := tx.ExecContext(ctx, embeddedmigrations.NotificationTrafficStateSQL()); err != nil {
+					return fmt.Errorf("run notification and traffic state SQL: %w", err)
+				}
+				return sealNotifyConfigs(ctx, tx, keyPath)
+			},
+		},
+		nil,
+	)
 }
 
 func schemaVersionError(kind error, current, target int64) error {

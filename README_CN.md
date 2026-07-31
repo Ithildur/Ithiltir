@@ -58,6 +58,7 @@ go run ./cmd/dash -debug
 
 管理员登录密码只从环境变量 `monitor_dash_pwd` 读取，不写入配置文件；密码至少包含 8 个可见 ASCII 字符，且不得包含空白字符。
 `auth.jwt_signing_key` 至少为 32 字节，且不能带首尾空白。Linux 安装器会生成 32 字节的随机字母数字密钥。
+`dash migrate` 会在 `$DASH_HOME/configs/notify-config.key` 创建仅所有者可读的二进制通知配置密钥。未设置 `DASH_HOME` 时，Dash 使用自动发现的应用主目录；若发现的是受管 `releases/<version>` 目录，则回到稳定安装根目录。该文件必须与 PostgreSQL 分开备份，且绝不能提交到仓库。没有匹配密钥的数据库备份无法恢复 Telegram、SMTP 或 Webhook 凭据；数据库中已有加密配置时，Dash 会拒绝重新生成丢失的密钥。
 受支持的环境变量只要存在，就会覆盖 YAML，即使其值为空。必填字段会在后续校验中拒绝空值；可选字段按各自的空值/默认语义处理；凭据字段可以被显式清空。整数环境变量为空时表示 0；非空但无法解析为整数时属于配置错误。
 数据库连接池数值必须非负；`database.max_open_conns` 为正数时不得小于 `database.max_idle_conns`，零值保留既有默认/不限语义。`database.conn_max_lifetime` 不得为负，零表示不按连接年龄淘汰。
 Redis 配置和 `REDIS_*` 覆盖只在启用 Redis 模式时加载。连接池数值必须非负；`redis.pool_size=0` 使用 go-redis 默认值，此时要求 `redis.min_idle_conns=0`；pool size 为正数时不得小于最小空闲连接数。`--no-redis` 和迁移命令不会读取或校验 Redis 专属配置。
@@ -168,7 +169,8 @@ Linux 更新器把官方 GitHub release 源作为根信任源。GitHub 账号、
 | `internal` | 后端应用代码 |
 | `web` | 随应用一起打包的 SPA 前端源码 |
 | `configs` | 示例配置 |
-| `db/migrations` | 数据库结构变更 |
+| `db/migrations` | 由 Goose 直接执行的 SQL 迁移 |
+| `db/migrationdata` | 由 Go 迁移执行的 SQL 内容 |
 | `scripts` | 前端构建和发布打包入口 |
 | `deploy/node` | 离线打包用本地节点二进制 |
 

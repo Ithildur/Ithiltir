@@ -10,10 +10,11 @@
 
 ### Notification channel configuration
 
-- Stored notification channel configuration is validated with the current strict schema when it is listed, updated, tested, or used to send a notification.
+- `dash migrate` encrypts complete notification-channel configuration documents with AES-256-GCM, replaces the plaintext in the current logical rows with `{}`, and creates `$DASH_HOME/configs/notify-config.key` only when no ciphertext already exists. Back up that key separately from PostgreSQL. Startup fails instead of generating a replacement or falling back to plaintext when the key is missing, invalid, or cannot decrypt every stored channel. This migration is not secure physical erasure: MVCC dead tuples, table free space, retained WAL, replicas, physical backups, and storage snapshots may still contain the former plaintext and must remain protected until explicitly retired under the applicable storage and backup retention policies.
+- Stored notification channel configuration is validated with the current strict schema when it is listed, updated, tested, or used to send a notification. List and detail reads keep an invalid channel visible with `config: null` instead of failing the complete response.
 - Numeric strings and integer-valued JSON floats are no longer accepted for integer fields such as `api_id` and `smtp_port`.
 - Unknown configuration fields are rejected.
-- Stored configurations that do not satisfy the current schema must be recreated or corrected directly in PostgreSQL before the channel can be used or edited through the API.
+- Stored configurations that do not satisfy the current schema must be deleted and recreated. The admin UI keeps them visible for that recovery path while preventing unsafe edit, enable, selection, and test actions.
 - Notification delivery no longer has a silent `failed_permanent` terminal state. Existing rows in that state are migrated to `blocked` and resume automatic low-frequency probes after upgrade; a historical notification may therefore be delivered when its endpoint recovers.
 - Disabling a channel pauses unsent notifications, and re-enabling or compatibly replacing it wakes them. Deleting a channel or changing its type explicitly discards incompatible unsent notifications.
 - Channel list and detail responses add delivery-health fields and the `delivery_status` values `unknown`, `healthy`, `degraded`, and `disabled`.

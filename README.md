@@ -58,6 +58,7 @@ Minimum config fields:
 
 The admin login password is read only from the `monitor_dash_pwd` environment variable. It must contain at least 8 visible ASCII characters without whitespace.
 `auth.jwt_signing_key` must be at least 32 bytes and must not contain surrounding whitespace. The Linux installer generates a 32-byte random alphanumeric key.
+`dash migrate` creates the binary notification-configuration key at `$DASH_HOME/configs/notify-config.key` with owner-only permissions. When `DASH_HOME` is unset, Dash uses the discovered application home and maps a managed `releases/<version>` directory back to the stable installation root. Back up this file separately from PostgreSQL and never commit it. A database backup without the matching key cannot recover stored Telegram, SMTP, or webhook credentials; Dash refuses to replace a missing key when encrypted configurations already exist.
 When a supported environment variable is present, its value overrides YAML even when it is empty. Required fields then reject the empty value; optional fields apply their documented empty/default semantics, and credential fields may be explicitly cleared. An empty integer environment variable means zero; a non-empty value that is not an integer is a configuration error.
 Database pool sizes must be non-negative. A positive `database.max_open_conns` must be at least `database.max_idle_conns`; zero keeps the existing default/unlimited semantics. `database.conn_max_lifetime` must be non-negative, and zero disables age-based expiry.
 Redis configuration and `REDIS_*` overrides are loaded only when Redis mode is enabled. Pool values must be non-negative; `redis.pool_size=0` uses the go-redis default and requires `redis.min_idle_conns=0`, while a positive pool size must be at least the minimum idle count. `--no-redis` and migration commands do not read or validate Redis-specific settings.
@@ -168,7 +169,8 @@ The Linux updater treats the official GitHub release source as the root of trust
 | `internal` | backend application code |
 | `web` | SPA source bundled into the app |
 | `configs` | sample config |
-| `db/migrations` | database schema changes |
+| `db/migrations` | SQL migrations executed directly by Goose |
+| `db/migrationdata` | SQL bodies executed by Go-owned migrations |
 | `scripts` | frontend build and release packaging entry points |
 | `deploy/node` | local node binaries for offline packaging |
 

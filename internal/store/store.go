@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"dash/internal/notify"
 	alertstore "dash/internal/store/alert"
 	"dash/internal/store/frontcache"
 	"dash/internal/store/frontprojection"
@@ -31,10 +32,15 @@ type Stores struct {
 }
 
 // New wires concrete stores. DB/Redis may be nil; call Validate at startup.
-func New(db *gorm.DB, redisClient *redis.Client, trafficLoc *time.Location) *Stores {
+func New(
+	db *gorm.DB,
+	redisClient *redis.Client,
+	trafficLoc *time.Location,
+	configCipher *notify.ConfigCipher,
+) *Stores {
 	projection := frontprojection.New()
 	front := frontcache.New(db, redisClient, projection)
-	alert := alertstore.New(db)
+	alert := alertstore.New(db, configCipher)
 
 	return &Stores{
 		db:      db,

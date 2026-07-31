@@ -16,6 +16,7 @@ import (
 	"dash/internal/infra"
 	"dash/internal/infra/cachekeys"
 	"dash/internal/migrate"
+	"dash/internal/notify"
 	"dash/internal/store"
 	themefs "dash/internal/theme"
 	trafficservice "dash/internal/traffic"
@@ -111,6 +112,17 @@ func main() {
 	if err := migrate.CheckVersion(ctx, db); err != nil {
 		infra.Fatal("validate database schema failed", err)
 	}
+	notifyKeyPath, err := config.NotifyConfigKeyPath()
+	if err != nil {
+		infra.Fatal("resolve notification config key path failed", err)
+	}
+	configCipher, err := notify.LoadConfigCipher(notifyKeyPath)
+	if err != nil {
+		infra.Fatal("load notification config key failed", err, slog.String("path", notifyKeyPath))
+	}
+	if err := migrate.CheckNotifyConfigs(ctx, db, configCipher); err != nil {
+		infra.Fatal("validate encrypted notification configs failed", err)
+	}
 	if err := migrate.SyncRetentionPolicies(ctx, db, cfg.Database.EffectiveRetentionDays(), cfg.Database.EffectiveTrafficRetentionDays()); err != nil {
 		infra.Fatal("sync retention policies failed", err)
 	}
@@ -139,7 +151,7 @@ func main() {
 	}
 
 	appLocation := cfg.App.EffectiveLocation()
-	st := store.New(db, redisClient, appLocation)
+	st := store.New(db, redisClient, appLocation, configCipher)
 	if err := st.Validate(); err != nil {
 		infra.Fatal("init store failed", err)
 	}

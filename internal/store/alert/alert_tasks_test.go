@@ -12,7 +12,7 @@ import (
 func TestIntegrationFailedControlTaskDoesNotBlockRequeue(t *testing.T) {
 	ctx := context.Background()
 	db := pgtest.NewDB(t)
-	st := New(db)
+	st := newTestStore(t, db)
 	const key = "full_reconcile:test"
 
 	if err := st.EnqueueFullReconcileTask(ctx, key); err != nil {
@@ -51,7 +51,7 @@ func TestIntegrationFailedControlTaskDoesNotBlockRequeue(t *testing.T) {
 func TestIntegrationTakeControlTaskRecoversLegacyLeaseImmediately(t *testing.T) {
 	ctx := context.Background()
 	db := pgtest.NewDB(t)
-	st := New(db)
+	st := newTestStore(t, db)
 	const key = "full_reconcile:legacy-lease"
 	if err := st.EnqueueFullReconcileTask(ctx, key); err != nil {
 		t.Fatalf("EnqueueFullReconcileTask() error = %v", err)

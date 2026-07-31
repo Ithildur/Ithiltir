@@ -44,7 +44,7 @@ func TestDecodeRuntimeStateKeepsValidFieldsAndReportsCorruptFields(t *testing.T)
 
 func TestSaveRuntimeStateReplacesCorruptMemoryField(t *testing.T) {
 	ctx := context.Background()
-	st := alertstore.New(nil)
+	st := alertstore.New(nil, testNotifyConfigCipher(t))
 
 	const serverID = int64(42)
 	key := ruleStateKey(7, 3)
@@ -86,7 +86,7 @@ func TestSaveRuntimeStateReplacesCorruptMemoryField(t *testing.T) {
 func TestIntegrationLoadRuntimeStateRepairsCorruptFieldsFromOpenEvents(t *testing.T) {
 	ctx := context.Background()
 	db := pgtest.NewDB(t)
-	st := alertstore.New(db)
+	st := alertstore.New(db, testNotifyConfigCipher(t))
 	now := time.Date(2026, time.July, 12, 10, 0, 0, 0, time.UTC)
 	currentValue := 91.5
 	threshold := 90.0

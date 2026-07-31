@@ -16,7 +16,7 @@ import (
 
 func TestIntegrationUpdateSessionRejectsLoginForReplacedChannel(t *testing.T) {
 	ctx := context.Background()
-	st := alertstore.New(pgtest.NewDB(t))
+	st := alertstore.New(pgtest.NewDB(t), pgtest.ConfigCipher(t))
 	payload, err := json.Marshal(notify.TelegramMTProtoConfig{
 		Mode:    "mtproto",
 		APIID:   123,

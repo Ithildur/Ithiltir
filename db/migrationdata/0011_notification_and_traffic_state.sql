@@ -1,5 +1,3 @@
--- +goose Up
-
 ALTER TABLE notify_channels
     ADD COLUMN IF NOT EXISTS revision BIGINT NOT NULL DEFAULT 1,
     ADD COLUMN IF NOT EXISTS last_success_at TIMESTAMPTZ,
@@ -7,7 +5,8 @@ ALTER TABLE notify_channels
     ADD COLUMN IF NOT EXISTS consecutive_failures INTEGER NOT NULL DEFAULT 0,
     ADD COLUMN IF NOT EXISTS last_error_code VARCHAR(64),
     ADD COLUMN IF NOT EXISTS last_error TEXT,
-    ADD COLUMN IF NOT EXISTS config_updated_at TIMESTAMPTZ NOT NULL DEFAULT now();
+    ADD COLUMN IF NOT EXISTS config_updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    ADD COLUMN IF NOT EXISTS config_sealed BYTEA;
 
 ALTER TABLE notify_channels
     DISABLE TRIGGER notify_channels_updated_at;
@@ -17,6 +16,16 @@ SET config_updated_at = updated_at;
 
 ALTER TABLE notify_channels
     ENABLE TRIGGER notify_channels_updated_at;
+
+ALTER TABLE notify_channels
+    DROP CONSTRAINT IF EXISTS chk_notify_channels_config_storage;
+
+-- Existing plaintext rows are converted by the following Go migration. NOT
+-- VALID permits those rows temporarily while immediately rejecting new writes
+-- that do not provide ciphertext and clear the compatibility column.
+ALTER TABLE notify_channels
+    ADD CONSTRAINT chk_notify_channels_config_storage
+    CHECK (config = '{}'::jsonb AND config_sealed IS NOT NULL) NOT VALID;
 
 WITH normalized AS (
     SELECT settings.id,
@@ -101,6 +110,8 @@ COMMENT ON COLUMN notify_channels.consecutive_failures IS '连续投递失败次
 COMMENT ON COLUMN notify_channels.last_error_code IS '最近一次投递失败稳定错误码';
 COMMENT ON COLUMN notify_channels.last_error IS '最近一次投递失败摘要';
 COMMENT ON COLUMN notify_channels.config_updated_at IS '最近一次配置或启停状态更新时间';
+COMMENT ON COLUMN notify_channels.config IS '兼容占位；通知渠道配置明文不得持久化';
+COMMENT ON COLUMN notify_channels.config_sealed IS 'AES-256-GCM 加密的完整渠道配置';
 COMMENT ON TABLE alert_notification_outbox IS '持久化通知 outbox；历史表名保留用于兼容';
 COMMENT ON COLUMN alert_notification_outbox.event_id IS '关联告警事件；系统通知为空';
 COMMENT ON COLUMN alert_notification_outbox.transition IS '通知事件类型';
@@ -194,7 +205,6 @@ ALTER TABLE servers
 -- aggregates cannot follow a grouping-column type change. Derived aggregates
 -- are disposable; decompress and rebuild them only while upgrading legacy
 -- storage types.
--- +goose StatementBegin
 DO $migration$
 DECLARE
     compressed_chunk REGCLASS;
@@ -296,8 +306,6 @@ BEGIN
     END IF;
 END
 $migration$;
--- +goose StatementEnd
-
 ALTER TABLE server_current_disk_metrics
     ALTER COLUMN name TYPE VARCHAR(255),
     ALTER COLUMN ref TYPE VARCHAR(320),

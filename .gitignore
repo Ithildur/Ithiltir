@@ -25,6 +25,8 @@ web/*.tsbuildinfo
 
 # Local config / env
 config.local.yaml
+configs/notify-config.key
+configs/.notify-config.key-*
 .env
 .env.*
 web/.env

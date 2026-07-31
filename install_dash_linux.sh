@@ -19,6 +19,7 @@ BIN_PATH="${BIN_DIR}/dash"
 CONFIG_DIR="${INSTALL_DIR}/configs"
 CONFIG_EXAMPLE="${CONFIG_DIR}/config.example.yaml"
 CONFIG_LOCAL="${CONFIG_DIR}/config.local.yaml"
+NOTIFY_CONFIG_KEY="${CONFIG_DIR}/notify-config.key"
 
 SERVICE_FILE="/etc/systemd/system/${APP}.service"
 MANUAL_RUN_FILE="${INSTALL_DIR}/run_dash.sh"
@@ -2015,6 +2016,10 @@ tighten_sensitive_file_permissions() {
 	if [[ -f "$CONFIG_LOCAL" ]]; then
 		as_root chown root:root "$CONFIG_LOCAL"
 		as_root chmod 0600 "$CONFIG_LOCAL"
+	fi
+	if [[ -f "$NOTIFY_CONFIG_KEY" ]]; then
+		as_root chown root:root "$NOTIFY_CONFIG_KEY"
+		as_root chmod 0600 "$NOTIFY_CONFIG_KEY"
 	fi
 	if [[ -f "$SERVICE_FILE" ]]; then
 		as_root chown root:root "$SERVICE_FILE"

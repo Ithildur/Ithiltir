@@ -52,7 +52,12 @@ func runMigrate(args []string) {
 	}
 	defer sqlDB.Close()
 
-	res, err := migrate.Run(ctx, db)
+	notifyKeyPath, err := config.NotifyConfigKeyPath()
+	if err != nil {
+		infra.Log().Error("resolve notification config key path failed", err)
+		os.Exit(1)
+	}
+	res, err := migrate.Run(ctx, db, notifyKeyPath)
 	if err != nil {
 		infra.Log().Error("migrate failed", err)
 		os.Exit(1)

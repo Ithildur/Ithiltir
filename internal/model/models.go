@@ -648,7 +648,7 @@ type NotifyChannel struct {
 	ID                  int64          `gorm:"column:id;primaryKey;autoIncrement"`
 	Name                string         `gorm:"column:name;size:64;not null"`
 	Type                NotifyType     `gorm:"column:type;type:notify_type;not null"`
-	Config              datatypes.JSON `gorm:"column:config;not null"` // 按 Type 存放不同渠道配置；更新时空 secret 表示保留旧 secret。
+	Config              datatypes.JSON `gorm:"-"` // 仅存在于 Dash 内存；持久化由通知 store 在加密边界完成。
 	Enabled             bool           `gorm:"column:enabled;not null"`
 	IsDeleted           bool           `gorm:"column:is_deleted;not null;default:false"`
 	Revision            int64          `gorm:"column:revision;not null;default:1"`
