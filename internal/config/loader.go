@@ -68,6 +68,13 @@ func resolveConfigPath(path string) (string, error) {
 	return path, nil
 }
 
+type configFile struct {
+	*Config `yaml:",inline"`
+
+	LegacyAlerts yaml.Node `yaml:"alerts"`
+	LegacyNotify yaml.Node `yaml:"notify"`
+}
+
 func readConfigFile(path string, cfg *Config) error {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -75,7 +82,7 @@ func readConfigFile(path string, cfg *Config) error {
 	}
 	decoder := yaml.NewDecoder(bytes.NewReader(data))
 	decoder.KnownFields(true)
-	if err := decoder.Decode(cfg); err != nil {
+	if err := decoder.Decode(&configFile{Config: cfg}); err != nil {
 		return fmt.Errorf("config: parse file %q: %w", path, err)
 	}
 	var extra yaml.Node

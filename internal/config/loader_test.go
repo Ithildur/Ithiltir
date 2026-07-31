@@ -20,6 +20,31 @@ func TestReadConfigFileRejectsUnknownField(t *testing.T) {
 	}
 }
 
+func TestReadConfigFileIgnoresLegacyNotifications(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	data := `app:
+  listen: ":8080"
+alerts:
+  enabled: true
+  channels: ["telegram"]
+notify:
+  telegram:
+    enabled: false
+    bot_token: ""
+`
+	if err := os.WriteFile(path, []byte(data), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	var cfg Config
+	if err := readConfigFile(path, &cfg); err != nil {
+		t.Fatalf("readConfigFile() error = %v", err)
+	}
+	if cfg.App.Listen != ":8080" {
+		t.Fatalf("cfg.App.Listen = %q, want :8080", cfg.App.Listen)
+	}
+}
+
 func TestReadConfigFileRejectsMultipleDocuments(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.yaml")
 	data := "app:\n  listen: \":8080\"\n---\napp:\n  public_url: https://example.com\n"
