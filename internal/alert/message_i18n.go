@@ -31,6 +31,7 @@ type messageText struct {
 	smartDetailMore        string
 	smartHealthFailed      string
 	smartFailingAttrs      string
+	smartAttrsMore         string
 	nvmeWarning            string
 	nvmeMediaErrors        string
 	nvmeUnknownWarningBits string
@@ -54,6 +55,7 @@ var messageTexts = map[string]messageText{
 		smartDetailMore:        "另有 %d 个设备",
 		smartHealthFailed:      "健康检查失败",
 		smartFailingAttrs:      "失败属性: %s",
+		smartAttrsMore:         "另有 %d 个失败属性",
 		nvmeWarning:            "关键警告 0x%02X",
 		nvmeMediaErrors:        "0E 媒体/数据完整性错误: %d",
 		nvmeUnknownWarningBits: "未知位 0x%X",
@@ -75,6 +77,7 @@ var messageTexts = map[string]messageText{
 		smartDetailMore:        "%d more devices",
 		smartHealthFailed:      "health check failed",
 		smartFailingAttrs:      "failing attributes: %s",
+		smartAttrsMore:         "%d more failing attributes",
 		nvmeWarning:            "critical warning 0x%02X",
 		nvmeMediaErrors:        "0E media/data integrity errors: %d",
 		nvmeUnknownWarningBits: "unknown bits 0x%X",

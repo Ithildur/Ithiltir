@@ -3,6 +3,7 @@ package alert
 import (
 	"fmt"
 	"strings"
+	"unicode"
 
 	"dash/internal/metrics"
 )
@@ -10,6 +11,9 @@ import (
 const (
 	smartTitleDeviceLimit  = 3
 	smartDetailDeviceLimit = 5
+	smartFailingAttrLimit  = 8
+	smartLabelRuneLimit    = 128
+	smartDetailRuneLimit   = 2048
 )
 
 func openTitleName(metricName string, snapshot *metrics.NodeView, fallback, language string) string {
@@ -46,7 +50,10 @@ func openMetricDetail(metricName string, snapshot *metrics.NodeView, language st
 	if len(details) == 0 {
 		return ""
 	}
-	return strings.Join(limitSmartDetails(details, text), text.detailJoiner)
+	return limitSmartText(
+		strings.Join(limitSmartDetails(details, text), text.detailJoiner),
+		smartDetailRuneLimit,
+	)
 }
 
 func smartDevicesForMetric(metricName string, snapshot *metrics.NodeView) []metrics.DiskSmartDevice {
@@ -148,7 +155,7 @@ func smartDeviceTitleList(devices []metrics.DiskSmartDevice, text messageText) s
 
 func smartDeviceShortLabel(device metrics.DiskSmartDevice, text messageText) string {
 	for _, raw := range []string{device.Name, device.DevicePath, device.Ref, device.Serial, device.WWN} {
-		if value := strings.TrimSpace(raw); value != "" {
+		if value := smartLabel(raw); value != "" {
 			return value
 		}
 	}
@@ -157,7 +164,7 @@ func smartDeviceShortLabel(device metrics.DiskSmartDevice, text messageText) str
 
 func smartDeviceLabel(device metrics.DiskSmartDevice, text messageText) string {
 	label := smartDeviceShortLabel(device, text)
-	model := strings.TrimSpace(device.Model)
+	model := smartLabel(device.Model)
 	if model == "" {
 		return label
 	}
@@ -165,13 +172,18 @@ func smartDeviceLabel(device metrics.DiskSmartDevice, text messageText) string {
 }
 
 func smartAttrsText(attrs []metrics.DiskSmartAttr, text messageText) string {
-	items := make([]string, 0, len(attrs))
+	items := make([]string, 0, min(len(attrs), smartFailingAttrLimit)+1)
+	total := 0
 	for _, attr := range attrs {
-		name := strings.TrimSpace(attr.Name)
+		name := smartLabel(attr.Name)
 		if name == "" && attr.ID > 0 {
 			name = fmt.Sprintf("ID %d", attr.ID)
 		}
 		if name == "" {
+			continue
+		}
+		total++
+		if len(items) >= smartFailingAttrLimit {
 			continue
 		}
 		if attr.ID > 0 && !strings.EqualFold(name, fmt.Sprintf("ID %d", attr.ID)) {
@@ -182,7 +194,28 @@ func smartAttrsText(attrs []metrics.DiskSmartAttr, text messageText) string {
 	if len(items) == 0 {
 		return ""
 	}
+	if remaining := total - len(items); remaining > 0 {
+		items = append(items, fmt.Sprintf(text.smartAttrsMore, remaining))
+	}
 	return fmt.Sprintf(text.smartFailingAttrs, strings.Join(items, ", "))
+}
+
+func smartLabel(raw string) string {
+	value := strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) || unicode.Is(unicode.Cf, r) {
+			return ' '
+		}
+		return r
+	}, raw)
+	return limitSmartText(strings.Join(strings.Fields(value), " "), smartLabelRuneLimit)
+}
+
+func limitSmartText(value string, limit int) string {
+	runes := []rune(value)
+	if len(runes) <= limit {
+		return value
+	}
+	return string(runes[:limit-1]) + "…"
 }
 
 func nvmeWarningText(value uint64, text messageText, language string) string {

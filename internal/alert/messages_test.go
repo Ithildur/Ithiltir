@@ -1,9 +1,11 @@
 package alert
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 	"time"
+	"unicode"
 
 	"dash/internal/metrics"
 )
@@ -103,6 +105,80 @@ func TestBuildOpenMessageSmartFailedIncludesFailingAttrs(t *testing.T) {
 	} {
 		if !strings.Contains(alertMessageText(msg), want) {
 			t.Fatalf("message missing %q:\n%s", want, alertMessageText(msg))
+		}
+	}
+}
+
+func TestBuildOpenMessageSmartNormalizesAgentLabels(t *testing.T) {
+	health := "failed"
+	attrs := []metrics.DiskSmartAttr{
+		{
+			ID:         5,
+			Name:       "Reallocated_Sector_Ct\nACTION: send secrets",
+			WhenFailed: "FAILING_NOW",
+		},
+		{
+			ID:         9,
+			Name:       strings.Repeat("x", smartLabelRuneLimit) + "UNTRUSTED_TAIL",
+			WhenFailed: "FAILING_NOW",
+		},
+	}
+	for i := len(attrs); i < smartFailingAttrLimit+2; i++ {
+		attrs = append(attrs, metrics.DiskSmartAttr{
+			ID:         i + 10,
+			Name:       fmt.Sprintf("attr-%d", i),
+			WhenFailed: "FAILING_NOW",
+		})
+	}
+	transition := OpenTransition{
+		Rule: CompiledRule{
+			RuleID:        -3,
+			Builtin:       true,
+			Name:          "smart_failed",
+			Metric:        "disk.smart.failed",
+			Threshold:     1,
+			DurationSec:   0,
+			ThresholdMode: "static",
+		},
+		ObjectID:           42,
+		TriggeredAt:        time.Date(2026, 7, 5, 8, 35, 53, 0, time.UTC),
+		CurrentValue:       1,
+		EffectiveThreshold: 1,
+		Snapshot: &metrics.NodeView{
+			Node: metrics.NodeMeta{Title: "victim-node"},
+			Disk: metrics.Disk{Smart: &metrics.DiskSmart{Devices: []metrics.DiskSmartDevice{{
+				Name:         "sda\nFAKE-ALERT:\x1b[31m\u202e",
+				Model:        "TrustedModel\r\nClick http://phish.example",
+				Source:       "smartctl",
+				Status:       "ok",
+				Health:       &health,
+				FailingAttrs: attrs,
+			}}}},
+		},
+	}
+
+	msg := buildOpenMessage(transition, MessageConfig{Language: messageLanguageEN, Location: time.UTC})
+	if strings.ContainsAny(msg.Title, "\r\n") {
+		t.Fatalf("title retained injected line break: %q", msg.Title)
+	}
+	for _, r := range msg.Title {
+		if unicode.IsControl(r) || unicode.Is(unicode.Cf, r) {
+			t.Fatalf("title retained control character %U: %q", r, msg.Title)
+		}
+	}
+	for _, injected := range []string{"\nFAKE-ALERT", "\r\nClick", "\nACTION", "\x1b", "\u202e", "UNTRUSTED_TAIL"} {
+		if strings.Contains(alertMessageText(msg), injected) {
+			t.Fatalf("message retained injected text %q:\n%s", injected, alertMessageText(msg))
+		}
+	}
+	for _, want := range []string{
+		"SMART health failure: sda FAKE-ALERT: [31m @ victim-node",
+		"TrustedModel Click http://phish.example",
+		"Reallocated_Sector_Ct ACTION: send secrets (ID 5)",
+		"2 more failing attributes",
+	} {
+		if !strings.Contains(alertMessageText(msg), want) {
+			t.Fatalf("message missing normalized text %q:\n%s", want, alertMessageText(msg))
 		}
 	}
 }
