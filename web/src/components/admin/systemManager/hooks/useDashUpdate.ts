@@ -153,7 +153,7 @@ export const useDashUpdate = ({ enabled, channel, onChannelChange }: Options) =>
         if (controller.signal.aborted) return;
         const selectedIDs = new Set(settings.channel_ids);
         const activeCount = channels.filter(
-          (item) => item.enabled && selectedIDs.has(item.id),
+          (item) => item.config !== null && item.enabled && selectedIDs.has(item.id),
         ).length;
         setNotify({
           value: {

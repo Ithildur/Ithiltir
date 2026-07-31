@@ -356,6 +356,8 @@ export const zh = {
   admin_alerts_channels_delivery_next_retry: '将在 {{time}} 后重试',
   admin_alerts_channels_delivery_next_probe: '下次探测：{{time}}',
   admin_alerts_channels_delivery_last_success: '最近成功：{{time}}',
+  admin_alerts_channels_config_invalid: '配置无效',
+  admin_alerts_channels_config_invalid_summary: '配置无法按当前格式读取，请删除后重新创建。',
   admin_alerts_channels_empty_title: '暂无通知渠道',
   admin_alerts_channels_empty_description: '创建通知渠道，将告警投递到聊天、邮件或 Webhook。',
   admin_alerts_channels_edit: '编辑渠道',

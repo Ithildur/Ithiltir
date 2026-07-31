@@ -16,6 +16,7 @@ import type {
   AlertChannelDeliveryStatus,
   AlertChannelType,
   AlertSettings,
+  ValidAlertChannel,
 } from '@app-types/admin';
 import { useI18n } from '@i18n';
 import { formatLocalDateTime, formatLocalTimestamp, formatTimeAgo } from '@utils/time';
@@ -31,7 +32,7 @@ interface Props {
   onToggleSettingsEnabled: () => void;
   onToggleSettingsChannel: (id: number) => void;
   onToggleEnabled: (channel: AlertChannel) => void;
-  onEdit: (channel: AlertChannel) => void;
+  onEdit: (channel: ValidAlertChannel) => void;
   onDelete: (channel: AlertChannel) => void;
   onTest: (channel: AlertChannel) => void;
 }
@@ -91,6 +92,9 @@ const AlertChannelsPanel: React.FC<Props> = ({
 
   const formatSummary = React.useCallback(
     (channel: AlertChannel): string => {
+      if (channel.config === null) {
+        return t('admin_alerts_channels_config_invalid_summary');
+      }
       if (channel.type === 'telegram') {
         const config = channel.config;
         if (config.mode === 'mtproto') {
@@ -118,7 +122,7 @@ const AlertChannelsPanel: React.FC<Props> = ({
   const filteredChannels = React.useMemo(() => {
     const keyword = normalizeSearch(search);
     return channels.filter((channel) => {
-      if (activeFilter === 'active' && !channel.enabled) return false;
+      if (activeFilter === 'active' && (!channel.enabled || channel.config === null)) return false;
       if (activeFilter === 'paused' && channel.enabled) return false;
       if (!keyword) return true;
       const summary = formatSummary(channel);
@@ -140,7 +144,9 @@ const AlertChannelsPanel: React.FC<Props> = ({
     if (!settings?.enabled) return 0;
     let count = 0;
     for (const channel of channels) {
-      if (channel.enabled && selectedChannelIds.has(channel.id)) count += 1;
+      if (channel.config !== null && channel.enabled && selectedChannelIds.has(channel.id)) {
+        count += 1;
+      }
     }
     return count;
   }, [channels, selectedChannelIds, settings?.enabled]);
@@ -187,6 +193,8 @@ const AlertChannelsPanel: React.FC<Props> = ({
           ) : (
             channels.map((channel) => {
               const selected = selectedChannelIds.has(channel.id);
+              const invalidConfig = channel.config === null;
+              const selectionDisabled = settingsDisabled || (invalidConfig && !selected);
               return (
                 <label
                   key={channel.id}
@@ -194,13 +202,13 @@ const AlertChannelsPanel: React.FC<Props> = ({
                     selected
                       ? 'border-(--theme-border-interactive-muted) bg-(--theme-bg-interactive-muted)'
                       : 'border-(--theme-border-subtle) bg-(--theme-bg-default) dark:border-(--theme-border-default)'
-                  } ${settingsDisabled ? 'cursor-not-allowed opacity-60' : 'cursor-pointer hover:bg-(--theme-surface-row-hover)'}`}
+                  } ${selectionDisabled ? 'cursor-not-allowed opacity-60' : 'cursor-pointer hover:bg-(--theme-surface-row-hover)'}`}
                 >
                   <input
                     type="checkbox"
                     className="mt-0.5 size-4 accent-(--theme-fg-interactive)"
                     checked={selected}
-                    disabled={settingsDisabled}
+                    disabled={selectionDisabled}
                     onChange={() => onToggleSettingsChannel(channel.id)}
                   />
                   <span className="min-w-0">
@@ -212,9 +220,11 @@ const AlertChannelsPanel: React.FC<Props> = ({
                       {!channel.enabled && (
                         <Badge color="amber">{t('admin_alerts_settings_channel_paused')}</Badge>
                       )}
-                      {channel.delivery_status === 'degraded' && (
+                      {invalidConfig ? (
+                        <Badge color="rose">{t('admin_alerts_channels_config_invalid')}</Badge>
+                      ) : channel.delivery_status === 'degraded' ? (
                         <Badge color="amber">{t('admin_alerts_channels_delivery_degraded')}</Badge>
-                      )}
+                      ) : null}
                     </span>
                   </span>
                 </label>
@@ -299,6 +309,7 @@ const AlertChannelsPanel: React.FC<Props> = ({
                   const meta = channelTypeMeta[channel.type];
                   const delivery = deliveryMeta[channel.delivery_status];
                   const summary = formatSummary(channel);
+                  const invalidConfig = channel.config === null;
                   return (
                     <tr
                       key={channel.id}
@@ -329,7 +340,13 @@ const AlertChannelsPanel: React.FC<Props> = ({
                       <td className="px-4 py-3">
                         <div className="flex min-w-48 items-start justify-between gap-3">
                           <div className="min-w-0 space-y-1.5">
-                            <Badge color={delivery.color}>{delivery.label}</Badge>
+                            {invalidConfig ? (
+                              <Badge color="rose">
+                                {t('admin_alerts_channels_config_invalid')}
+                              </Badge>
+                            ) : (
+                              <Badge color={delivery.color}>{delivery.label}</Badge>
+                            )}
                             {channel.consecutive_failures > 0 ? (
                               <p className="text-[11px] text-(--theme-fg-danger-muted)">
                                 {t('admin_alerts_channels_delivery_failures', {
@@ -382,7 +399,10 @@ const AlertChannelsPanel: React.FC<Props> = ({
                           <IOSSwitch
                             size="sm"
                             checked={channel.enabled}
-                            disabled={togglingIds.includes(channel.id)}
+                            disabled={
+                              togglingIds.includes(channel.id) ||
+                              (invalidConfig && !channel.enabled)
+                            }
                             ariaLabel={t('admin_alerts_channels_enabled_toggle', {
                               name: channel.name,
                             })}
@@ -397,19 +417,31 @@ const AlertChannelsPanel: React.FC<Props> = ({
                         <div className="flex items-center justify-end gap-1">
                           <button
                             type="button"
-                            onClick={() => onEdit(channel)}
-                            className="p-1.5 text-(--theme-fg-subtle) hover:text-(--theme-fg-interactive) dark:hover:text-(--theme-fg-interactive-hover) hover:bg-(--theme-bg-interactive-hover) dark:hover:bg-(--theme-bg-interactive-hover) rounded transition-colors"
+                            onClick={() => {
+                              if (!invalidConfig) onEdit(channel);
+                            }}
+                            className="p-1.5 text-(--theme-fg-subtle) hover:text-(--theme-fg-interactive) dark:hover:text-(--theme-fg-interactive-hover) hover:bg-(--theme-bg-interactive-hover) dark:hover:bg-(--theme-bg-interactive-hover) rounded transition-colors disabled:cursor-not-allowed disabled:opacity-40"
                             aria-label={t('common_edit')}
+                            title={
+                              invalidConfig
+                                ? t('admin_alerts_channels_config_invalid_summary')
+                                : t('common_edit')
+                            }
+                            disabled={invalidConfig}
                           >
                             <Edit2 className="size-4.5" />
                           </button>
                           <button
                             type="button"
                             onClick={() => onTest(channel)}
-                            className="p-1.5 text-(--theme-fg-subtle) hover:text-(--theme-fg-interactive) dark:hover:text-(--theme-fg-interactive-hover) hover:bg-(--theme-bg-interactive-hover) dark:hover:bg-(--theme-bg-interactive-hover) rounded transition-colors"
+                            className="p-1.5 text-(--theme-fg-subtle) hover:text-(--theme-fg-interactive) dark:hover:text-(--theme-fg-interactive-hover) hover:bg-(--theme-bg-interactive-hover) dark:hover:bg-(--theme-bg-interactive-hover) rounded transition-colors disabled:cursor-not-allowed disabled:opacity-40"
                             aria-label={t('admin_alerts_channels_action_test')}
-                            title={t('admin_alerts_channels_action_test')}
-                            disabled={testingIds.includes(channel.id)}
+                            title={
+                              invalidConfig
+                                ? t('admin_alerts_channels_config_invalid_summary')
+                                : t('admin_alerts_channels_action_test')
+                            }
+                            disabled={invalidConfig || testingIds.includes(channel.id)}
                           >
                             <FlaskConical className="size-4.5" />
                           </button>

@@ -1,6 +1,7 @@
 package channels
 
 import (
+	"encoding/json"
 	"errors"
 	"strings"
 	"time"
@@ -8,6 +9,7 @@ import (
 	"unicode/utf8"
 
 	"dash/internal/model"
+	"dash/internal/notify"
 	alertstore "dash/internal/store/alert"
 )
 
@@ -31,8 +33,13 @@ type channelView struct {
 	UpdatedAt           string                           `json:"updated_at"`
 }
 
-func viewFromDelivery(delivery alertstore.ChannelDelivery, config any) channelView {
+func viewFromDelivery(delivery alertstore.ChannelDelivery) channelView {
 	channel := delivery.Channel
+	config, err := notify.SanitizeConfig(channel.Type, json.RawMessage(channel.Config))
+	if err != nil {
+		// Keep legacy-invalid channels visible so operators can remove them.
+		config = nil
+	}
 	return channelView{
 		ID:                  channel.ID,
 		Name:                channel.Name,

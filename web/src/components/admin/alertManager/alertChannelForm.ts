@@ -1,4 +1,4 @@
-import type { AlertChannel, AlertChannelType, AlertTelegramMode } from '@app-types/admin';
+import type { AlertChannelType, AlertTelegramMode, ValidAlertChannel } from '@app-types/admin';
 import type { AlertChannelInput } from '@lib/adminApi';
 
 export type AlertChannelFormKind = 'telegram_bot' | 'telegram_mtproto' | 'email' | 'webhook';
@@ -227,7 +227,7 @@ export const channelInputFromForm = (
   };
 };
 
-export const formFromChannel = (channel: AlertChannel): AlertChannelForm => {
+export const formFromChannel = (channel: ValidAlertChannel): AlertChannelForm => {
   const base = { name: channel.name };
 
   if (channel.type === 'telegram') {

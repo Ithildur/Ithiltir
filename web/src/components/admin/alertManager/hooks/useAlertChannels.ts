@@ -1,6 +1,6 @@
 import React from 'react';
 import { useI18n, type TranslationKey } from '@i18n';
-import type { AlertChannel, AlertSettings } from '@app-types/admin';
+import type { AlertChannel, AlertSettings, ValidAlertChannel } from '@app-types/admin';
 import { pushTopBanner } from '@runtime/topBannerRuntime';
 import { useApiErrorHandler } from '@hooks/useApiErrorHandler';
 import type { ConfirmAction } from '@hooks/useConfirmDialog';
@@ -48,8 +48,12 @@ export const useAlertChannels = ({
   const [modal, setModal] = React.useState<{ editingChannelId: number | null } | null>(null);
   const isModalOpen = modal !== null;
   const editingChannelId = modal?.editingChannelId ?? null;
-  const editingChannel = React.useMemo(
-    () => channels.find((channel) => channel.id === editingChannelId) ?? null,
+  const editingChannel = React.useMemo<ValidAlertChannel | null>(
+    () =>
+      channels.find(
+        (channel): channel is ValidAlertChannel =>
+          channel.id === editingChannelId && channel.config !== null,
+      ) ?? null,
     [channels, editingChannelId],
   );
 
@@ -162,7 +166,7 @@ export const useAlertChannels = ({
     setModal({ editingChannelId: null });
   }, []);
 
-  const openEdit = React.useCallback((channel: AlertChannel) => {
+  const openEdit = React.useCallback((channel: ValidAlertChannel) => {
     setModal({ editingChannelId: channel.id });
   }, []);
 
@@ -174,6 +178,7 @@ export const useAlertChannels = ({
   const toggleEnabled = React.useCallback(
     async (channel: AlertChannel) => {
       const nextEnabled = !channel.enabled;
+      if (channel.config === null && nextEnabled) return;
       try {
         const didUpdate = await updateAlertChannelEnabled(channel.id, nextEnabled);
         if (!didUpdate) return;
@@ -186,6 +191,7 @@ export const useAlertChannels = ({
 
   const testChannel = React.useCallback(
     async (channel: AlertChannel) => {
+      if (channel.config === null) return;
       try {
         const didTest = await testAlertChannel(channel.id);
         if (!didTest) return;

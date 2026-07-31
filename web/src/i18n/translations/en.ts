@@ -369,6 +369,9 @@ export const en = {
   admin_alerts_channels_delivery_next_retry: 'Will retry after {{time}}',
   admin_alerts_channels_delivery_next_probe: 'Next probe: {{time}}',
   admin_alerts_channels_delivery_last_success: 'Last success: {{time}}',
+  admin_alerts_channels_config_invalid: 'Invalid configuration',
+  admin_alerts_channels_config_invalid_summary:
+    'This configuration cannot be read in the current format. Delete and recreate the channel.',
   admin_alerts_channels_empty_title: 'No channels configured',
   admin_alerts_channels_empty_description:
     'Create a notification channel to route alerts to chat, email, or webhooks.',

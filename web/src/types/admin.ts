@@ -236,7 +236,14 @@ interface WebhookAlertChannel extends AlertChannelBase {
   config: WebhookViewConfig;
 }
 
-export type AlertChannel = TelegramAlertChannel | EmailAlertChannel | WebhookAlertChannel;
+interface InvalidAlertChannel extends AlertChannelBase {
+  type: AlertChannelType;
+  config: null;
+}
+
+export type ValidAlertChannel = TelegramAlertChannel | EmailAlertChannel | WebhookAlertChannel;
+
+export type AlertChannel = ValidAlertChannel | InvalidAlertChannel;
 
 export interface AlertEvent {
   id: number;

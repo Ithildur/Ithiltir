@@ -102,7 +102,7 @@ Bearer 可选端点会把缺失、格式错误、过期、已撤销或其他非�
 
 ## 管理告警通知渠道
 
-- `GET /api/admin/alerts/channels` 和 `GET /api/admin/alerts/channels/{id}` 返回脱敏后的渠道配置及投递健康状态。`delivery_status` 在首次成功投递前为 `unknown`；成功投递且当前无阻塞任务时为 `healthy`；存在投递失败或阻塞通知时为 `degraded`；渠道停用时为 `disabled`。
+- `GET /api/admin/alerts/channels` 和 `GET /api/admin/alerts/channels/{id}` 返回脱敏后的渠道配置及投递健康状态。存量配置无法按当前 schema 解码时，对应渠道仍保留在成功响应中，但 `config` 为 `null`；单个非法渠道不会导致整个列表失败。管理界面会继续显示该渠道以供删除，但不允许编辑、启用、重新选作通知目标或测试。`delivery_status` 在首次成功投递前为 `unknown`；成功投递且当前无阻塞任务时为 `healthy`；存在投递失败或阻塞通知时为 `degraded`；渠道停用时为 `disabled`。
 - 投递健康字段包括 `last_success_at`、`last_failure_at`、`consecutive_failures`、`last_error_code`、`last_error`、`next_retry_at`、`next_probe_at`、`pending_count` 和 `blocked_count`。没有值的可选时间及错误字段为 `null`。`next_retry_at` 是最早的瞬时失败重试时间，管理端按本地时间显示为 `YYYYMMDD HH:mm:ss`；`next_probe_at` 是最早的阻塞恢复探测时间。`pending_count` 包含待发送、发送中、重试、阻塞和暂停通知；`blocked_count` 是其中等待低频恢复探测的通知数。
 - `updated_at` 表示最近一次渠道配置或启停状态变更；后台健康状态更新不会改变 API 返回的该时间。
 - 渠道名会 trim，不能为空，最多 64 个 Unicode 字符，且不得含控制字符。非法创建或全量替换请求返回 `400 invalid_fields`。

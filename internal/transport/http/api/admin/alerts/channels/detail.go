@@ -2,13 +2,11 @@ package channels
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"net/http"
 
 	"dash/internal/infra"
 	"dash/internal/model"
-	"dash/internal/notify"
 	alertstore "dash/internal/store/alert"
 	"dash/internal/transport/http/httperr"
 	"dash/internal/transport/http/request"
@@ -43,13 +41,8 @@ func (h *handler) detailHandler(w http.ResponseWriter, r *http.Request, rawID st
 		httperr.Write(w, http.StatusServiceUnavailable, "db_error", "failed to fetch channel")
 		return
 	}
-	configView, err := notify.SanitizeConfig(item.Channel.Type, json.RawMessage(item.Channel.Config))
-	if err != nil {
-		httperr.Write(w, http.StatusServiceUnavailable, "db_error", "failed to decode channel config")
-		return
-	}
 
-	response.WriteJSON(w, http.StatusOK, viewFromDelivery(item, configView))
+	response.WriteJSON(w, http.StatusOK, viewFromDelivery(item))
 }
 
 func loadChannelDelivery(ctx context.Context, st *alertstore.Store, id int64) (alertstore.ChannelDelivery, error) {

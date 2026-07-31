@@ -2,11 +2,9 @@ package channels
 
 import (
 	"context"
-	"encoding/json"
 	"net/http"
 
 	"dash/internal/infra"
-	"dash/internal/notify"
 	alertstore "dash/internal/store/alert"
 	"dash/internal/transport/http/httperr"
 	"github.com/Ithildur/EiluneKit/http/response"
@@ -33,12 +31,7 @@ func (h *handler) listHandler(w http.ResponseWriter, r *http.Request) {
 
 	out := make([]channelView, 0, len(items))
 	for _, item := range items {
-		configView, err := notify.SanitizeConfig(item.Channel.Type, json.RawMessage(item.Channel.Config))
-		if err != nil {
-			httperr.Write(w, http.StatusServiceUnavailable, "db_error", "failed to decode channel config")
-			return
-		}
-		out = append(out, viewFromDelivery(item, configView))
+		out = append(out, viewFromDelivery(item))
 	}
 
 	response.WriteJSON(w, http.StatusOK, out)
