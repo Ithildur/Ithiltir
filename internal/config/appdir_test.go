@@ -37,7 +37,7 @@ func TestInstallIDPathDoesNotFallbackToCwd(t *testing.T) {
 	}
 }
 
-func TestMutableHomeUsesManagedInstallRoot(t *testing.T) {
+func TestMutableHome(t *testing.T) {
 	root := t.TempDir()
 	release := filepath.Join(root, "releases", "1.2.3")
 	if err := os.MkdirAll(filepath.Join(root, "configs"), 0o755); err != nil {
@@ -50,9 +50,7 @@ func TestMutableHomeUsesManagedInstallRoot(t *testing.T) {
 	if got := mutableHome(release); got != root {
 		t.Fatalf("mutableHome() = %q, want %q", got, root)
 	}
-}
 
-func TestMutableHomeKeepsStandaloneRoot(t *testing.T) {
 	home := t.TempDir()
 	if got := mutableHome(home); got != home {
 		t.Fatalf("mutableHome() = %q, want %q", got, home)

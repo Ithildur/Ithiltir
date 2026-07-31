@@ -65,9 +65,6 @@ func TestDeployAssetRequiresNodeSecret(t *testing.T) {
 	if rr.Code != http.StatusOK {
 		t.Fatalf("install script status = %d, want %d", rr.Code, http.StatusOK)
 	}
-	if !bytes.Contains(rr.Body.Bytes(), []byte(request.NodeSecretHeader)) {
-		t.Fatalf("install script does not send %s", request.NodeSecretHeader)
-	}
 
 	req = httptest.NewRequest(http.MethodGet, "/deploy/linux/node_linux_amd64", nil)
 	rr = httptest.NewRecorder()

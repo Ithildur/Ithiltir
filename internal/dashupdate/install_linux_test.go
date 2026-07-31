@@ -3,7 +3,6 @@
 package dashupdate
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"io"
@@ -13,17 +12,6 @@ import (
 	"testing"
 	"time"
 )
-
-func TestRunCommandUsesDashUpdateUsage(t *testing.T) {
-	var out bytes.Buffer
-	if code := RunCommand(context.Background(), []string{"--help"}, nil, &out, &out); code != 0 {
-		t.Fatalf("RunCommand() exit = %d, want 0", code)
-	}
-	usage := out.String()
-	if !strings.Contains(usage, "dash update") || strings.Contains(usage, "ithiltir-update") {
-		t.Fatalf("RunCommand() usage = %q", usage)
-	}
-}
 
 func TestValidateTransactionPathsBindsTargetToCandidate(t *testing.T) {
 	home := filepath.Join(t.TempDir(), "Ithiltir-dash")

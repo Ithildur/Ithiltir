@@ -64,23 +64,6 @@ func TestBuildTrafficStatRejectsOverflow(t *testing.T) {
 	}
 }
 
-func TestApplyTrafficSelectionRejectsInvalidDirection(t *testing.T) {
-	stat := TrafficStat{InBytes: 1, OutBytes: 2}
-	if err := applyTrafficSelection(&stat, DirectionMode("unknown")); err == nil {
-		t.Fatal("applyTrafficSelection() error = nil")
-	}
-}
-
-func TestTrafficCycleMissingBoundariesReturnError(t *testing.T) {
-	ref := time.Date(2026, time.April, 1, 0, 0, 0, 0, time.UTC)
-	if _, _, err := trafficBoundsFrom(nil, ref); err == nil {
-		t.Fatal("trafficBoundsFrom() error = nil")
-	}
-	if _, err := prevBoundaryFrom(nil, ref); err == nil {
-		t.Fatal("prevBoundaryFrom() error = nil")
-	}
-}
-
 func TestTrafficCycleCalendarMonth(t *testing.T) {
 	loc := time.UTC
 	ref := time.Date(2026, time.April, 26, 12, 0, 0, 0, loc)

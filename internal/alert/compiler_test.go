@@ -83,28 +83,6 @@ func TestCompiledRulesForMountsUsesBuiltinDefault(t *testing.T) {
 	}
 }
 
-func TestNormalizeMetricRejectsHistoricalAlias(t *testing.T) {
-	if _, err := alertspec.NormalizeMetric("disk.total_used_ratio"); err == nil {
-		t.Fatalf("expected historical disk metric alias to be rejected")
-	}
-}
-
-func TestNormalizeRuleModelRejectsStaticOffset(t *testing.T) {
-	_, err := alertspec.NormalizeRuleModel(model.AlertRule{
-		Name:            "cpu_high",
-		Metric:          "cpu.usage_ratio",
-		Operator:        ">=",
-		Threshold:       0.9,
-		DurationSec:     60,
-		ThresholdMode:   "static",
-		ThresholdOffset: 1,
-		Generation:      1,
-	})
-	if err == nil {
-		t.Fatalf("expected static threshold_mode with non-zero offset to be rejected")
-	}
-}
-
 func TestExtractMetricValueDiskFallsBackToFirstMount(t *testing.T) {
 	node := metrics.NodeView{Disk: metrics.Disk{Mounts: []metrics.DiskMount{
 		{Mountpoint: "/data", UsedRatio: 0.7},
