@@ -48,7 +48,7 @@
 ### Runtime configuration
 
 - `auth.jwt_signing_key` must be at least 32 bytes and must not contain surrounding whitespace. Changing the key invalidates existing login sessions.
-- Default Redis mode requires a non-empty `redis.addr`, a server version of at least `8.2.3`, and permission for the configured account to run `PING` and `INFO server`. Dash refuses to start otherwise; `--no-redis` skips these Redis requirements.
+- Default Redis mode requires a non-empty `redis.addr`, a server version of at least `6.2.0`, and permission for the configured account to run `PING` and `INFO server`. Redis `8.2.3+` is recommended; older supported versions produce a warning without blocking startup. Dash refuses to start when the required conditions are not met; `--no-redis` skips these Redis requirements.
 - Redis continues to store admin sessions by default and also stores the disposable frontend cache; only `--no-redis` keeps sessions and the frontend cache in process memory. Alert evaluation runtime and MTProto login handshakes move to process-local state and reset on restart; open firing alerts are restored from PostgreSQL, while pending and cooldown phases are not restored.
 - Frontend cache keys move to the project-namespaced `ithiltir:dash:front:v2:*` layout. Existing v1, unnamespaced v2, alert-runtime, and MTProto-login keys are ignored without dual-write and are not deleted automatically at startup. `auth:jwt:*` remains the session compatibility prefix, so upgrades do not proactively clear existing login credentials.
 
@@ -88,7 +88,7 @@
 
 - `install_dash_linux.sh` is supported only as a one-time first installation on a fresh host. It is not a reinstall or update command; all later version changes use the packaged `dash update` executor. Existing `update_dash_linux.sh` commands remain compatible through the wrapper.
 - Before configuration is collected, manual dependency mode requires PostgreSQL 16+ and a TimescaleDB installation built for that PostgreSQL major version. It does not require a local `redis-server` binary.
-- After Redis configuration is collected, the installer validates the configured endpoint with the packaged Dash binary, including connectivity, `PING`, `INFO server`, and the Redis 8.2.3+ version floor. Remote-only Redis deployments are supported.
+- After Redis configuration is collected, the installer validates the configured endpoint with the packaged Dash binary, including connectivity, `PING`, `INFO server`, and the supported Redis 6.2.0+ version floor. Installer-managed Redis provisioning still targets the recommended 8.2.3+ baseline. Remote-only Redis deployments are supported.
 
 ### Node installer redirects
 

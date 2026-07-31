@@ -2247,7 +2247,7 @@ main() {
 		if check_redis_endpoint "$redis_addr" "$redis_password"; then
 			break
 		fi
-		say_err "无法使用该 Redis 地址，请确认服务可达、允许 PING/INFO server，且版本不低于 8.2.3。" "Cannot use this Redis endpoint. Ensure it is reachable, permits PING and INFO server, and runs Redis 8.2.3 or newer."
+		say_err "无法使用该 Redis 地址，请确认服务可达、允许 PING/INFO server，且版本不低于 6.2.0。" "Cannot use this Redis endpoint. Ensure it is reachable, permits PING and INFO server, and runs Redis 6.2.0 or newer."
 	done
 	offline_threshold="$(prompt_string "$(txt "请输入离线判定阈值（app.node_offline_threshold，例如：14s/30s/1m）" "app.node_offline_threshold (e.g. 14s/30s/1m)")" "14s")"
 	language="$(prompt_language)"

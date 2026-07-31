@@ -48,7 +48,7 @@
 ### 运行配置
 
 - `auth.jwt_signing_key` 至少为 32 字节，且不得包含首尾空白。修改该密钥会使现有登录会话失效。
-- 默认 Redis 模式要求 `redis.addr` 非空、实际服务端版本不低于 `8.2.3`，且配置账号允许执行 `PING` 和 `INFO server`。不满足条件时 Dash 停止启动；`--no-redis` 跳过这些 Redis 要求。
+- 默认 Redis 模式要求 `redis.addr` 非空、实际服务端版本不低于 `6.2.0`，且配置账号允许执行 `PING` 和 `INFO server`。推荐 Redis `8.2.3+`；低于推荐版本但仍受支持时只记录警告，不阻断启动。不满足必要条件时 Dash 停止启动；`--no-redis` 跳过这些 Redis 要求。
 - Redis 默认继续保存管理员会话，并保存可丢弃的前台缓存；`--no-redis` 才把会话和前台缓存放入进程内存。告警评估运行态和 MTProto 登录握手改为进程内状态，重启后重置；开放中的 firing 告警会从 PostgreSQL 恢复，pending 和 cooldown 不会恢复。
 - 前台缓存迁移到带项目 namespace 的 `ithiltir:dash:front:v2:*` key 布局。已有 v1、未加 namespace 的 v2、告警运行态和 MTProto 登录态 key 会被忽略、不做双写，也不会在启动时自动删除。`auth:jwt:*` 作为会话兼容前缀继续使用，升级不会主动清除现有登录凭证。
 
@@ -88,7 +88,7 @@
 
 - `install_dash_linux.sh` 只支持在全新主机上执行一次首次安装，不是重装或更新命令；后续所有版本变更都使用打包的 `dash update` 执行器。原有 `update_dash_linux.sh` 命令通过兼容包装继续可用。
 - 手动依赖模式在收集配置前，要求本机已安装 PostgreSQL 16+，以及与其 PostgreSQL 主版本匹配的 TimescaleDB；不要求本机存在 `redis-server` 二进制。
-- 收集 Redis 配置后，安装器会使用包内 Dash 二进制校验实际配置的端点，包括连通性、`PING`、`INFO server` 和 Redis 8.2.3+ 版本下限；支持仅使用远程 Redis。
+- 收集 Redis 配置后，安装器会使用包内 Dash 二进制校验实际配置的端点，包括连通性、`PING`、`INFO server` 和 Redis 6.2.0+ 支持下限；安装器自行部署 Redis 时仍以推荐的 8.2.3+ 为目标。支持仅使用远程 Redis。
 
 ### 节点安装器重定向
 

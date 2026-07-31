@@ -13,7 +13,10 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-const redisMinVersion = "8.2.3"
+const (
+	redisMinVersion         = "6.2.0"
+	RedisRecommendedVersion = "8.2.3"
+)
 
 // NewRedisClient builds a Redis client with sensible defaults.
 func NewRedisClient(cfg config.RedisConfig) (*redis.Client, error) {

@@ -144,7 +144,18 @@ func main() {
 				slog.String("addr", cfg.Redis.Addr),
 				slog.Int("db", cfg.Redis.DB))
 		}
-		logger.Info("redis connected", nil, slog.String("version", redisVersion))
+		recommended, compareErr := version.Compare(redisVersion, infra.RedisRecommendedVersion)
+		if compareErr != nil {
+			infra.Fatal("compare redis version failed", compareErr, slog.String("version", redisVersion))
+		}
+		if recommended < 0 {
+			logger.Warn("redis connected below recommended version",
+				nil,
+				slog.String("version", redisVersion),
+				slog.String("recommended", infra.RedisRecommendedVersion))
+		} else {
+			logger.Info("redis connected", nil, slog.String("version", redisVersion))
+		}
 		defer redisClient.Close()
 	} else {
 		logger.Warn("redis disabled by startup flag", nil)
