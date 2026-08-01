@@ -5,6 +5,7 @@ import { useApiErrorHandler } from '@hooks/useApiErrorHandler';
 import { useConfirmDialog } from '@hooks/useConfirmDialog';
 import { useI18n } from '@i18n';
 import * as adminApi from '@lib/adminApi';
+import { clearDashUpdateReload, readDashUpdateReload } from '@lib/dashUpdateSession';
 import { fetchAppVersion } from '@lib/versionApi';
 import { pushTopBanner } from '@runtime/topBannerRuntime';
 import { isCanceledRequestError } from '@utils/errors';
@@ -78,6 +79,7 @@ export const useDashUpdate = ({ enabled, channel, onChannelChange }: Options) =>
   const [startingUpdate, setStartingUpdate] = React.useState<adminApi.DashUpdateAction | null>(
     null,
   );
+  const [updatedVersion, setUpdatedVersion] = React.useState('');
   const versionGate = React.useMemo(() => createSeqGate(), []);
   const statusGate = React.useMemo(() => createSeqGate(), []);
   const checkRequestRef = React.useRef<AbortController | null>(null);
@@ -219,6 +221,17 @@ export const useDashUpdate = ({ enabled, channel, onChannelChange }: Options) =>
 
     const current = status.value;
     if (!current) return;
+    const reload = readDashUpdateReload();
+    if (reload) {
+      if (statusValue === 'failed') {
+        clearDashUpdateReload();
+      } else if (statusValue === 'completed') {
+        clearDashUpdateReload();
+        if (!current.target_version || current.target_version === reload.version) {
+          setUpdatedVersion(reload.version);
+        }
+      }
+    }
     const key = updateStatusKey(current);
     if (previous !== 'running' || announcedStatusRef.current === key) return;
 
@@ -464,10 +477,12 @@ export const useDashUpdate = ({ enabled, channel, onChannelChange }: Options) =>
     loadingNotifyTargets: notify.phase === 'loading',
     notifyTargetsFailed: notify.phase === 'failed',
     startingUpdate,
+    updatedVersion,
     confirmDialogProps,
     checkUpdate,
     togglePrerelease,
     runUpdate,
+    dismissUpdateSuccess: () => setUpdatedVersion(''),
     dismissCheckError: () => setCheck((current) => ({ ...current, error: '' })),
   };
 };

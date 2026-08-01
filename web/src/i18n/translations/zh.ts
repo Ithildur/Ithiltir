@@ -219,6 +219,8 @@ export const zh = {
   admin_dash_update_run_reinstall: '重新安装',
   admin_dash_update_starting: '启动中...',
   admin_dash_update_started: '已开始更新，Dash 可能会短暂断开。',
+  admin_dash_update_success_title: '更新成功',
+  admin_dash_update_success_message: 'Dash 已成功更新至 {{version}}，当前页面已重新加载。',
   admin_dash_update_run_failed: '启动 Dash 更新失败。',
   admin_dash_update_run_confirm_title: '执行 Dash 更新？',
   admin_dash_update_reinstall_confirm_title: '重新安装 Dash？',

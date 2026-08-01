@@ -1,4 +1,5 @@
 import React from 'react';
+import { rememberDashUpdateReload } from '@lib/dashUpdateSession';
 import { fetchAppVersion } from '@lib/versionApi';
 
 const pollIntervalMs = 60_000;
@@ -20,6 +21,7 @@ export const DashVersionRuntime: React.FC = () => {
       }
       if (version === loadedVersionRef.current) return false;
 
+      rememberDashUpdateReload(version);
       window.location.reload();
       return true;
     } catch {

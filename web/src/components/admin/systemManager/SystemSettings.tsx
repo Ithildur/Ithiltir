@@ -5,6 +5,7 @@ import RotateCcw from 'lucide-react/dist/esm/icons/rotate-ccw';
 import Save from 'lucide-react/dist/esm/icons/save';
 import Settings2 from 'lucide-react/dist/esm/icons/settings-2';
 import Upload from 'lucide-react/dist/esm/icons/upload';
+import { useSearchParams } from 'react-router';
 import { AdminSectionTabs } from '@components/admin/AdminSectionTabs';
 import { BrandImage } from '@components/BrandLogo';
 import Button from '@components/ui/Button';
@@ -65,6 +66,17 @@ const tabs = [
 
 type SystemManagerTab = (typeof tabs)[number]['key'];
 
+const systemTabFromParams = (params: URLSearchParams): SystemManagerTab => {
+  switch (params.get('system_tab')) {
+    case 'themes':
+      return 'themes';
+    case 'dash_update':
+      return 'dashUpdate';
+    default:
+      return 'settings';
+  }
+};
+
 const readFileAsDataURL = (file: File, mediaType: string): Promise<string> =>
   new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -91,6 +103,7 @@ const logoMediaType = (file: File): string | null => {
 
 const SystemSettings: React.FC = () => {
   const { t } = useI18n();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { dialogProps: confirmDialogProps, run: confirmAction } = useConfirmDialog();
   const apiError = useApiErrorHandler();
   const [settings, setSettings] = React.useState<SystemSettingsData | null>(null);
@@ -99,11 +112,27 @@ const SystemSettings: React.FC = () => {
   const [savingHistoryMode, setSavingHistoryMode] = React.useState(false);
   const [savingDashUpdateChannel, setSavingDashUpdateChannel] = React.useState(false);
   const [savingDashUpdateMode, setSavingDashUpdateMode] = React.useState(false);
-  const [activeTab, setActiveTab] = React.useState<SystemManagerTab>('settings');
   const [brandDraft, setBrandDraft] = React.useState<SiteBrand | null>(null);
   const brandDirty = React.useRef(false);
   const loadGate = React.useMemo(() => createSeqGate(), []);
   const logoInputRef = React.useRef<HTMLInputElement | null>(null);
+  const activeTab = systemTabFromParams(searchParams);
+
+  const changeTab = React.useCallback(
+    (tab: SystemManagerTab) => {
+      setSearchParams((current) => {
+        const next = new URLSearchParams(current);
+        next.set('tab', 'system');
+        if (tab === 'settings') {
+          next.delete('system_tab');
+        } else {
+          next.set('system_tab', tab === 'dashUpdate' ? 'dash_update' : tab);
+        }
+        return next;
+      });
+    },
+    [setSearchParams],
+  );
 
   const loadSettings = React.useCallback(
     async (signal: AbortSignal) => {
@@ -283,7 +312,7 @@ const SystemSettings: React.FC = () => {
 
       <div className="flex flex-col justify-between gap-3 md:flex-row md:gap-4">
         <div className="flex w-full md:w-auto md:flex-1">
-          <AdminSectionTabs tabs={tabs} activeKey={activeTab} onChange={setActiveTab} />
+          <AdminSectionTabs tabs={tabs} activeKey={activeTab} onChange={changeTab} />
         </div>
       </div>
 

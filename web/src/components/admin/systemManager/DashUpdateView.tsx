@@ -1,4 +1,5 @@
 import React from 'react';
+import CheckCircle2 from 'lucide-react/dist/esm/icons/check-circle-2';
 import ExternalLink from 'lucide-react/dist/esm/icons/external-link';
 import LoaderCircle from 'lucide-react/dist/esm/icons/loader-circle';
 import RefreshCw from 'lucide-react/dist/esm/icons/refresh-cw';
@@ -65,23 +66,25 @@ const modeButtonClass = (active: boolean) =>
       : 'border-(--theme-border-subtle) bg-(--theme-bg-default) text-(--theme-fg-default) hover:bg-(--theme-surface-row-hover) dark:border-(--theme-border-default) dark:hover:bg-(--theme-canvas-subtle)'
   } disabled:cursor-not-allowed disabled:opacity-50`;
 
-const CheckFailedDialog: React.FC<{
+const NoticeDialog: React.FC<{
+  isOpen: boolean;
   message: string;
   title: string;
   closeLabel: string;
   onClose: () => void;
-}> = ({ message, title, closeLabel, onClose }) => {
+  icon?: React.ReactNode;
+}> = ({ isOpen, message, title, closeLabel, onClose, icon }) => {
   const titleId = React.useId();
 
   return (
     <Modal
-      isOpen={Boolean(message)}
+      isOpen={isOpen}
       onClose={onClose}
       maxWidth="max-w-md"
       zIndex={60}
       ariaLabelledby={titleId}
     >
-      <ModalHeader title={title} onClose={onClose} id={titleId} className="py-3" />
+      <ModalHeader title={title} onClose={onClose} icon={icon} id={titleId} className="py-3" />
       <ModalBody className="text-sm/relaxed text-(--theme-fg-muted) dark:text-(--theme-fg-neutral) dark:text-(--theme-fg-control-hover)">
         {message}
       </ModalBody>
@@ -152,10 +155,12 @@ export const DashUpdateView: React.FC<Props> = ({
     loadingNotifyTargets,
     notifyTargetsFailed,
     startingUpdate,
+    updatedVersion,
     confirmDialogProps,
     checkUpdate,
     togglePrerelease,
     runUpdate,
+    dismissUpdateSuccess,
     dismissCheckError,
   } = controller;
   const channel = settings?.dash_update_channel ?? 'release';
@@ -260,11 +265,20 @@ export const DashUpdateView: React.FC<Props> = ({
   return (
     <div className="space-y-4">
       <ConfirmDialog {...confirmDialogProps} />
-      <CheckFailedDialog
+      <NoticeDialog
+        isOpen={Boolean(checkError)}
         message={checkError}
         title={t('admin_dash_update_check_failed_title')}
         closeLabel={t('common_close')}
         onClose={dismissCheckError}
+      />
+      <NoticeDialog
+        isOpen={Boolean(updatedVersion)}
+        message={t('admin_dash_update_success_message', { version: updatedVersion })}
+        title={t('admin_dash_update_success_title')}
+        closeLabel={t('common_close')}
+        onClose={dismissUpdateSuccess}
+        icon={<CheckCircle2 className="size-5 text-(--theme-fg-success)" aria-hidden="true" />}
       />
 
       <section className="overflow-hidden rounded-lg border border-(--theme-border-subtle) bg-(--theme-bg-default) dark:border-(--theme-border-default)">

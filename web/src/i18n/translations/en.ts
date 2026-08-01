@@ -224,6 +224,9 @@ export const en = {
   admin_dash_update_run_reinstall: 'Reinstall',
   admin_dash_update_starting: 'Starting...',
   admin_dash_update_started: 'Update started. Dash may disconnect briefly.',
+  admin_dash_update_success_title: 'Update successful',
+  admin_dash_update_success_message:
+    'Dash was successfully updated to {{version}}. This page has been reloaded.',
   admin_dash_update_run_failed: 'Failed to start Dash update.',
   admin_dash_update_run_confirm_title: 'Run Dash update?',
   admin_dash_update_reinstall_confirm_title: 'Reinstall Dash?',

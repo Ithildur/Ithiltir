@@ -86,6 +86,9 @@ const AdminConsolePage: React.FC = () => {
           next.delete('alert_from');
           next.delete('alert_to');
         }
+        if (tab !== 'system') {
+          next.delete('system_tab');
+        }
         return next;
       });
     },
