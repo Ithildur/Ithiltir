@@ -20,8 +20,8 @@
 | 管理员密码                             | `POST /api/auth/login`                              |
 | refresh cookie + `X-CSRF-Token`        | `POST /api/auth/refresh`、`POST /api/auth/logout`   |
 | `Authorization: Bearer <access_token>` | 管理 API 和可选鉴权读取                             |
-| `X-Node-Secret`                        | Agent 上报、节点身份读取和 deploy 资产下载          |
-| `upgrade_token` query                  | 只给旧 Agent 自动升级使用的临时 deploy 资产下载授权 |
+| `X-Node-Secret`                        | Node 上报、节点身份读取和 deploy 资产下载           |
+| `upgrade_token` query                  | 只给旧 Node 自动升级使用的临时 deploy 资产下载授权  |
 
 Bearer 可选端点会把缺失、格式错误、过期、已撤销或其他非法 Bearer token 当作匿名请求处理。这是有意设计：它们是提供可选管理员视图的公开端点，不是带游客兜底的鉴权端点。Refresh cookie 使用 `SameSite=Strict`，refresh/logout 还必须提交匹配的 `X-CSRF-Token`。
 管理员密码通过 `monitor_dash_pwd` 提供，至少包含 8 个可见 ASCII 字符，且不得包含空白字符。
@@ -61,6 +61,9 @@ Bearer 可选端点会把缺失、格式错误、过期、已撤销或其他非�
 
 ## 认证会话
 
+- `POST /api/auth/login` 请求体必须包含 `password` 和 `persistence`；`persistence` 只允许 `session` 或 `persistent`。兼容字段 `username` 可以省略，Dash 的固定密码鉴权不会使用它。
+- 登录成功返回 `{ "access_token": "...", "expires_at": "<RFC3339>", "csrf_token": "..." }`，并写入 refresh/CSRF cookie。格式错误的登录 JSON 返回 `400 invalid_json`，非法 `persistence` 返回 `400 invalid_persistence`，凭据错误返回 `401 unauthorized`，登录限流返回 `429 rate_limited`。
+- `POST /api/auth/refresh` 使用 refresh cookie 和 `X-CSRF-Token`，轮换会话并返回与登录相同的响应字段。`POST /api/auth/logout` 使用相同鉴权，成功返回 `204` 并清除会话 cookie。
 - 默认 Redis 模式下，认证会话保存在 Redis 中，在过期或被撤销前可跨 Dash 重启和原地升级继续有效；使用 `--no-redis` 时，会话只存在于当前进程，并在 Dash 重启后失效。
 - `GET /api/auth/sessions/` 返回当前 Bearer token 用户的 `{ "sessions": [...] }`。每项包含 `id`、`expires_at`、`session_only` 和 `current`。
 - `DELETE /api/auth/sessions/current`、`DELETE /api/auth/sessions/` 和 `DELETE /api/auth/sessions/{sid}` 成功时返回 `204`。
@@ -68,7 +71,7 @@ Bearer 可选端点会把缺失、格式错误、过期、已撤销或其他非�
 ## 管理节点
 
 - `GET /api/admin/nodes/` 包含 `traffic_p95_enabled`、`traffic_cycle_mode`、`traffic_billing_start_day`、`traffic_billing_anchor_date`、`traffic_billing_timezone`、`traffic_direction_mode`、`tags` 和 `version`。`tags` 始终是字符串数组。
-- `version.version` 是 Agent 最后上报版本；缺失、非法或低于受支持节点版本下限时，`version.is_outdated` 为 true。上报的 Agent 版本支持自动更新协议时，`version.supports_auto_update` 为 true；平台支持和打包更新资产是否可用会在请求升级时继续校验。
+- `version.version` 是 Node 最后上报版本；缺失、非法或低于受支持节点版本下限时，`version.is_outdated` 为 true。上报的 Node 版本支持自动更新协议时，`version.supports_auto_update` 为 true；平台支持和打包更新资产是否可用会在请求升级时继续校验。
 - `PATCH /api/admin/nodes/{id}` 接受 `traffic_p95_enabled`、`tags` 和节点流量字段。非账期字段未提交时保持不变。节点账期字段是原子组：只要提交 `traffic_cycle_mode`、`traffic_billing_start_day`、`traffic_billing_anchor_date` 或 `traffic_billing_timezone` 中任意一个字段，就必须同时提交 `traffic_cycle_mode` 和该模式使用的全部字段，否则返回 `400 invalid_traffic_cycle_settings`。账期和统计方向变更立即生效；账期改变时，该节点受影响的月度派生数据会失效，并在后台从新旧当前账期较早的起点局部重算仍在保留期内的原始数据。局部重算期间只暂停该节点的 Lite 实时累计，不会回退全局进度或阻塞其他节点；受影响节点在追平前可能暂时没有当前账期统计或只显示部分覆盖。`calendar_month` 使用 `traffic_billing_timezone`；`clamp_to_month_end` 使用 `traffic_billing_start_day` 和 `traffic_billing_timezone`；`whmcs_compatible` 使用 `traffic_billing_anchor_date` 和 `traffic_billing_timezone`，`traffic_billing_start_day` 由锚点日期推导。兼容旧客户端的输入别名 `default` 仍可在不带账期字段时提交，但会保存为从 1 号开始的显式 `calendar_month`。`tags` 接受字符串数组；值会 trim，空值和重复值会被删除，`[]` 表示清空标签。响应中的 `traffic_cycle_mode` 只包含 `calendar_month`、`whmcs_compatible`、`clamp_to_month_end`；`traffic_direction_mode` 允许 `default`、`out`、`both`、`max`。
 - `PATCH /api/admin/nodes/{id}` 会 trim `secret`；字段必须包含 8–128 个 Unicode 字符，否则返回 `400 invalid_secret`。提交的 `secret` 已属于其他节点时返回 `409 duplicate_secret`。
 - 提交的节点 `name` 会 trim，必须包含 1 到 64 个 Unicode 字符且不得含控制字符；非法值返回 `400 invalid_name`。
@@ -80,7 +83,7 @@ Bearer 可选端点会把缺失、格式错误、过期、已撤销或其他非�
 - 每个节点都保存显式账期。新节点默认为 `calendar_month` 且 `traffic_billing_start_day=1`；非 `whmcs_compatible` 模式保存空 `traffic_billing_anchor_date`；空 `traffic_billing_timezone` 在读取时使用应用时区。
 - 节点统计方向规范化语义稳定：`default` 继承全局统计方向；`out`、`both`、`max` 覆盖该节点。
 - 非法节点流量字段返回 `400 invalid_traffic_cycle_mode`、`invalid_traffic_cycle_settings`、`invalid_traffic_billing_start_day`、`invalid_traffic_billing_anchor_date`、`invalid_traffic_billing_timezone` 或 `invalid_traffic_direction_mode`。
-- `POST /api/admin/nodes/{id}/upgrade` 成功返回 `204`；节点无法接收自动下发更新时返回 `409 node_upgrade_unsupported`；打包版本、平台或资产不可用时返回 `409`；Dash 无法生成旧 Agent 临时下载授权时返回 `503 node_upgrade_grant_error`。
+- `POST /api/admin/nodes/{id}/upgrade` 成功返回 `204`；节点无法接收自动下发更新时返回 `409 node_upgrade_unsupported`；打包版本、平台或资产不可用时返回 `409`；Dash 无法生成旧 Node 临时下载授权时返回 `503 node_upgrade_grant_error`。
 
 ## 管理分组
 
@@ -142,20 +145,20 @@ Bearer 可选端点会把缺失、格式错误、过期、已撤销或其他非�
 - 管理端控制器基于 Linux/systemd，通过 transient unit 启动打包 Dash 二进制中的 `dash update execute`；`update_dash_linux.sh` 只保留为手工兼容包装。Release 包必须使用格式 v1，包含匹配的 `release.env`、`bin/dash`、`dist/index.html`、`deploy` 下覆盖五个受支持平台/架构目标的全部七个 node/runner 资产、`configs/config.example.yaml` 和 Linux 安装/更新脚本，且这些必需文件不能为空、`Ithiltir-dash/` 下只能有普通文件和目录。`release.env` 以 SHA-256 绑定每个内置资产，候选 Dash 二进制必须同时报告 manifest 中的 Dash 版本和打包节点版本。压缩大小、解压大小和条目数都有硬限制。更新任务可能重启 Dash，调用方收到 `202` 后必须容忍短暂断连。迁移或服务启动需要恢复时，以 root 执行 `DASH_HOME/bin/dash update recover`。
 - `GET /api/admin/system/dash-update/release-notes?lang=zh|en` 从文档站返回 `{ "source_url": "...", "html": "..." }`；非法 `lang` 返回 `400 invalid_fields`；抓取失败返回 `502 release_notes_fetch_failed`。
 
-## Agent 更新
+## Node 更新
 
 - `POST /api/node/metrics` 成功响应包含 `update`。
 - 无待升级任务时，`update` 为 `null`。
 - 有待升级任务时，`update` 包含 `id`、`version`、`url`、`sha256` 和 `size`。
-- `url` 可能包含短期有效的 `upgrade_token`，让旧 Agent 不发送 `X-Node-Secret` 也能下载本次升级的精确资产。客户端必须按原样使用返回的 URL。
-- 待升级任务是易失状态，Agent 上报完全相同的目标版本或 SemVer 优先级更高的版本后清除。同一 SemVer 优先级但 build metadata 不同的版本视为不同节点二进制，仍可下发。
+- `url` 可能包含短期有效的 `upgrade_token`，让旧 Node 不发送 `X-Node-Secret` 也能下载本次升级的精确资产。客户端必须按原样使用返回的 URL。
+- 待升级任务是易失状态，Node 上报完全相同的目标版本或 SemVer 优先级更高的版本后清除。同一 SemVer 优先级但 build metadata 不同的版本视为不同节点二进制，仍可下发。
 
 ## 节点运行时指标字段
 
-- `POST /api/node/metrics` 接受可选的 `metrics.disk.smart`、`metrics.thermal` 和 `metrics.pressure`。旧 Agent 可以不带这些字段。
-- 持久化的字节数、容量、计数器和 uptime 必须是有符号 64 位范围内的非负 JSON 整数；进程数和连接数使用有符号 32 位范围；`/api/node/static` 的上报间隔使用有符号 32 位范围，CPU 拓扑计数使用有符号 16 位范围。普通正整数的 JSON 编码不变，因此现有 Agent 继续兼容。整数超出接收类型范围时返回 `400 invalid_request`；负数、非法比例或非法速率返回 `422 invalid_metrics` 或 `422 invalid_static_payload`。
+- `POST /api/node/metrics` 接受可选的 `metrics.disk.smart`、`metrics.thermal` 和 `metrics.pressure`。旧 Node 可以不带这些字段。
+- 持久化的字节数、容量、计数器和 uptime 必须是有符号 64 位范围内的非负 JSON 整数；进程数和连接数使用有符号 32 位范围；`/api/node/static` 的上报间隔使用有符号 32 位范围，CPU 拓扑计数使用有符号 16 位范围。普通正整数的 JSON 编码不变，因此现有 Node 继续兼容。整数超出接收类型范围时返回 `400 invalid_request`；负数、非法比例或非法速率返回 `422 invalid_metrics` 或 `422 invalid_static_payload`。
 - 写入 PostgreSQL 定长标识列的文本会在持久化前校验：Node 版本 64 字符，hostname 和磁盘名称 255，磁盘 ref 320，磁盘 kind/role 与 RAID health 16，网卡名称 64，文件系统类型及逻辑盘 health/level 32。静态 OS/platform/arch 限 32 字符，platform/kernel 版本限 255。路径、挂载点和硬件描述使用不定长 TEXT。超长值返回 `422 invalid_metrics` 或 `422 invalid_static_payload`，不会静默截断。
-- 并发上报按服务端接收时间决定当前投影。因执行顺序倒置而较晚完成的旧接收样本仍写入指标历史，但不会覆盖当前指标、前台热点快照或触发新的告警评估；请求中的 `timestamp` 只作为 Agent 上报时间保存，不决定当前投影顺序。
+- 并发上报按服务端接收时间决定当前投影。因执行顺序倒置而较晚完成的旧接收样本仍写入指标历史，但不会覆盖当前指标、前台热点快照或触发新的告警评估；请求中的 `timestamp` 只作为 Node 上报时间保存，不决定当前投影顺序。
 - `metrics.disk.smart` 是磁盘 SMART 运行时状态，进入独立热点缓存，不写入 PostgreSQL 指标快照。确认是物理盘的 SMART 温度可归约成按设备区分的 `disk.temp_c` 历史值。`metrics.thermal` 保存硬件温度传感器，位置在 metrics 根级；thermal 会写入 PostgreSQL 指标快照，但在前台缓存中作为独立字段缓存保存。
 - `metrics.pressure` 是 Linux PSI（Pressure Stall Information）。它可以包含 `cpu`、`memory`、`io`，每项可带 `some` 和 `full` 数值组。每个组包含 `avg10`、`avg60`、`avg300` 百分比和累计 `total` 微秒。Dashboard 会把这些值保存成固定数值时序列；采集状态/原因字符串不持久化。缺失的组保持 `NULL`，表示不可用，不会当成 0 压力。
 - `disk.smart.devices` 和 `thermal.sensors` 是数组。字段存在但结果为空时使用 `[]`，不是 `null`。
@@ -197,14 +200,15 @@ Bearer 可选端点会把缺失、格式错误、过期、已撤销或其他非�
 | `/theme/active.css`           | 实际解析出的主题 CSS；配置主题缺失或损坏时返回用于前端默认皮肤的空覆盖 CSS |
 | `/theme/active.json`          | 实际解析出的主题 manifest；默认主题及回退到默认主题时返回 404              |
 | `/theme/preview/{id}.png`     | 主题预览图                                                                 |
-| `/deploy/linux/install.sh`    | Linux Agent 安装脚本                                                       |
-| `/deploy/macos/install.sh`    | macOS Agent 安装脚本                                                       |
-| `/deploy/windows/install.ps1` | Windows Agent 安装脚本                                                     |
+| `/theme-bootstrap.js`         | 启动主题引导脚本；固定使用 `Cache-Control: no-store`                       |
+| `/deploy/linux/install.sh`    | Linux Node 安装脚本                                                        |
+| `/deploy/macos/install.sh`    | macOS Node 安装脚本                                                        |
+| `/deploy/windows/install.ps1` | Windows Node 安装脚本                                                      |
 | `/deploy/*`                   | 打包携带的节点发布资产；需要 `X-Node-Secret` 或临时 `upgrade_token`        |
 | `/`                           | SPA                                                                        |
 
 ## 契约规则
 
 - 未知或格式错误的值在边界直接拒绝，不会静默归一化成另一个合法请求。
-- JSON 请求超过路由 body 上限时返回 `413 body_too_large`；JSON 格式错误返回 `400 invalid_request`。
+- JSON 请求超过路由 body 上限时返回 `413 body_too_large`；JSON 格式错误通常返回 `400 invalid_request`，`POST /api/auth/login` 使用鉴权契约的 `400 invalid_json`。
 - 核心持久化存储和必需依赖失败会明确返回错误。文档声明的可选边界保留降级语义：Bearer 可选读取转为匿名视图，当前主题不可用时使用前端默认皮肤并暴露 `missing` 或 `broken` 状态。

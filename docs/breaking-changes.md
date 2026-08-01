@@ -2,7 +2,11 @@
 
 ## Unreleased
 
-### Runtime configuration
+No known breaking changes.
+
+## 0.3.0 (2026-08-01)
+
+### Base runtime configuration
 
 - `monitor_dash_pwd` must contain at least 8 visible ASCII characters without whitespace. Existing installations with a shorter admin password must replace it before starting the upgraded Dash binary.
 - `app.public_url` now accepts only IP literals or ASCII DNS names with ports from 1 through 65535. Internationalized domains must be configured in IDNA/punycode form.
@@ -45,7 +49,7 @@
 - Thresholds and threshold offsets must be finite, duration is limited to 0, 60, or 300 seconds, and cooldown is limited to 525600 minutes.
 - Stored rules that violate the current constraints are marked invalid. Startup reconciliation closes their open alert events with the `rule_invalid` reason.
 
-### Runtime configuration
+### Auth, Redis, and runtime state
 
 - `auth.jwt_signing_key` must be at least 32 bytes and must not contain surrounding whitespace. Changing the key invalidates existing login sessions.
 - Default Redis mode requires a non-empty `redis.addr`, a server version of at least `6.2.0`, and permission for the configured account to run `PING` and `INFO server`. Redis `8.2.3+` is recommended; older supported versions produce a warning without blocking startup. Dash refuses to start when the required conditions are not met; `--no-redis` skips these Redis requirements.

@@ -2,11 +2,11 @@
 
 Ithiltir Dash is a single-instance, self-hosted server monitoring dashboard. One Dash process serves the web UI, HTTP API, theme assets, install scripts, and node binary download paths.
 
-**Resources:** [中文](README_CN.md) · [Documentation](https://www.ithiltir.dev/) · [Architecture](docs/architecture.md) · [API](docs/api.md) · [Breaking changes](docs/breaking-changes.md) · [Node agent](https://github.com/Ithildur/Ithiltir-node)
+**Resources:** [中文](README_CN.md) · [Documentation](https://www.ithiltir.dev/) · [Architecture](docs/architecture.md) · [API](docs/api.md) · [Breaking changes](docs/breaking-changes.md) · [Ithiltir-node](https://github.com/Ithildur/Ithiltir-node)
 
 ## Screenshot
 
-![Ithiltir Control dashboard](screenshot/en.jpg)
+![Ithiltir Dash dashboard](screenshot/en.jpg)
 
 ## Scope
 
@@ -17,15 +17,15 @@ Ithiltir Dash is a single-instance, self-hosted server monitoring dashboard. One
 - SMART status, critical warnings, SMART temperature, and thermal sensor runtime fields
 - Traffic statistics, monthly cycles, and 95th percentile billing data
 - Node, group, alert, theme, and system settings management
-- Agent metrics, static host data, and bundled update manifests
-- Built-in Linux, macOS, and Windows agent install scripts
+- Node metrics, static host data, and bundled update manifests
+- Built-in Linux, macOS, and Windows Node install scripts
 - One process for the SPA, API, admin console, and deployment assets
 
 ## Requirements
 
 - PostgreSQL 16+ with TimescaleDB built for the same PostgreSQL major version
 - Redis persists admin sessions by default and stores the disposable frontend cache; `--no-redis` keeps both in process memory. Alert runtime and MTProto login handshakes always stay in memory and reset on restart
-- Go 1.26+ to run from source or build packages
+- Go 1.26.5+ to run from source or build packages
 - Bun 1.3.11 to build the frontend
 
 ## Quick Start
@@ -51,10 +51,14 @@ Minimum config fields:
 
 - `app.listen`
 - `app.public_url`
+- `database.driver`
+- `database.host`
+- `database.port`
 - `database.user`
 - `database.name`
-- `redis.addr`
 - `auth.jwt_signing_key`
+
+Redis mode additionally requires `redis.addr`; `--no-redis` does not load or validate Redis configuration.
 
 The admin login password is read only from the `monitor_dash_pwd` environment variable. It must contain at least 8 visible ASCII characters without whitespace.
 `auth.jwt_signing_key` must be at least 32 bytes and must not contain surrounding whitespace. The Linux installer generates a 32-byte random alphanumeric key.
@@ -83,7 +87,7 @@ Config lookup order:
 - `install_dash_linux.sh` uses signed PostgreSQL/TimescaleDB repositories and first tries the system package manager for Redis. The installer provisions Redis `8.2.3+` as the recommended baseline; if the packaged Redis is unavailable or older, it can build or upgrade Redis from source (default `8.2.5`). Before replacing an existing Redis configuration or service, or stopping a listener on port 6379, it asks for explicit confirmation with a default of yes and backs up replaced files. Before cutover, the packaged Dash binary validates the configured `redis.addr` and optional `redis.password` with `PING`, `INFO server`, and the supported `6.2.0+` version floor; it does not infer remote service health from a local `redis-server` executable. Default startup repeats the same endpoint validation and logs a warning below the recommended `8.2.3`. `--no-redis` skips Redis connection and version checks.
 - Node install script messages follow `app.language`.
 - The Dash Linux installer registers a service only when systemd is actually running. It requires `pgrep` so cutover can stop an existing process launched manually from the installed binary. Non-systemd hosts must explicitly use `--service-manager=none`; this installs files and a manual runner without claiming that a service was started or enabled. Its supported lifecycle is one initial run on a fresh host: it is not a reinstall, repair, rollback, or version-update entrypoint, and it is never run concurrently with the updater. It installs only the package content beside `install_dash_linux.sh`, validates the packaged `dash` binary, and does not select an online release. After installation, every version change is executed by `/opt/Ithiltir-dash/bin/dash update`; `update_dash_linux.sh` is only a compatibility wrapper. Managed packages are installed under `/opt/Ithiltir-dash/releases`; one atomic `current` symlink selects the active package, while legacy paths such as `/opt/Ithiltir-dash/bin/dash` remain compatibility aliases and mutable `configs`, `runtime`, `logs`, `themes`, and `install_id` stay outside release directories. Installer backups and recovery paths only contain failure within that one initial run; they do not define a supported rerun or downgrade. The updater holds one root-owned cross-process lock across installed-state validation and cutover. Failure before database migration starts restores the pre-cutover state; after migration starts, the old binary is never restored. A persistent transaction and systemd start guard keep an interrupted migration stopped until `dash update recover` completes it forward. Package staging uses a sibling directory beside `/opt/Ithiltir-dash`, and initial-install cutover requires GNU coreutils `mv`. Alpine Dash hosts must also preinstall and start PostgreSQL 16+, TimescaleDB built for that PostgreSQL major version, and Redis 6.2.0+; Redis 8.2.3+ remains recommended.
-- The Linux node installer officially supports systemd and Alpine/OpenRC; other OpenRC distributions are best effort. Alpine must have `bash`, `ca-certificates`, `curl`, and `coreutils` available before running the Bash installer. This installer always replaces its managed node release, report configuration, service definition, and collectors; agent version upgrades are owned by the separate node self-update path. It stages the downloaded binary under `/var/lib/ithiltir-node/releases` and executes `--version` before stopping the installed runtime, then force-replaces the target release and atomically switches `current`. The runtime user owns the data/release tree so the unprivileged self-updater can create and switch releases. Downloads follow at most five redirects to the original host; same-scheme hops keep the effective port and only HTTP-to-HTTPS upgrades may change scheme. systemd uses service/timer units for SMART, connection-count, and detected LVM thin-pool collectors. OpenRC uses `supervise-daemon` for the node process and BusyBox `crond` as a temporary scheduler for SMART every five minutes and LVM every minute. The one-second root connection helper is not degraded to minute-level cron under OpenRC; the node uses its built-in connection counting there, which may miss container connections.
+- The Linux node installer officially supports systemd and Alpine/OpenRC; other OpenRC distributions are best effort. Alpine must have `bash`, `ca-certificates`, `curl`, and `coreutils` available before running the Bash installer. This installer always replaces its managed node release, report configuration, service definition, and collectors; Node version upgrades are owned by the separate node self-update path. It stages the downloaded binary under `/var/lib/ithiltir-node/releases` and executes `--version` before stopping the installed runtime, then force-replaces the target release and atomically switches `current`. The runtime user owns the data/release tree so the unprivileged self-updater can create and switch releases. Downloads follow at most five redirects to the original host; same-scheme hops keep the effective port and only HTTP-to-HTTPS upgrades may change scheme. systemd uses service/timer units for SMART, connection-count, and detected LVM thin-pool collectors. OpenRC uses `supervise-daemon` for the Node process and BusyBox `crond` as a temporary scheduler for SMART every five minutes and LVM every minute. The one-second root connection helper is not degraded to minute-level cron under OpenRC; the Node uses its built-in connection counting there, which may miss container connections.
 - On systemd, Linux node installation compiles a small root-side connections helper when `cc`, `gcc`, or `clang` is available. This helper is required for full host/container network-namespace TCP/UDP counts because the node service runs with low privileges. Install a C compiler with the system package manager and rerun the installer to enable it.
 - Recommended minimum: `1 vCPU / 2 GB RAM / 40 GB SSD/NVMe`
 - Setups below `4 GB RAM` should enable `SWAP`
@@ -132,7 +136,9 @@ Build a Linux package:
 bash scripts/package.sh --version 1.2.3-alpha.1 --node-version 1.2.3-alpha.1 -o release -t linux/amd64 --tar-gz
 ```
 
-Dash server release packages currently target Linux amd64 and Linux arm64. macOS and Windows deploy assets are agent assets.
+Dash server release packages currently target Linux amd64 and Linux arm64. macOS and Windows deploy assets are Node assets.
+
+The packaging scripts include only `configs/config.example.yaml`; they do not package `config.local.yaml`, `configs/config.local.yaml`, or other local configuration.
 
 PowerShell:
 

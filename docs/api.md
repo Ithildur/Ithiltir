@@ -20,8 +20,8 @@ This document defines the current HTTP contract.
 | admin password                         | `POST /api/auth/login`                                                      |
 | refresh cookie + `X-CSRF-Token`        | `POST /api/auth/refresh`, `POST /api/auth/logout`                           |
 | `Authorization: Bearer <access_token>` | admin APIs and optional authenticated reads                                 |
-| `X-Node-Secret`                        | agent pushes, node identity reads, and deploy asset downloads               |
-| `upgrade_token` query                  | temporary deploy asset download grant issued only for legacy agent upgrades |
+| `X-Node-Secret`                        | Node pushes, node identity reads, and deploy asset downloads                 |
+| `upgrade_token` query                  | temporary deploy asset download grant issued only for legacy Node upgrades   |
 
 Optional bearer endpoints treat a missing, malformed, expired, revoked, or otherwise invalid bearer token as an anonymous request. This is intentional: these are public endpoints with an optional authenticated view, not authenticated endpoints with a guest fallback. Refresh cookies use `SameSite=Strict`, and refresh/logout require the matching `X-CSRF-Token`.
 The admin password is supplied through `monitor_dash_pwd` and must contain at least 8 visible ASCII characters without whitespace.
@@ -61,6 +61,9 @@ The admin password is supplied through `monitor_dash_pwd` and must contain at le
 
 ## Auth Sessions
 
+- `POST /api/auth/login` request bodies must include `password` and `persistence`; `persistence` accepts only `session` or `persistent`. The compatibility field `username` may be omitted and is unused by Dash's fixed-password authenticator.
+- Successful login returns `{ "access_token": "...", "expires_at": "<RFC3339>", "csrf_token": "..." }` and sets refresh/CSRF cookies. Malformed login JSON returns `400 invalid_json`, invalid `persistence` returns `400 invalid_persistence`, invalid credentials return `401 unauthorized`, and login rate limiting returns `429 rate_limited`.
+- `POST /api/auth/refresh` uses the refresh cookie and `X-CSRF-Token`, rotates the session, and returns the same response fields as login. `POST /api/auth/logout` uses the same authentication and returns `204` after clearing the session cookies.
 - In the default Redis mode, authentication sessions are stored in Redis and remain valid across Dash restarts and in-place upgrades until they expire or are revoked. With `--no-redis`, sessions are process-local and are invalidated whenever Dash restarts.
 - `GET /api/auth/sessions/` returns `{ "sessions": [...] }` for the bearer token user. Each item includes `id`, `expires_at`, `session_only`, and `current`.
 - `DELETE /api/auth/sessions/current`, `DELETE /api/auth/sessions/`, and `DELETE /api/auth/sessions/{sid}` return `204` on success.
@@ -68,7 +71,7 @@ The admin password is supplied through `monitor_dash_pwd` and must contain at le
 ## Admin Nodes
 
 - `GET /api/admin/nodes/` includes `traffic_p95_enabled`, `traffic_cycle_mode`, `traffic_billing_start_day`, `traffic_billing_anchor_date`, `traffic_billing_timezone`, `traffic_direction_mode`, `tags`, and `version`. `tags` is always a string array.
-- `version.version` is the last reported agent version. `version.is_outdated` is true when it is missing, invalid, or below the supported node version floor. `version.supports_auto_update` is true when the reported agent version supports the automatic update protocol; platform support and bundled update asset availability are still checked when an upgrade is requested.
+- `version.version` is the last reported Node version. `version.is_outdated` is true when it is missing, invalid, or below the supported node version floor. `version.supports_auto_update` is true when the reported Node version supports the automatic update protocol; platform support and bundled update asset availability are still checked when an upgrade is requested.
 - `PATCH /api/admin/nodes/{id}` accepts `traffic_p95_enabled`, `tags`, and node traffic fields. Omitted non-cycle fields are unchanged. Node cycle fields are atomic: if any of `traffic_cycle_mode`, `traffic_billing_start_day`, `traffic_billing_anchor_date`, or `traffic_billing_timezone` is submitted, the request must include `traffic_cycle_mode` and every field used by that mode, otherwise it returns `400 invalid_traffic_cycle_settings`. Cycle and direction changes take effect immediately. A cycle change invalidates affected monthly derived rows for that node and queues a node-local replay of retained raw data from the earlier start of the old and new active cycles. While that replay catches up, only the affected node is excluded from live Lite accumulation; the global progress and unrelated nodes continue, and the affected node may temporarily have no current-cycle statistic or only partial coverage. `calendar_month` uses `traffic_billing_timezone`; `clamp_to_month_end` uses `traffic_billing_start_day` and `traffic_billing_timezone`; `whmcs_compatible` uses `traffic_billing_anchor_date` and `traffic_billing_timezone`, with `traffic_billing_start_day` derived from the anchor date. The legacy input alias `default` remains accepted without billing fields and is stored as an explicit `calendar_month` cycle starting on day 1. `tags` accepts a string array; values are trimmed, empty values and duplicates are removed, and `[]` clears tags. `traffic_cycle_mode` responses contain `calendar_month`, `whmcs_compatible`, or `clamp_to_month_end`; `traffic_direction_mode` allows `default`, `out`, `both`, and `max`.
 - `PATCH /api/admin/nodes/{id}` trims `secret` and returns `400 invalid_secret` unless it contains 8–128 Unicode characters. It returns `409 duplicate_secret` when the submitted `secret` already belongs to another node.
 - A submitted node `name` is trimmed and must contain 1 to 64 Unicode characters with no control characters; invalid values return `400 invalid_name`.
@@ -142,20 +145,20 @@ The admin password is supplied through `monitor_dash_pwd` and must contain at le
 - The admin controller is Linux/systemd based and launches `dash update execute` from the packaged Dash binary in a transient unit; `update_dash_linux.sh` is only a manual compatibility wrapper. Release archives must use format v1, contain matching `release.env`, `bin/dash`, `dist/index.html`, all seven bundled node/runner assets for the five supported platform/architecture targets under `deploy`, `configs/config.example.yaml`, and the Linux install/update scripts, and contain only regular files/directories under `Ithiltir-dash/`; required files must be non-empty. `release.env` binds each bundled asset by SHA-256, and the candidate Dash binary must report both the manifest Dash version and bundled-node version. Compressed size, expanded size, and entry count are bounded. The task may restart Dash, so callers must tolerate a brief connection loss after `202`. If migration or service start requires recovery, run `DASH_HOME/bin/dash update recover` as root.
 - `GET /api/admin/system/dash-update/release-notes?lang=zh|en` returns `{ "source_url": "...", "html": "..." }` from the documentation site. Invalid `lang` returns `400 invalid_fields`; fetch failure returns `502 release_notes_fetch_failed`.
 
-## Agent Updates
+## Node Updates
 
 - Successful `POST /api/node/metrics` responses include `update`.
 - `update` is `null` when no upgrade is pending.
 - A pending update contains `id`, `version`, `url`, `sha256`, and `size`.
-- `url` may include a short-lived `upgrade_token` so legacy agents can download the exact update asset without sending `X-Node-Secret`. Clients must use the URL as returned.
-- Pending updates are volatile and clear when the agent reports the exact target version or a higher SemVer precedence. Different build metadata at the same SemVer precedence is treated as a distinct node binary and can still be delivered.
+- `url` may include a short-lived `upgrade_token` so legacy Nodes can download the exact update asset without sending `X-Node-Secret`. Clients must use the URL as returned.
+- Pending updates are volatile and clear when the Node reports the exact target version or a higher SemVer precedence. Different build metadata at the same SemVer precedence is treated as a distinct node binary and can still be delivered.
 
 ## Node Metrics Runtime Fields
 
-- `POST /api/node/metrics` accepts optional `metrics.disk.smart`, `metrics.thermal`, and `metrics.pressure`. Older agents may omit these fields.
-- Persisted byte, capacity, counter, and uptime values are non-negative JSON integers within signed 64-bit range. Process and connection counts use signed 32-bit range; `/api/node/static` additionally uses signed 32-bit report intervals and signed 16-bit CPU topology counts. Existing agents remain wire-compatible because ordinary positive JSON integers have the same encoding. An integer outside the receiving type returns `400 invalid_request`; a negative value, invalid ratio, or invalid rate returns `422 invalid_metrics` or `422 invalid_static_payload`.
+- `POST /api/node/metrics` accepts optional `metrics.disk.smart`, `metrics.thermal`, and `metrics.pressure`. Older Nodes may omit these fields.
+- Persisted byte, capacity, counter, and uptime values are non-negative JSON integers within signed 64-bit range. Process and connection counts use signed 32-bit range; `/api/node/static` additionally uses signed 32-bit report intervals and signed 16-bit CPU topology counts. Existing Nodes remain wire-compatible because ordinary positive JSON integers have the same encoding. An integer outside the receiving type returns `400 invalid_request`; a negative value, invalid ratio, or invalid rate returns `422 invalid_metrics` or `422 invalid_static_payload`.
 - Text written to bounded PostgreSQL identifiers is checked before persistence: Node version 64 characters, hostname and disk name 255, disk reference 320, disk kind/role and RAID health 16, interface name 64, and filesystem type plus logical-disk health/level 32. Static OS/platform/architecture values are limited to 32 characters and platform/kernel versions to 255. Paths, mountpoints, and hardware descriptions use unbounded text storage. Oversized values return `422 invalid_metrics` or `422 invalid_static_payload`; values are never silently truncated.
-- Concurrent reports are ordered by server receive time. An older receive-time sample that finishes after a newer one is still written to metrics history, but it does not overwrite current metrics or the frontend hot snapshot and does not schedule a new alert evaluation. The request `timestamp` is retained as the agent-reported time and does not choose the current projection.
+- Concurrent reports are ordered by server receive time. An older receive-time sample that finishes after a newer one is still written to metrics history, but it does not overwrite current metrics or the frontend hot snapshot and does not schedule a new alert evaluation. The request `timestamp` is retained as the Node-reported time and does not choose the current projection.
 - `metrics.disk.smart` is disk SMART runtime state. It is kept in a separate hot cache and is not written to PostgreSQL metrics snapshots. SMART temperature for confirmed physical disks may be reduced into per-device `disk.temp_c` history. `metrics.thermal` stores hardware temperature sensors at the metrics root; thermal data is written to PostgreSQL metrics snapshots but kept as a separate field cache in the frontend cache.
 - `metrics.pressure` is Linux PSI (Pressure Stall Information). It may contain `cpu`, `memory`, and `io`, each with optional `some` and `full` numeric groups. Each group has `avg10`, `avg60`, `avg300` percentages and cumulative `total` microseconds. Dashboard stores these values as fixed numeric time-series columns; collection status/reason strings are not persisted. Missing groups remain `NULL` and are treated as unavailable, not as zero pressure.
 - `disk.smart.devices` and `thermal.sensors` are arrays. Empty results are `[]`, not `null`, when the field is present.
@@ -197,14 +200,15 @@ The admin password is supplied through `monitor_dash_pwd` and must contain at le
 | `/theme/active.css`           | resolved theme CSS; missing or broken configured themes return empty override CSS for the frontend default |
 | `/theme/active.json`          | resolved theme manifest; the default and fallback default return 404                                       |
 | `/theme/preview/{id}.png`     | theme preview image                                                                                        |
-| `/deploy/linux/install.sh`    | Linux agent install script                                                                                 |
-| `/deploy/macos/install.sh`    | macOS agent install script                                                                                 |
-| `/deploy/windows/install.ps1` | Windows agent install script                                                                               |
+| `/theme-bootstrap.js`         | theme bootstrap script with fixed `Cache-Control: no-store`                                                |
+| `/deploy/linux/install.sh`    | Linux Node install script                                                                                  |
+| `/deploy/macos/install.sh`    | macOS Node install script                                                                                  |
+| `/deploy/windows/install.ps1` | Windows Node install script                                                                                |
 | `/deploy/*`                   | packaged node release assets; requires `X-Node-Secret` or a temporary `upgrade_token`                      |
 | `/`                           | SPA                                                                                                        |
 
 ## Contract Rules
 
 - Unknown or malformed values are rejected at the boundary rather than silently normalized into another valid request.
-- JSON requests that exceed the route body limit return `413 body_too_large`; malformed JSON returns `400 invalid_request`.
+- JSON requests that exceed the route body limit return `413 body_too_large`; malformed JSON usually returns `400 invalid_request`, while `POST /api/auth/login` uses the auth-specific `400 invalid_json` contract.
 - Core durable-storage and required-dependency failures are returned as errors. Documented optional boundaries retain their degraded behavior: optional bearer reads become anonymous, and an unavailable active theme uses the frontend default while exposing `missing` or `broken` state.

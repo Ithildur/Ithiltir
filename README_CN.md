@@ -6,7 +6,7 @@ Ithiltir Dash 是单实例、自托管的服务器监控面板。一个 Dash 进
 
 ## 界面预览
 
-![Ithiltir Control 看板](screenshot/zh.jpg)
+![Ithiltir Dash 看板](screenshot/zh.jpg)
 
 ## 功能范围
 
@@ -17,15 +17,15 @@ Ithiltir Dash 是单实例、自托管的服务器监控面板。一个 Dash 进
 - SMART 状态、NVMe critical warning、SMART 温度和普通温度传感器运行时字段
 - 流量统计、月度周期和 95 计费数据
 - 节点、分组、告警、主题和系统设置管理
-- Agent 指标、静态信息和打包更新下发
-- 内置 Linux / macOS / Windows Agent 安装脚本
+- Node 指标、静态信息和打包更新下发
+- 内置 Linux / macOS / Windows Node 安装脚本
 - 单进程交付 SPA、API、管理台和部署资产
 
 ## 运行要求
 
 - PostgreSQL 16+ 和按相同 PostgreSQL 主版本构建的 TimescaleDB
 - Redis 默认持久化管理员会话，并保存可丢弃的前台缓存；`--no-redis` 把两者都放入进程内存。告警运行态和 MTProto 登录握手始终在内存中，重启后重置
-- 从源码运行或打包需要 Go 1.26+
+- 从源码运行或打包需要 Go 1.26.5+
 - 构建前端需要 Bun 1.3.11
 
 ## 快速启动
@@ -51,10 +51,14 @@ go run ./cmd/dash -debug
 
 - `app.listen`
 - `app.public_url`
+- `database.driver`
+- `database.host`
+- `database.port`
 - `database.user`
 - `database.name`
-- `redis.addr`
 - `auth.jwt_signing_key`
+
+启用 Redis 模式时还必须配置 `redis.addr`；`--no-redis` 不读取或校验 Redis 配置。
 
 管理员登录密码只从环境变量 `monitor_dash_pwd` 读取，不写入配置文件；密码至少包含 8 个可见 ASCII 字符，且不得包含空白字符。
 `auth.jwt_signing_key` 至少为 32 字节，且不能带首尾空白。Linux 安装器会生成 32 字节的随机字母数字密钥。
@@ -132,7 +136,9 @@ bash scripts/build_frontend.sh --version 0.0.0-dev -o build/frontend/dist
 bash scripts/package.sh --version 1.2.3-alpha.1 --node-version 1.2.3-alpha.1 -o release -t linux/amd64 --tar-gz
 ```
 
-Dash 主控端发布包当前只面向 Linux amd64 和 Linux arm64。macOS 与 Windows 的 deploy 资产只用于 Agent。
+Dash 主控端发布包当前只面向 Linux amd64 和 Linux arm64。macOS 与 Windows 的 deploy 资产只用于 Node。
+
+打包脚本只把 `configs/config.example.yaml` 放入发布包，不会打包 `config.local.yaml`、`configs/config.local.yaml` 或其他本地配置。
 
 PowerShell：
 

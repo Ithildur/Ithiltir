@@ -6,14 +6,14 @@ Ithiltir Dash 是单实例应用。根入口只启动一个 HTTP 进程，该进
 
 | 组件                     | 责任                                                                                                 |
 | ------------------------ | ---------------------------------------------------------------------------------------------------- |
-| `cmd/dash`               | 进程入口、配置加载、依赖装配、迁移入口和关闭流程                                                     |
+| `cmd/dash`               | 进程入口、配置加载、依赖装配、迁移、更新、Redis 检查和关闭流程                                       |
 | HTTP 服务                | 挂载 `/api`、`/theme`、`/deploy` 和 SPA                                                              |
 | PostgreSQL + TimescaleDB | 持久化指标历史、流量事实及物化进度、节点元数据、告警规则、加密通知配置、通知 outbox 和系统设置       |
 | Redis                    | 管理员会话；可丢弃的前台运行快照/元数据、SMART/thermal 字段、节点目录和游客可见目录                  |
-| 进程内内存               | 解密后的通知配置、`--no-redis` 管理员会话、节点鉴权索引、告警队列/最新快照/运行态、MTProto 登录态和易失 Agent 更新请求 |
+| 进程内内存               | 解密后的通知配置、`--no-redis` 管理员会话、节点鉴权索引、告警队列/最新快照/运行态、MTProto 登录态和易失 Node 更新请求  |
 | Dash home 文件系统       | 仅文件所有者可读的通知配置密钥（受管 Linux 安装由 root 持有）和可变安装/运行状态                  |
-| Agent                    | 上报指标和静态主机信息；接收更新 manifest                                                            |
-| Linux 节点服务管理       | systemd 或 OpenRC/supervise-daemon 管理前台 Agent 进程；显式 `none` 模式由运维者持有进程生命周期     |
+| Node                     | 上报指标和静态主机信息；接收更新 manifest                                                            |
+| Linux 节点服务管理       | systemd 或 OpenRC/supervise-daemon 管理前台 Node 进程；显式 `none` 模式由运维者持有进程生命周期      |
 | Linux root 侧缓存        | systemd timer 刷新 SMART、连接数和 LVM；Alpine/OpenRC 暂时只用 BusyBox cron 刷新 SMART 和 LVM        |
 | Web UI                   | 读取看板数据并提交管理操作                                                                           |
 
@@ -26,7 +26,7 @@ Ithiltir Dash 是单实例应用。根入口只启动一个 HTTP 进程，该进
 | `/api/front`      | 看板读取                             |
 | `/api/metrics`    | 历史指标和在线率查询                 |
 | `/api/statistics` | 统计访问策略和流量统计查询           |
-| `/api/node`       | Agent 上报和节点身份读取             |
+| `/api/node`       | Node 上报和节点身份读取              |
 | `/api/admin`      | 管理台写操作                         |
 | `/theme`          | 当前主题 CSS、主题 manifest 和预览图 |
 | `/deploy`         | 安装脚本和节点发布资产               |
@@ -34,30 +34,30 @@ Ithiltir Dash 是单实例应用。根入口只启动一个 HTTP 进程，该进
 
 ## 数据流
 
-1. Agent 通过 `/api/node/*` 上报指标和静态主机信息。
+1. Node 通过 `/api/node/*` 上报指标和静态主机信息。
 2. 指标上报成功响应可包含更新 manifest。
 3. PostgreSQL + TimescaleDB 保存持久化历史、流量事实、普通配置、加密后的通知渠道配置和通知 outbox。
 4. 默认模式下 Redis 保存管理员会话和可丢弃的前台缓存；`--no-redis` 用进程内内存替代两者。告警运行态和 MTProto 登录握手始终留在单个 Dash 进程内。
 5. 后台服务评估告警、发送队列通知并汇总流量数据。
 
-节点 IP 是已鉴权 Agent 请求的观察值：有 `X-Forwarded-For` 时 Dash 取其第一个 IP，否则回退到 `RemoteAddr`；不可解析的值不会被使用。该字段用于展示和运维，不作为鉴权边界。
+节点 IP 是已鉴权 Node 请求的观察值：有 `X-Forwarded-For` 时 Dash 取其第一个 IP，否则回退到 `RemoteAddr`；不可解析的值不会被使用。该字段用于展示和运维，不作为鉴权边界。
 
 ## 状态和保留策略
 
 - 默认启动依赖 PostgreSQL 和 Redis `6.2.0+`，推荐 Redis `8.2.3+`。Dash 会通过 `PING` 和 `INFO server` 校验实际连接的服务端，因此配置的 Redis 账号必须允许这两个命令；服务不可用、版本无法识别或低于 6.2.0 时终止启动，低于 8.2.3 时仍可运行但会记录启动警告。Redis 保存管理员会话和可丢弃的前台缓存，单次 Redis 故障不会回退到内存。传 `--no-redis` 时会跳过 Redis 连接和版本校验，并从启动时把会话与前台缓存装配到进程内内存。
 - `app.timezone` 在启动时编译。空值使用本地时区；非空值必须是有效 IANA 时区名，否则配置加载失败，错误中会包含配置值。
 - 前台缓存 v2 使用项目 namespace `ithiltir:dash:`，具体 key 为 `ithiltir:dash:front:v2:node:runtime:{id}`、`ithiltir:dash:front:v2:node:meta:{id}`、`ithiltir:dash:front:v2:node:smart:{id}`、`ithiltir:dash:front:v2:node:thermal:{id}`、`ithiltir:dash:front:v2:node:ids`、`ithiltir:dash:front:v2:node:catalog`、`ithiltir:dash:front:v2:guest:ids` 和 `ithiltir:dash:front:v2:guest:catalog`。旧 v1 和未加 namespace 的 v2 缓存 key 会被忽略，不做双写，也不会在启动时自动删除；冷缓存按需重建。管理员会话继续使用兼容前缀 `auth:jwt:*`，保证存量 session 在升级后仍然有效，该前缀不会在启动时迁移或删除。
-- PostgreSQL 是节点元数据和当前指标的权威来源；对节点投影而言，Redis 或 `--no-redis` 的内存后端只是前台读取索引。运行指标与 PostgreSQL 派生元数据分开保存，读取时组合成公开契约不变的 `NodeView`。普通已接受指标只更新 runtime/SMART/thermal，不改变目录投影 generation。当前目录中不存在的 ID 上报 runtime 时会保留样本并让目录失效，但绝不自行加入目录；成员和元数据只能由 PostgreSQL 投影重建决定。全量重建会替换元数据和目录，但只在 runtime 不存在时补写，因此不会覆盖并发到达的新样本，持续上报也不会让重建饥饿。节点生命周期串行化由 node 领域持有：全局变更使用结构锁独占侧，单节点投影变更使用共享侧和节点本地锁，高频 runtime 写入只使用节点本地锁；不同节点仍可并发，任何单节点投影变更都不能与全局变更重叠。独立 generation gate 负责条件发布重建，数据库或缓存 I/O 期间不持有其互斥量。代表逻辑盘的路径、文件系统类型和容量是一组 last-known 观测：上报没有可用路径时整组保留旧观测；存在路径时整组替换，未上报的类型或容量记为未知。节点名称/排序/标签和影响前台的静态字段只失效元数据；游客可见性只失效游客目录；流量设置、密钥、分组、hostname/IP/Agent 版本、CPU 厂商/频率、磁盘总量、RAID 能力和上报周期不写前台 Redis。批量排序和节点成员变化失效节点目录。PostgreSQL 元数据事务在提交前执行必要的 Redis 失效；Redis 失败会回滚 PostgreSQL，之后若 PostgreSQL 提交失败则只留下缓存 miss。节点删除在提交前只失效目录，成功提交后才删除运行快照。
-- 在已鉴权节点上报边界，写入 PostgreSQL 的数值直接解码成对应的 Go 有符号宽度：JSON 解码负责可表示范围，语义校验负责非负计数器和数值领域约束，持久化过程不再执行窄化转换。定长协议标识在现有报告遍历中校验长度；hostname、操作系统路径、挂载点和硬件描述使用足以表达正常系统观察值的存储类型。Agent 的普通正整数 JSON 编码不变，继续保持兼容。
+- PostgreSQL 是节点元数据和当前指标的权威来源；对节点投影而言，Redis 或 `--no-redis` 的内存后端只是前台读取索引。运行指标与 PostgreSQL 派生元数据分开保存，读取时组合成公开契约不变的 `NodeView`。普通已接受指标只更新 runtime/SMART/thermal，不改变目录投影 generation。当前目录中不存在的 ID 上报 runtime 时会保留样本并让目录失效，但绝不自行加入目录；成员和元数据只能由 PostgreSQL 投影重建决定。全量重建会替换元数据和目录，但只在 runtime 不存在时补写，因此不会覆盖并发到达的新样本，持续上报也不会让重建饥饿。节点生命周期串行化由 node 领域持有：全局变更使用结构锁独占侧，单节点投影变更使用共享侧和节点本地锁，高频 runtime 写入只使用节点本地锁；不同节点仍可并发，任何单节点投影变更都不能与全局变更重叠。独立 generation gate 负责条件发布重建，数据库或缓存 I/O 期间不持有其互斥量。代表逻辑盘的路径、文件系统类型和容量是一组 last-known 观测：上报没有可用路径时整组保留旧观测；存在路径时整组替换，未上报的类型或容量记为未知。节点名称/排序/标签和影响前台的静态字段只失效元数据；游客可见性只失效游客目录；流量设置、密钥、分组、hostname/IP/Node 版本、CPU 厂商/频率、磁盘总量、RAID 能力和上报周期不写前台 Redis。批量排序和节点成员变化失效节点目录。PostgreSQL 元数据事务在提交前执行必要的 Redis 失效；Redis 失败会回滚 PostgreSQL，之后若 PostgreSQL 提交失败则只留下缓存 miss。节点删除在提交前只失效目录，成功提交后才删除运行快照。
+- 在已鉴权节点上报边界，写入 PostgreSQL 的数值直接解码成对应的 Go 有符号宽度：JSON 解码负责可表示范围，语义校验负责非负计数器和数值领域约束，持久化过程不再执行窄化转换。定长协议标识在现有报告遍历中校验长度；hostname、操作系统路径、挂载点和硬件描述使用足以表达正常系统观察值的存储类型。Node 的普通正整数 JSON 编码不变，继续保持兼容。
 - 默认模式下管理员会话保存在 Redis，可跨 Dash 进程重启和原地升级继续使用；`--no-redis` 模式下会话属于进程内存并在重启后失效。告警评估状态和 MTProto 登录握手在两种模式下都属于进程内存，重启后有意重置。开放中的 firing 告警从 PostgreSQL 事件恢复；pending 和 cooldown 不承诺跨重启保留。指标提交把最新评估快照放入内存队列，规则/全量协调缺少快照时直接读取 PostgreSQL 当前指标，绝不读取前台 Redis。可选运行字段缺失时保留已有 firing 状态，前台缓存 miss 不会被当成告警恢复。
 - SPA 根级运行时负责浏览器资源版本一致性。文档可见时，唯一的根级运行时检查本地 `/api/version`；Dash 版本发生变化就重新加载整个文档，不受当前页面影响。页面级更新界面只负责更新操作和展示，远端 release 是否可访问不会阻止加载本地已经安装的新前端。
 - Dash 只有一个管理用户、一个运行实例和一个内置安装后执行器：`DASH_HOME/bin/dash update`。`install_dash_linux.sh` 只负责首次安装；`update_dash_linux.sh` 只是没有更新逻辑的兼容包装。Dash 与自动更新服务都是控制器：先从 GitHub Releases 解析目标，把目标版本、预期当前版本和预期安装修订号组成不可变计划，持久化到 `DASH_HOME/runtime/dash-update/jobs/<job-id>`，再通过 systemd transient unit 启动隐藏的 `dash update execute` 命令。执行器先取得 root 所有的跨进程锁，再读取已安装状态并执行 compare-and-swap；过期计划会失败，不会重新选择目标或把安装回退。手工更新使用同一个执行器和锁。管理台控制器仍只支持 systemd；执行器本身也支持显式手动安装。任务来源、阶段、状态、失败代码、恢复路径和日志都原子持久化；独立的任务 `current` 符号链接只选择管理 API 展示的任务。完成切换的事务会作为恢复证据保留到任务终态可靠落盘，执行器崩溃后也可由状态协调从该事务恢复真实终态。自动通知扫描所有未确认的终态自动任务，并以任务 ID 作为持久化 outbox 幂等键。
 - 打包文件位于 `DASH_HOME/releases` 下的不可变目录，由原子 `current` 符号链接选择当前 release；旧平铺路径在迁移窗口内保留为兼容别名，可变运行时和配置仍位于 `DASH_HOME`。Linux 发布格式 v1 归档必须包含匹配的 `release.env`、`bin/dash`、`dist/index.html`、`deploy` 下覆盖五个受支持平台/架构目标的全部七个 node/runner 资产、`configs/config.example.yaml` 和 Linux 安装/更新脚本。manifest 以 SHA-256 绑定每个内置资产；停止线上进程前，候选 Dash 二进制必须同时报告匹配的 Dash 版本和打包节点版本。官方前端构建还要求非空的 `dist/theme-bootstrap.js`；任意自定义前端产物不属于发布契约。归档只允许单一根目录下的普通文件和目录，并限制为 1 GiB 压缩大小、4 GiB 解压大小和 20000 个条目。暂存目录和旧平铺布局恢复资产位于安装目录旁的同一文件系统。执行器保持现有 systemd/手动运行方式和受管服务更新前的运行状态。systemd 服务重启后必须连续五秒保持 `active/running` 且 `NRestarts` 不增加，更新才能结束；稳定检查失败时会恢复 `update.block` 并停止服务等待恢复。手工运行模式只停止受管安装目录中以服务模式启动的 Dash 命令行，不会终止维护子命令。
 - `runtime/dash-update/transaction.env` 是持久化切换记录。停止 systemd 管理的 Dash 前，执行器会安装永久服务条件并创建 `update.block`；因此重启或执行器异常退出都不能在迁移前或部分迁移区间拉起 Dash。迁移开始前，恢复会还原之前的 release 和运行状态；迁移一旦开始，恢复只会激活候选版本并向前完成，绝不把旧二进制恢复到可能已经更新的 schema 上。迁移成功后先移除启动阻断，再启动服务；事务文件保留到启动和清理成功。完成结果依次持久化为终态事务和任务终态，最后才删除事务；执行器在两次写入之间退出时，状态协调会从终态事务恢复任务结果，而不是凭空合成失败。`dash update recover` 会继续或回滚记录中的事务。Goose 的 `goose_db_version` 仍是唯一 schema 版本来源：`dash migrate` 推进较旧 schema 并拒绝较新 schema，正常启动要求完全一致。GitHub Releases 元数据与资产是更新根信任源；GitHub 账号、token、仓库、workflow 或 release 权限被攻破，等价于更新源被攻破。
-- Linux 节点安装器只负责安装和强制重装，不负责版本升级。它会在停止 systemd、OpenRC 和匹配的手动运行进程前暂存并执行下载的二进制，随后覆盖受管 release、上报配置、服务/采集器资产，并原子切换 `current` 符号链接。节点运行用户拥有数据和 release 树，因为非特权 Agent 自更新协议需要创建和切换 release；root 所有的服务及采集器资产位于该树之外。安装器最多跟随五次重定向，目标必须保持初始主机；同协议跳转必须保持有效端口，只允许 HTTP 升级到 HTTPS。节点版本升级及其恢复语义归独立的节点自更新路径所有。
+- Linux 节点安装器只负责安装和强制重装，不负责版本升级。它会在停止 systemd、OpenRC 和匹配的手动运行进程前暂存并执行下载的二进制，随后覆盖受管 release、上报配置、服务/采集器资产，并原子切换 `current` 符号链接。节点运行用户拥有数据和 release 树，因为非特权 Node 自更新协议需要创建和切换 release；root 所有的服务及采集器资产位于该树之外。安装器最多跟随五次重定向，目标必须保持初始主机；同协议跳转必须保持有效端口，只允许 HTTP 升级到 HTTPS。节点版本升级及其恢复语义归独立的节点自更新路径所有。
 - 当前主题 ID 是持久化配置，主题解析结果只是可丢弃的展示状态。选中主题包缺失或非法时记录为 `missing` 或 `broken`，运行时使用前端内置默认皮肤，主题管理仍可用于修复或重新选择；数据库和主题根目录不可访问仍属于运行错误。主题包格式 v1 已冻结并弃用但继续兼容，不再扩展语法或能力；新能力使用后续格式。固定文件名 `/theme-bootstrap.js` 使用 `Cache-Control: no-store`，其他静态资源保持各自的缓存行为。
 - SMART、thermal 和完整 RAID 详情属于运行时状态。SMART 缓存新鲜度、helper 可用性、设备健康结果、完整 thermal 传感器 payload 以及完整 RAID 阵列/成员 payload 保存在当前快照或热点缓存，不写入 PostgreSQL 历史指标行。确认是物理盘的 SMART 温度会归约写入 `disk_physical_metrics.temp_c`，用于按设备查询历史；虚拟盘和 RAID 设备会被忽略。同一套后端判定会生成 `disk.temperature_devices`，供前端进入硬盘温度历史。thermal 会归约写入 `cpu_temp_c` 作为主机历史；完整 thermal 详情拆成独立前台字段缓存，读取前台节点视图时再组合进 JSON。
-- TCP/UDP 连接数是持久化数值指标，会写入 `tcp_conn` 和 `udp_conn`，并作为 `conn.tcp` 和 `conn.udp` 支持历史查询。systemd Linux 主机上的完整主机/netns 连接数来自 1 秒周期的 root 侧连接数缓存，因为 Agent 以低权限运行；安装脚本会在存在 `cc`、`gcc` 或 `clang` 时本地编译该 helper。OpenRC 不运行该 helper，因为 BusyBox cron 无法保持 1 秒周期。缓存缺失、过期、helper 无法编译或使用 OpenRC 时，Agent 使用自带连接数统计，可能缺失容器连接数据。
+- TCP/UDP 连接数是持久化数值指标，会写入 `tcp_conn` 和 `udp_conn`，并作为 `conn.tcp` 和 `conn.udp` 支持历史查询。systemd Linux 主机上的完整主机/netns 连接数来自 1 秒周期的 root 侧连接数缓存，因为 Node 以低权限运行；安装脚本会在存在 `cc`、`gcc` 或 `clang` 时本地编译该 helper。OpenRC 不运行该 helper，因为 BusyBox cron 无法保持 1 秒周期。缓存缺失、过期、helper 无法编译或使用 OpenRC 时，Node 使用自带连接数统计，可能缺失容器连接数据。
 - Linux PSI pressure 指标是固定数值时序数据。PSI 的 `avg10`、`avg60`、`avg300` 和 `total` 会作为可空列保存到 `server_metrics` 和 `server_current_metrics`；缺失列表示不可用，不表示 0 压力。Dashboard 持久化会忽略采集原因/状态字符串。PSI 当前不接入告警评估。
 - 告警评估读取进程内最新上报快照或 PostgreSQL 当前投影。内置离线、RAID、SMART 健康失败和 NVMe 关键告警规则来自快照新鲜度和上报磁盘状态。
 - 告警服务启动后 1 分钟内不会新开告警事件。
@@ -84,7 +84,7 @@ Ithiltir Dash 是单实例应用。根入口只启动一个 HTTP 进程，该进
 | `/api/front/*`、`/api/metrics/*`、`/api/statistics/*` | Bearer 可选；匿名请求按系统可见性设置过滤                     |
 | `/api/node/*`                                         | `X-Node-Secret`                                               |
 | `/api/admin/*`                                        | `Authorization: Bearer <access_token>`                        |
-| `/deploy/*` 打包资产                                  | `X-Node-Secret` 或旧 Agent 升级临时 token；安装脚本模板仍公开 |
+| `/deploy/*` 打包资产                                  | `X-Node-Secret` 或旧 Node 升级临时 token；安装脚本模板仍公开  |
 
 ## 前端和反向代理
 
@@ -94,7 +94,7 @@ Ithiltir Dash 是单实例应用。根入口只启动一个 HTTP 进程，该进
 
 | 路径                          | 内容                                     |
 | ----------------------------- | ---------------------------------------- |
-| `cmd/dash`                    | 服务、迁移和主题打包入口                 |
+| `cmd/dash`                    | 服务、迁移、更新、Redis 检查和主题打包入口 |
 | `internal/config`             | 配置加载、默认值、校验和运行目录         |
 | `internal/transport/http`     | HTTP 服务、静态资源、主题资源和 API 挂载 |
 | `internal/transport/http/api` | `/api` 路由树                            |
