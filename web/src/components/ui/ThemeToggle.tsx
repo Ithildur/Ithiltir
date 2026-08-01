@@ -72,10 +72,7 @@ const ThemeToggle: React.FC<Props> = ({
       onClick={() => setTheme(nextTheme)}
       className={`${base} ${sizeClass} ${justifyClass} ${variantClass} ${className}`}
       aria-label={t('theme_switch_aria', { current: labelByTheme[theme] })}
-      title={
-        titleOverride ??
-        t('theme_switch_title', { current: labelByTheme[theme], next: labelByTheme[nextTheme] })
-      }
+      title={titleOverride ?? t('theme_switch_title', { current: labelByTheme[theme] })}
     >
       {iconByTheme[theme]}
       {showLabel && (

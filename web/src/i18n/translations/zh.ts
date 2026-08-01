@@ -83,7 +83,7 @@ export const zh = {
   theme_dark: '深色',
   theme_system: '跟随系统',
   theme_switch_aria: '切换主题（当前：{{current}}）',
-  theme_switch_title: '主题：{{current}} → {{next}}',
+  theme_switch_title: '主题：{{current}}',
   theme_runtime_load_failed: '加载当前皮肤失败。',
   brand_runtime_load_failed: '加载站点品牌失败。',
 

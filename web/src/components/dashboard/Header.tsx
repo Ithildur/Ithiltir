@@ -1,6 +1,6 @@
 import React from 'react';
 import { createPortal } from 'react-dom';
-import LogIn from 'lucide-react/dist/esm/icons/log-in';
+import UserRound from 'lucide-react/dist/esm/icons/user-round';
 import LogOut from 'lucide-react/dist/esm/icons/log-out';
 import Search from 'lucide-react/dist/esm/icons/search';
 import SlidersHorizontal from 'lucide-react/dist/esm/icons/sliders-horizontal';
@@ -220,7 +220,7 @@ const Header: React.FC<Props> = ({ searchTerm, setSearchTerm }) => {
               aria-label={t('login_sign_in')}
               title={t('login_sign_in')}
             >
-              <LogIn size={16} />
+              <UserRound size={18} aria-hidden="true" />
             </Link>
           )}
         </div>

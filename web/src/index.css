@@ -5,16 +5,12 @@
 /* Tailwind v4: 定义 dark 模式的自定义变体 */
 @custom-variant dark (&:where(.dark, .dark *));
 
+@theme inline {
+  --font-sans: var(--skin-font-sans);
+}
+
 :root {
-  font-family: var(
-    --skin-font-sans,
-    'Space Grotesk',
-    system-ui,
-    -apple-system,
-    BlinkMacSystemFont,
-    'Segoe UI',
-    sans-serif
-  );
+  font-family: var(--skin-font-sans);
 
   /* color-scheme 由 JavaScript 动态设置，不在这里固定 */
 }

@@ -1,5 +1,4 @@
 import React, { useState } from 'react';
-import ArrowRight from 'lucide-react/dist/esm/icons/arrow-right';
 import CheckCircle2 from 'lucide-react/dist/esm/icons/check-circle-2';
 import Eye from 'lucide-react/dist/esm/icons/eye';
 import EyeOff from 'lucide-react/dist/esm/icons/eye-off';
@@ -231,10 +230,6 @@ const LoginPage: React.FC = () => {
                   type="submit"
                 >
                   <span>{t('login_sign_in')}</span>
-                  <ArrowRight
-                    size={16}
-                    className="group-hover:translate-x-0.5 transition-transform motion-reduce:transform-none motion-reduce:transition-none"
-                  />
                 </GradientButton>
               </div>
             </form>

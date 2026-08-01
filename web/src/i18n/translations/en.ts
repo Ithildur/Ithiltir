@@ -83,7 +83,7 @@ export const en = {
   theme_dark: 'Dark',
   theme_system: 'System',
   theme_switch_aria: 'Switch theme (current: {{current}})',
-  theme_switch_title: 'Theme: {{current}} → {{next}}',
+  theme_switch_title: 'Theme: {{current}}',
   theme_runtime_load_failed: 'Failed to load the active skin.',
   brand_runtime_load_failed: 'Failed to load site brand.',
 

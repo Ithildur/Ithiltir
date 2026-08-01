@@ -1,7 +1,9 @@
 :root,
 :root[data-theme='default'] {
   --skin-font-sans:
-    'Space Grotesk', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC',
+    'Hiragino Sans GB', 'Microsoft YaHei', 'Noto Sans CJK SC', 'Noto Sans', Arial, sans-serif,
+    'Apple Color Emoji', 'Segoe UI Emoji', 'Noto Color Emoji';
 
   --theme-fg-default: #1f2328;
   --theme-fg-muted: #656d76;
@@ -227,7 +229,9 @@
 :root.dark,
 :root.dark[data-theme='default'] {
   --skin-font-sans:
-    'Space Grotesk', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC',
+    'Hiragino Sans GB', 'Microsoft YaHei', 'Noto Sans CJK SC', 'Noto Sans', Arial, sans-serif,
+    'Apple Color Emoji', 'Segoe UI Emoji', 'Noto Color Emoji';
 
   --theme-fg-default: #e6edf3;
   --theme-fg-muted: #8b949e;
