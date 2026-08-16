@@ -26,6 +26,7 @@ import (
 	authjwt "github.com/Ithildur/EiluneKit/auth/jwt"
 	authstore "github.com/Ithildur/EiluneKit/auth/store"
 	"github.com/Ithildur/EiluneKit/auth/store/redissession"
+	kitmigration "github.com/Ithildur/EiluneKit/postgres/migration"
 	"github.com/redis/go-redis/v9"
 	"golang.org/x/sync/errgroup"
 
@@ -109,7 +110,7 @@ func main() {
 		infra.Fatal("extract sql.DB failed", err)
 	}
 	defer sqlDB.Close()
-	if err := migrate.CheckVersion(ctx, db); err != nil {
+	if err := kitmigration.RequireCurrent(ctx, migrate.New(sqlDB, "")); err != nil {
 		infra.Fatal("validate database schema failed", err)
 	}
 	notifyKeyPath, err := config.NotifyConfigKeyPath()

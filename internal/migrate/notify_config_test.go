@@ -12,6 +12,8 @@ import (
 	"dash/internal/model"
 	"dash/internal/notify"
 	pgtest "dash/internal/testutil/postgres"
+
+	kitmigration "github.com/Ithildur/EiluneKit/postgres/migration"
 )
 
 func TestIntegrationNotifyConfigMigrationRemovesPlaintextAndDoesNotReplaceLostKey(t *testing.T) {
@@ -26,7 +28,7 @@ func TestIntegrationNotifyConfigMigrationRemovesPlaintextAndDoesNotReplaceLostKe
 		t.Fatalf("create legacy notification channel: %v", err)
 	}
 
-	result, err := migrate.Run(ctx, db, keyPath)
+	result, err := kitmigration.Run(ctx, migrationConfig(t, db, keyPath))
 	if err != nil {
 		t.Fatalf("run notification config encryption migration: %v", err)
 	}
@@ -77,7 +79,7 @@ func TestIntegrationNotifyConfigMigrationRemovesPlaintextAndDoesNotReplaceLostKe
 	if err := os.Remove(keyPath); err != nil {
 		t.Fatalf("remove notification config key: %v", err)
 	}
-	if _, err := migrate.Run(ctx, db, keyPath); err != nil {
+	if _, err := kitmigration.Run(ctx, migrationConfig(t, db, keyPath)); err != nil {
 		t.Fatalf("rerun current migration after key loss: %v", err)
 	}
 	if _, err := os.Stat(keyPath); !errors.Is(err, fs.ErrNotExist) {
@@ -100,7 +102,7 @@ func TestIntegrationNotifyConfigMigrationRecordsVersionAfterSealing(t *testing.T
 	if err := os.Mkdir(keyPath, 0o700); err != nil {
 		t.Fatalf("replace notification config key with directory: %v", err)
 	}
-	if _, err := migrate.Run(ctx, db, keyPath); err == nil {
+	if _, err := kitmigration.Run(ctx, migrationConfig(t, db, keyPath)); err == nil {
 		t.Fatal("Run() error = nil with invalid notification config key")
 	}
 	var version int64
@@ -143,7 +145,7 @@ func TestIntegrationNotifyConfigMigrationRecordsVersionAfterSealing(t *testing.T
 	if err := os.Remove(keyPath); err != nil {
 		t.Fatalf("remove invalid notification config key: %v", err)
 	}
-	if _, err := migrate.Run(ctx, db, keyPath); err != nil {
+	if _, err := kitmigration.Run(ctx, migrationConfig(t, db, keyPath)); err != nil {
 		t.Fatalf("retry notification config migration: %v", err)
 	}
 	if err := db.Raw("SELECT max(version_id) FROM goose_db_version").Scan(&version).Error; err != nil {

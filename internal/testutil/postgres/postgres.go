@@ -16,6 +16,7 @@ import (
 	"dash/internal/migrate"
 	"dash/internal/notify"
 
+	kitmigration "github.com/Ithildur/EiluneKit/postgres/migration"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"gorm.io/gorm"
@@ -84,10 +85,15 @@ func newDB(t testing.TB, target *int64) (*gorm.DB, string) {
 	if err := os.WriteFile(keyPath, make([]byte, notify.ConfigKeySize), 0o600); err != nil {
 		t.Fatalf("create test notification config key: %v", err)
 	}
+	sqlDB, err := db.DB()
+	if err != nil {
+		t.Fatalf("extract sql.DB: %v", err)
+	}
+	migrationCfg := migrate.New(sqlDB, keyPath)
 	if target == nil {
-		_, err = migrate.Run(ctx, db, keyPath)
+		_, err = kitmigration.Run(ctx, migrationCfg)
 	} else {
-		_, err = migrate.RunTo(ctx, db, keyPath, *target)
+		_, err = kitmigration.RunTo(ctx, migrationCfg, *target)
 	}
 	if err != nil {
 		t.Fatalf("run migrations: %v", err)

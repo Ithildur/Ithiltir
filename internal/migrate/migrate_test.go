@@ -8,6 +8,9 @@ import (
 
 	"dash/internal/migrate"
 	pgtest "dash/internal/testutil/postgres"
+
+	kitmigration "github.com/Ithildur/EiluneKit/postgres/migration"
+	"gorm.io/gorm"
 )
 
 func TestIntegrationNotificationMigrationRemovesDeletedChannelRefs(t *testing.T) {
@@ -57,7 +60,7 @@ func TestIntegrationNotificationMigrationRemovesDeletedChannelRefs(t *testing.T)
 	if activeRefs != 1 {
 		t.Fatalf("legacy channel ids = %s with %d active refs, want one", before, activeRefs)
 	}
-	result, err := migrate.Run(ctx, db, keyPath)
+	result, err := kitmigration.Run(ctx, migrationConfig(t, db, keyPath))
 	if err != nil {
 		t.Fatalf("rerun notification migration: %v", err)
 	}
@@ -114,7 +117,7 @@ func TestIntegrationTrafficCycleMigrationPreservesEffectiveNodeCycles(t *testing
 	`).Error; err != nil {
 		t.Fatalf("seed legacy traffic cycles: %v", err)
 	}
-	result, err := migrate.Run(ctx, db, keyPath)
+	result, err := kitmigration.Run(ctx, migrationConfig(t, db, keyPath))
 	if err != nil {
 		t.Fatalf("rerun traffic migration: %v", err)
 	}
@@ -232,7 +235,7 @@ func TestIntegrationReleaseMigrationWidensNaturalObservationFields(t *testing.T)
 	`).Error; err != nil {
 		t.Fatalf("seed legacy observation rows: %v", err)
 	}
-	result, err := migrate.Run(ctx, db, keyPath)
+	result, err := kitmigration.Run(ctx, migrationConfig(t, db, keyPath))
 	if err != nil {
 		t.Fatalf("rerun release migration: %v", err)
 	}
@@ -373,8 +376,8 @@ func TestIntegrationReleaseMigrationWidensNaturalObservationFields(t *testing.T)
 func TestIntegrationSchemaVersionGuard(t *testing.T) {
 	ctx := context.Background()
 	db, keyPath := pgtest.NewDBAt(t, 12)
-	if err := migrate.CheckVersion(ctx, db); err != nil {
-		t.Fatalf("CheckVersion(current) error = %v", err)
+	if err := kitmigration.RequireCurrent(ctx, migrationConfig(t, db, "")); err != nil {
+		t.Fatalf("RequireCurrent(current) error = %v", err)
 	}
 
 	var target int64
@@ -384,8 +387,8 @@ func TestIntegrationSchemaVersionGuard(t *testing.T) {
 	if err := db.Exec("DELETE FROM goose_db_version WHERE version_id = ?", target).Error; err != nil {
 		t.Fatalf("simulate older schema: %v", err)
 	}
-	if err := migrate.CheckVersion(ctx, db); !errors.Is(err, migrate.ErrSchemaBehind) {
-		t.Fatalf("CheckVersion(behind) error = %v, want ErrSchemaBehind", err)
+	if err := kitmigration.RequireCurrent(ctx, migrationConfig(t, db, "")); !errors.Is(err, kitmigration.ErrSchemaBehind) {
+		t.Fatalf("RequireCurrent(behind) error = %v, want ErrSchemaBehind", err)
 	}
 
 	if err := db.Exec(
@@ -394,10 +397,19 @@ func TestIntegrationSchemaVersionGuard(t *testing.T) {
 	).Error; err != nil {
 		t.Fatalf("simulate newer schema: %v", err)
 	}
-	if err := migrate.CheckVersion(ctx, db); !errors.Is(err, migrate.ErrSchemaAhead) {
-		t.Fatalf("CheckVersion(ahead) error = %v, want ErrSchemaAhead", err)
+	if err := kitmigration.RequireCurrent(ctx, migrationConfig(t, db, "")); !errors.Is(err, kitmigration.ErrSchemaAhead) {
+		t.Fatalf("RequireCurrent(ahead) error = %v, want ErrSchemaAhead", err)
 	}
-	if _, err := migrate.Run(ctx, db, keyPath); !errors.Is(err, migrate.ErrSchemaAhead) {
+	if _, err := kitmigration.Run(ctx, migrationConfig(t, db, keyPath)); !errors.Is(err, kitmigration.ErrSchemaAhead) {
 		t.Fatalf("Run(ahead) error = %v, want ErrSchemaAhead", err)
 	}
+}
+
+func migrationConfig(t testing.TB, db *gorm.DB, keyPath string) kitmigration.Config {
+	t.Helper()
+	sqlDB, err := db.DB()
+	if err != nil {
+		t.Fatalf("extract sql.DB: %v", err)
+	}
+	return migrate.New(sqlDB, keyPath)
 }

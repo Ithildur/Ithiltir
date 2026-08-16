@@ -9,6 +9,8 @@ import (
 	"dash/internal/config"
 	"dash/internal/infra"
 	"dash/internal/migrate"
+
+	kitmigration "github.com/Ithildur/EiluneKit/postgres/migration"
 )
 
 func runMigrate(args []string) {
@@ -57,7 +59,7 @@ func runMigrate(args []string) {
 		infra.Log().Error("resolve notification config key path failed", err)
 		os.Exit(1)
 	}
-	res, err := migrate.Run(ctx, db, notifyKeyPath)
+	res, err := kitmigration.Run(ctx, migrate.New(sqlDB, notifyKeyPath))
 	if err != nil {
 		infra.Log().Error("migrate failed", err)
 		os.Exit(1)
