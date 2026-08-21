@@ -11,8 +11,6 @@ import {
 import { getCsrfToken, readLoginPersistence, writeLoginPersistence } from '@lib/authSession';
 import { resetPrivateStores } from './privateStores';
 
-type AuthStoreState = AuthState;
-
 const initialAuthState: AuthState = {
   status: 'unknown',
   accessToken: null,
@@ -25,7 +23,7 @@ const pickAuthState = (state: AuthState): AuthState => ({
   expiresAt: state.expiresAt,
 });
 
-export const useAuthStore = create<AuthStoreState>()(() => initialAuthState);
+export const useAuthStore = create<AuthState>()(() => initialAuthState);
 
 let generation = 0;
 
@@ -60,10 +58,6 @@ const clearLocalSession = (): void => {
   resetPrivateStores();
 };
 
-const ignoreLogoutRevokeError = (): void => {
-  // Local session is already cleared; remote revoke is best-effort only.
-};
-
 const expireAuthState = (): void => {
   bumpAuthGeneration();
   clearLocalSession();
@@ -90,6 +84,7 @@ export const logout = (): void => {
   clearLocalSession();
 
   if (!tokenToRevoke && !csrfToUse) return;
+  // The local session is already cleared; remote revocation is best-effort.
   void apiFetch('/auth/logout', {
     method: 'POST',
     keepalive: true,
@@ -101,7 +96,7 @@ export const logout = (): void => {
       ...(tokenToRevoke ? { Authorization: `Bearer ${tokenToRevoke}` } : {}),
       ...(csrfToUse ? { 'X-CSRF-Token': csrfToUse } : {}),
     },
-  }).catch(ignoreLogoutRevokeError);
+  }).catch(() => undefined);
 };
 
 export const bootstrap = async (): Promise<void> => {

@@ -68,7 +68,7 @@ type HTTPConfig struct {
 	TrustedProxyPrefixes []netip.Prefix `yaml:"-"`
 }
 
-// AuthConfig holds admin auth settings (env-only).
+// AuthConfig holds admin authentication settings.
 type AuthConfig struct {
 	// JWTSigningKey is the HS256 signing key for issued JWT tokens.
 	// It must be a high-entropy secret and should be set via config file (install script generates it).

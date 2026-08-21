@@ -12,8 +12,8 @@ import (
 
 var errAccessTokenValidatorMissing = errors.New("access token validator is required")
 
-// OptionalBearer recognizes a valid admin token and treats every other request as a guest.
-// Invalid credentials intentionally do not turn a public endpoint into an authentication endpoint.
+// OptionalBearer authenticates valid admin bearer tokens. All other requests
+// continue as guests.
 func OptionalBearer(validator auth.AccessTokenValidator) (routes.Middleware, error) {
 	if validator == nil {
 		return nil, errAccessTokenValidatorMissing

@@ -14,7 +14,7 @@ Ithiltir Dash 是单实例应用。根入口只启动一个 HTTP 进程，该进
 | Dash home 文件系统       | 仅文件所有者可读的通知配置密钥（受管 Linux 安装由 root 持有）和可变安装/运行状态                  |
 | Node                     | 上报指标和静态主机信息；接收更新 manifest                                                            |
 | Linux 节点服务管理       | systemd 或 OpenRC/supervise-daemon 管理前台 Node 进程；显式 `none` 模式由运维者持有进程生命周期      |
-| Linux root 侧缓存        | systemd timer 刷新 SMART、连接数和 LVM；Alpine/OpenRC 暂时只用 BusyBox cron 刷新 SMART 和 LVM        |
+| Linux root 侧缓存        | systemd timer 刷新 SMART、连接数和 LVM；Alpine/OpenRC 只用 BusyBox cron 刷新 SMART 和 LVM            |
 | Web UI                   | 读取看板数据并提交管理操作                                                                           |
 
 ## HTTP 面
@@ -55,10 +55,10 @@ Ithiltir Dash 是单实例应用。根入口只启动一个 HTTP 进程，该进
 - 打包文件位于 `DASH_HOME/releases` 下的不可变目录，由原子 `current` 符号链接选择当前 release；旧平铺路径在迁移窗口内保留为兼容别名，可变运行时和配置仍位于 `DASH_HOME`。Linux 发布格式 v1 归档必须包含匹配的 `release.env`、`bin/dash`、`dist/index.html`、`deploy` 下覆盖五个受支持平台/架构目标的全部七个 node/runner 资产、`configs/config.example.yaml` 和 Linux 安装/更新脚本。manifest 以 SHA-256 绑定每个内置资产；停止线上进程前，候选 Dash 二进制必须同时报告匹配的 Dash 版本和打包节点版本。官方前端构建还要求非空的 `dist/theme-bootstrap.js`；任意自定义前端产物不属于发布契约。归档只允许单一根目录下的普通文件和目录，并限制为 1 GiB 压缩大小、4 GiB 解压大小和 20000 个条目。暂存目录和旧平铺布局恢复资产位于安装目录旁的同一文件系统。执行器保持现有 systemd/手动运行方式和受管服务更新前的运行状态。systemd 服务重启后必须连续五秒保持 `active/running` 且 `NRestarts` 不增加，更新才能结束；稳定检查失败时会恢复 `update.block` 并停止服务等待恢复。手工运行模式只停止受管安装目录中以服务模式启动的 Dash 命令行，不会终止维护子命令。
 - `runtime/dash-update/transaction.env` 是持久化切换记录。停止 systemd 管理的 Dash 前，执行器会安装永久服务条件并创建 `update.block`；因此重启或执行器异常退出都不能在迁移前或部分迁移区间拉起 Dash。迁移开始前，恢复会还原之前的 release 和运行状态；迁移一旦开始，恢复只会激活候选版本并向前完成，绝不把旧二进制恢复到可能已经更新的 schema 上。迁移成功后先移除启动阻断，再启动服务；事务文件保留到启动和清理成功。完成结果依次持久化为终态事务和任务终态，最后才删除事务；执行器在两次写入之间退出时，状态协调会从终态事务恢复任务结果，而不是凭空合成失败。`dash update recover` 会继续或回滚记录中的事务。Goose 的 `goose_db_version` 仍是唯一 schema 版本来源：`dash migrate` 推进较旧 schema 并拒绝较新 schema，正常启动要求完全一致。GitHub Releases 元数据与资产是更新根信任源；GitHub 账号、token、仓库、workflow 或 release 权限被攻破，等价于更新源被攻破。
 - Linux 节点安装器只负责安装和强制重装，不负责版本升级。它会在停止 systemd、OpenRC 和匹配的手动运行进程前暂存并执行下载的二进制，随后覆盖受管 release、上报配置、服务/采集器资产，并原子切换 `current` 符号链接。节点运行用户拥有数据和 release 树，因为非特权 Node 自更新协议需要创建和切换 release；root 所有的服务及采集器资产位于该树之外。安装器最多跟随五次重定向，目标必须保持初始主机；同协议跳转必须保持有效端口，只允许 HTTP 升级到 HTTPS。节点版本升级及其恢复语义归独立的节点自更新路径所有。
-- 当前主题 ID 是持久化配置，主题解析结果只是可丢弃的展示状态。选中主题包缺失或非法时记录为 `missing` 或 `broken`，运行时使用前端内置默认皮肤，主题管理仍可用于修复或重新选择；数据库和主题根目录不可访问仍属于运行错误。主题包格式 v1 已冻结并弃用但继续兼容，不再扩展语法或能力；新能力使用后续格式。固定文件名 `/theme-bootstrap.js` 使用 `Cache-Control: no-store`，其他静态资源保持各自的缓存行为。
+- 当前主题 ID 是持久化配置，主题解析结果只是可丢弃的展示状态。选中主题包缺失或非法时记录为 `missing` 或 `broken`，运行时使用前端内置默认皮肤，主题管理仍可用于修复或重新选择；数据库和主题根目录不可访问仍属于运行错误。主题包格式 v1 已冻结并弃用但继续兼容，不再扩展语法或能力；新增能力必须使用不同的格式版本。固定文件名 `/theme-bootstrap.js` 使用 `Cache-Control: no-store`，其他静态资源保持各自的缓存行为。
 - SMART、thermal 和完整 RAID 详情属于运行时状态。SMART 缓存新鲜度、helper 可用性、设备健康结果、完整 thermal 传感器 payload 以及完整 RAID 阵列/成员 payload 保存在当前快照或热点缓存，不写入 PostgreSQL 历史指标行。确认是物理盘的 SMART 温度会归约写入 `disk_physical_metrics.temp_c`，用于按设备查询历史；虚拟盘和 RAID 设备会被忽略。同一套后端判定会生成 `disk.temperature_devices`，供前端进入硬盘温度历史。thermal 会归约写入 `cpu_temp_c` 作为主机历史；完整 thermal 详情拆成独立前台字段缓存，读取前台节点视图时再组合进 JSON。
 - TCP/UDP 连接数是持久化数值指标，会写入 `tcp_conn` 和 `udp_conn`，并作为 `conn.tcp` 和 `conn.udp` 支持历史查询。systemd Linux 主机上的完整主机/netns 连接数来自 1 秒周期的 root 侧连接数缓存，因为 Node 以低权限运行；安装脚本会在存在 `cc`、`gcc` 或 `clang` 时本地编译该 helper。OpenRC 不运行该 helper，因为 BusyBox cron 无法保持 1 秒周期。缓存缺失、过期、helper 无法编译或使用 OpenRC 时，Node 使用自带连接数统计，可能缺失容器连接数据。
-- Linux PSI pressure 指标是固定数值时序数据。PSI 的 `avg10`、`avg60`、`avg300` 和 `total` 会作为可空列保存到 `server_metrics` 和 `server_current_metrics`；缺失列表示不可用，不表示 0 压力。Dashboard 持久化会忽略采集原因/状态字符串。PSI 当前不接入告警评估。
+- Linux PSI pressure 指标是固定数值时序数据。PSI 的 `avg10`、`avg60`、`avg300` 和 `total` 会作为可空列保存到 `server_metrics` 和 `server_current_metrics`；缺失列表示不可用，不表示 0 压力。Dashboard 持久化会忽略采集原因/状态字符串。PSI 数据只进入历史链路，不参与告警评估。
 - 告警评估读取进程内最新上报快照或 PostgreSQL 当前投影。内置离线、RAID、SMART 健康失败和 NVMe 关键告警规则来自快照新鲜度和上报磁盘状态。
 - 告警服务启动后 1 分钟内不会新开告警事件。
 - 指标提交把最新节点快照放入进程内告警脏队列；控制变更可以只放节点 ID。同一节点的重复标记合并为最新快照，执行期间再次变脏会在本轮结束后再执行一次。队列和运行态都不写 Redis；进程重启后的全量协调、PostgreSQL 开放事件和后续指标上报负责恢复评估。

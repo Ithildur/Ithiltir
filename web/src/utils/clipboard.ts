@@ -2,8 +2,6 @@ import type { PushBanner } from '@app-types/topBanner';
 
 type ClipboardCopyResult = 'success' | 'https_required' | 'unsupported' | 'failed';
 
-type BannerPusher = PushBanner;
-
 const isIpHostname = (hostname: string): boolean => {
   if (!hostname) return false;
   const normalized = hostname.replace(/^\[|\]$/g, '');
@@ -86,7 +84,7 @@ const copyTextToClipboard = async (
 export const copyTextToClipboardWithFeedback = async (
   text: string,
   opts: {
-    pushBanner: BannerPusher;
+    pushBanner: PushBanner;
     successMessage: string;
     httpsRequiredMessage: string;
     failureMessage: string;

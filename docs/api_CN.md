@@ -130,7 +130,7 @@ Bearer 可选端点会把缺失、格式错误、过期、已撤销或其他非�
 ## 管理主题
 
 - `GET /api/admin/system/themes/` 返回可读取的内置和自定义主题。每项包含 `id`、`name`、`version`、`author`、`description`、`skin`、`format_version`、`deprecated`、`built_in`、`active`、`deletable`、`missing`、`broken`、`has_preview`、`created_at` 和 `updated_at`。当前主题包均返回 `format_version=1` 和 `deprecated=true`。
-- 主题包格式 v1 已冻结并弃用，但没有移除日期；现有 v1 包继续支持上传、应用和运行。v1 不再增加新的 CSS 语法、文件类型或皮肤能力，后续能力必须使用新格式。
+- 主题包格式 v1 已冻结并弃用，但没有移除日期；现有 v1 包继续支持上传、应用和运行。v1 不再增加新的 CSS 语法、文件类型或皮肤能力；新增能力必须使用不同的格式版本。
 - 主题 manifest 必须包含 `skin.admin.shell`、`skin.admin.frame`、`skin.dashboard.summary` 和 `skin.dashboard.density`；缺失或未知值会拒绝整个主题包。
 - 主题 CSS 只允许自定义属性声明。单文件不是有效 UTF-8、超过 1 MiB、声明总数超过 1024、自定义属性名超过 128 字节、值超过 4096 个 Unicode 字符，或值中含 `!important`、`url()`、`image-set()`、`src()`、`expression()` 等可加载资源的函数时，主题包会被拒绝。校验按 CSS 字符串、转义和函数 token 解析；这些单词在引号文本中仍合法，转义函数名也不能绕过限制。
 - `POST /api/admin/system/themes/upload` 接受一个 `file` part，其中 ZIP 内容最大 20 MiB；整个 multipart 请求最大 21 MiB，额外 1 MiB 用于边界、头部和其他 framing 开销。Dash 为该上传路由提供最长 5 分钟的请求读取和响应写入窗口。
@@ -177,7 +177,7 @@ Bearer 可选端点会把缺失、格式错误、过期、已撤销或其他非�
 - `disk.smart.failed` 只统计 SMART 健康结果为 `failed` 的设备，不把 `no_cache`、`no_tool`、`unsupported` 或其他采集状态计为磁盘故障。
 - `disk.smart.nvme.critical_warning` 统计 `critical_warning` bitset 非 0 的设备数。`disk.smart.attribute_failing` 统计当前 `FAILING_NOW` 的 SMART 属性数。
 - 缺失 `disk.smart` 不表示 SMART 故障。节点没有 SMART 上报时，内置 SMART 规则不会触发。
-- PSI pressure 数据当前只保存并用于历史查询；它暂时不是告警指标，也没有启用内置 PSI 告警。
+- PSI pressure 数据只保存并用于历史查询。
 
 ## 流量统计
 

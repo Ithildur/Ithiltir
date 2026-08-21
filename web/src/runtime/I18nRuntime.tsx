@@ -8,7 +8,7 @@ export const I18nRuntime: React.FC = () => {
     try {
       window.localStorage.setItem(LANG_STORAGE_KEY, lang);
     } catch {
-      // ignore storage errors
+      // Language persistence is best-effort.
     }
   }, [lang]);
 

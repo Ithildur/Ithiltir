@@ -130,7 +130,7 @@ The admin password is supplied through `monitor_dash_pwd` and must contain at le
 ## Admin Themes
 
 - `GET /api/admin/system/themes/` returns readable built-in and custom packages. Each item includes `id`, `name`, `version`, `author`, `description`, `skin`, `format_version`, `deprecated`, `built_in`, `active`, `deletable`, `missing`, `broken`, `has_preview`, `created_at`, and `updated_at`. Current packages report `format_version=1` and `deprecated=true`.
-- Theme package format v1 is frozen and deprecated without a removal date. Existing v1 packages remain uploadable, applicable, and runnable. V1 accepts no new CSS syntax, file types, or skin capabilities; future capabilities require a new format.
+- Theme package format v1 is frozen and deprecated without a removal date. Existing v1 packages remain uploadable, applicable, and runnable. V1 accepts no new CSS syntax, file types, or skin capabilities; additional capabilities require a distinct format version.
 - Theme manifests require `skin.admin.shell`, `skin.admin.frame`, `skin.dashboard.summary`, and `skin.dashboard.density`. Missing or unknown values reject the package.
 - Theme CSS accepts custom-property declarations only. A package is rejected when CSS is not valid UTF-8, exceeds 1 MiB per file, contains more than 1024 declarations, uses a custom-property name longer than 128 bytes, uses a value longer than 4096 Unicode characters, or contains `!important` or resource-capable functions such as `url()`, `image-set()`, `src()`, or `expression()`. Validation parses CSS strings, escapes, and function tokens; those words remain legal inside quoted text, while escaped function names cannot bypass the restriction.
 - `POST /api/admin/system/themes/upload` accepts one `file` part whose ZIP payload is at most 20 MiB. The complete multipart request is capped at 21 MiB, leaving 1 MiB for boundaries, headers, and other framing overhead. Dash gives this upload route a maximum five-minute request-read and response-write window.
@@ -177,7 +177,7 @@ The admin password is supplied through `monitor_dash_pwd` and must contain at le
 - `disk.smart.failed` counts devices whose SMART health is `failed`. It does not count `no_cache`, `no_tool`, `unsupported`, or other collection states as disk failures.
 - `disk.smart.nvme.critical_warning` counts devices whose `critical_warning` bitset is non-zero. `disk.smart.attribute_failing` counts current `FAILING_NOW` SMART attributes.
 - Missing `disk.smart` data is not a SMART failure. Built-in SMART rules do not trigger when a node has no SMART report.
-- PSI pressure data is currently stored and exposed for history queries only; it is not an alert metric yet and no built-in PSI alerts are enabled.
+- PSI pressure data is stored and exposed only through history queries.
 
 ## Traffic Statistics
 

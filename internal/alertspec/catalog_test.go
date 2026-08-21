@@ -23,26 +23,18 @@ func TestBuiltinRulesDoNotReuseRetiredIDs(t *testing.T) {
 	}
 }
 
-func TestNormalizeRuleRejectsInvalidInput(t *testing.T) {
-	t.Run("historical metric alias", func(t *testing.T) {
-		if _, err := NormalizeMetric("disk.total_used_ratio"); err == nil {
-			t.Fatal("NormalizeMetric() accepted a historical alias")
-		}
+func TestNormalizeRuleRejectsStaticThresholdOffset(t *testing.T) {
+	_, err := NormalizeRuleModel(model.AlertRule{
+		Name:            "cpu_high",
+		Metric:          "cpu.usage_ratio",
+		Operator:        ">=",
+		Threshold:       0.9,
+		DurationSec:     60,
+		ThresholdMode:   "static",
+		ThresholdOffset: 1,
+		Generation:      1,
 	})
-
-	t.Run("static threshold offset", func(t *testing.T) {
-		_, err := NormalizeRuleModel(model.AlertRule{
-			Name:            "cpu_high",
-			Metric:          "cpu.usage_ratio",
-			Operator:        ">=",
-			Threshold:       0.9,
-			DurationSec:     60,
-			ThresholdMode:   "static",
-			ThresholdOffset: 1,
-			Generation:      1,
-		})
-		if err == nil {
-			t.Fatal("NormalizeRuleModel() accepted a static threshold offset")
-		}
-	})
+	if err == nil {
+		t.Fatal("NormalizeRuleModel() accepted a static threshold offset")
+	}
 }

@@ -37,8 +37,6 @@ type notificationQueue interface {
 	EnqueueDefault(context.Context, string, notify.Message) (notify.EnqueueStatus, error)
 }
 
-type autoPolicy = systemstore.DashUpdatePolicy
-
 type autoState struct {
 	LastAvailableKey string
 	LastStartedID    string
@@ -245,8 +243,8 @@ func (s *Service) notifyLegacyFinishedAutoUpdate(ctx context.Context, paths runn
 	}
 }
 
-func (s *Service) loadPolicy(ctx context.Context) (autoPolicy, error) {
-	return infra.WithPGReadTimeout(ctx, func(c context.Context) (autoPolicy, error) {
+func (s *Service) loadPolicy(ctx context.Context) (systemstore.DashUpdatePolicy, error) {
+	return infra.WithPGReadTimeout(ctx, func(c context.Context) (systemstore.DashUpdatePolicy, error) {
 		return s.system.GetDashUpdatePolicy(c)
 	})
 }

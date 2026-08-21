@@ -30,8 +30,8 @@ func deployRoute(r *routes.Blueprint, h *handler) {
 	)
 }
 
-// deploy returns node deploy/install script URLs and command prefixes.
-// The returned command prefixes intentionally exclude the per-node secret.
+// deployHandler returns node deployment script URLs and command prefixes. The
+// caller completes each prefix with the node secret.
 func (h *handler) deployHandler(w http.ResponseWriter, r *http.Request) {
 	cfg := h.config
 	if cfg == nil {

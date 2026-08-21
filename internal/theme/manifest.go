@@ -16,8 +16,9 @@ const DefaultID = "default"
 
 const maxManifestBytes = 64 << 10
 
-// PackageFormatV1 is the frozen legacy theme package format. Existing v1
-// packages remain supported, but new theme capabilities require a later format.
+// PackageFormatV1 identifies the frozen and deprecated v1 theme package
+// contract. Existing packages remain supported; additional capabilities require
+// a distinct version.
 const PackageFormatV1 = 1
 
 const (

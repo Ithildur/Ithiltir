@@ -60,7 +60,6 @@ func (h *handler) metricsRoute(r *routes.Blueprint) {
 	)
 }
 
-// Hot path for node ingest; keep behavior stable to avoid silent failures.
 func (h *handler) metricsHandler(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	defer r.Body.Close()
@@ -204,7 +203,8 @@ func decodeReport(r *http.Request) (metrics.NodeReport, error) {
 func (h *handler) persistMetrics(ctx context.Context, validated *validatedMetrics, r *http.Request, logger *kitlog.Helper) (bool, error) {
 	updates, nextIP := buildServerUpdates(validated.server, r)
 
-	// Agent disk.physical is validated but not persisted; base_io feeds disk IO history.
+	// Disk IO history is sourced from base_io; disk.physical participates only
+	// in report validation.
 	currentUpdated, err := h.saveMetrics(ctx, metricdata.MetricsSample{
 		ServerID:  validated.server.ID,
 		Metric:    validated.metric,

@@ -19,7 +19,6 @@ func RedactedForLog(cfg *Config) *Config {
 	c.Database.Password = redactIfSet(c.Database.Password)
 	c.Redis.Password = redactIfSet(c.Redis.Password)
 
-	// Auth is env-only and not marshaled from YAML, but redact anyway for safety.
 	c.Auth.Password = redactIfSet(c.Auth.Password)
 	c.Auth.JWTSigningKey = redactIfSet(c.Auth.JWTSigningKey)
 

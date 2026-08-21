@@ -11,8 +11,8 @@ import (
 	"dash/internal/nodetags"
 )
 
-// NodeView is the sanitized metrics report for frontend consumption.
-// It intentionally omits "alive" and "hostname"; the frontend derives online status from received_at + stale_after_sec.
+// NodeView is the sanitized metrics contract for frontend consumers.
+// Online status is derived from Observation.ReceivedAt and Observation.StaleAfterSec.
 type NodeView struct {
 	Node        NodeMeta    `json:"node"`
 	Observation Observation `json:"observation"`

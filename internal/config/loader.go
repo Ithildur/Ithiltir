@@ -265,9 +265,8 @@ func validatePublicURLHost(u *url.URL) error {
 
 func validDNSHost(host string) bool {
 	// PublicURLHost is embedded into Bash and PowerShell installers, so this
-	// boundary intentionally accepts only ASCII DNS A-labels. Internationalized
-	// domains must be configured in IDNA/punycode form; add explicit IDNA
-	// normalization here before accepting Unicode hostnames in the future.
+	// boundary accepts DNS names only in ASCII A-label form. Internationalized
+	// domains must be configured in IDNA/punycode form.
 	host = strings.TrimSuffix(host, ".")
 	if host == "" || len(host) > 253 {
 		return false
