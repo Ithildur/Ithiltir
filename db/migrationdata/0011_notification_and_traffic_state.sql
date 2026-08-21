@@ -1,12 +1,12 @@
 ALTER TABLE notify_channels
-    ADD COLUMN IF NOT EXISTS revision BIGINT NOT NULL DEFAULT 1,
-    ADD COLUMN IF NOT EXISTS last_success_at TIMESTAMPTZ,
-    ADD COLUMN IF NOT EXISTS last_failure_at TIMESTAMPTZ,
-    ADD COLUMN IF NOT EXISTS consecutive_failures INTEGER NOT NULL DEFAULT 0,
-    ADD COLUMN IF NOT EXISTS last_error_code VARCHAR(64),
-    ADD COLUMN IF NOT EXISTS last_error TEXT,
-    ADD COLUMN IF NOT EXISTS config_updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    ADD COLUMN IF NOT EXISTS config_sealed BYTEA;
+    ADD COLUMN revision BIGINT NOT NULL DEFAULT 1,
+    ADD COLUMN last_success_at TIMESTAMPTZ,
+    ADD COLUMN last_failure_at TIMESTAMPTZ,
+    ADD COLUMN consecutive_failures INTEGER NOT NULL DEFAULT 0,
+    ADD COLUMN last_error_code VARCHAR(64),
+    ADD COLUMN last_error TEXT,
+    ADD COLUMN config_updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    ADD COLUMN config_sealed BYTEA;
 
 ALTER TABLE notify_channels
     DISABLE TRIGGER notify_channels_updated_at;
@@ -49,9 +49,9 @@ WHERE settings.id = normalized.id
   AND settings.channel_ids IS DISTINCT FROM normalized.channel_ids;
 
 ALTER TABLE alert_notification_outbox
-    ADD COLUMN IF NOT EXISTS probe_count INTEGER NOT NULL DEFAULT 0,
-    ADD COLUMN IF NOT EXISTS is_probe BOOLEAN NOT NULL DEFAULT FALSE,
-    ADD COLUMN IF NOT EXISTS failure_code VARCHAR(64),
+    ADD COLUMN probe_count INTEGER NOT NULL DEFAULT 0,
+    ADD COLUMN is_probe BOOLEAN NOT NULL DEFAULT FALSE,
+    ADD COLUMN failure_code VARCHAR(64),
     ALTER COLUMN event_id DROP NOT NULL,
     ALTER COLUMN transition TYPE VARCHAR(32);
 
@@ -84,7 +84,7 @@ ALTER TABLE alert_notification_outbox
     ADD CONSTRAINT chk_alert_notification_outbox_probe_state
     CHECK (NOT is_probe OR status = 'sending');
 
-CREATE INDEX IF NOT EXISTS idx_alert_notification_outbox_channel_active
+CREATE INDEX idx_alert_notification_outbox_channel_active
     ON alert_notification_outbox (channel_id, status, next_attempt_at)
     WHERE status IN ('pending', 'sending', 'retry', 'blocked', 'paused');
 
@@ -306,6 +306,7 @@ BEGIN
     END IF;
 END
 $migration$;
+
 ALTER TABLE server_current_disk_metrics
     ALTER COLUMN name TYPE VARCHAR(255),
     ALTER COLUMN ref TYPE VARCHAR(320),
@@ -317,11 +318,11 @@ ALTER TABLE server_current_disk_usage_metrics
     ALTER COLUMN mountpoint TYPE TEXT,
     ALTER COLUMN path TYPE TEXT;
 
-SELECT add_compression_policy('disk_metrics', INTERVAL '7 days', if_not_exists => TRUE);
-SELECT add_compression_policy('disk_physical_metrics', INTERVAL '7 days', if_not_exists => TRUE);
-SELECT add_compression_policy('disk_usage_metrics', INTERVAL '7 days', if_not_exists => TRUE);
+SELECT add_compression_policy('disk_metrics', INTERVAL '7 days');
+SELECT add_compression_policy('disk_physical_metrics', INTERVAL '7 days');
+SELECT add_compression_policy('disk_usage_metrics', INTERVAL '7 days');
 
-CREATE MATERIALIZED VIEW IF NOT EXISTS disk_metrics_15m
+CREATE MATERIALIZED VIEW disk_metrics_15m
 WITH (
     timescaledb.continuous,
     timescaledb.materialized_only = false
@@ -355,7 +356,7 @@ FROM disk_metrics
 GROUP BY bucket, server_id, name, ref
 WITH NO DATA;
 
-CREATE MATERIALIZED VIEW IF NOT EXISTS disk_metrics_1h
+CREATE MATERIALIZED VIEW disk_metrics_1h
 WITH (
     timescaledb.continuous,
     timescaledb.materialized_only = false
@@ -389,7 +390,7 @@ FROM disk_metrics
 GROUP BY bucket, server_id, name, ref
 WITH NO DATA;
 
-CREATE MATERIALIZED VIEW IF NOT EXISTS disk_usage_metrics_15m
+CREATE MATERIALIZED VIEW disk_usage_metrics_15m
 WITH (
     timescaledb.continuous,
     timescaledb.materialized_only = false
@@ -412,7 +413,7 @@ FROM disk_usage_metrics
 GROUP BY bucket, server_id, name, ref, mountpoint
 WITH NO DATA;
 
-CREATE MATERIALIZED VIEW IF NOT EXISTS disk_usage_metrics_1h
+CREATE MATERIALIZED VIEW disk_usage_metrics_1h
 WITH (
     timescaledb.continuous,
     timescaledb.materialized_only = false
@@ -438,29 +439,25 @@ WITH NO DATA;
 SELECT add_continuous_aggregate_policy('disk_usage_metrics_15m',
     start_offset => INTERVAL '31 days',
     end_offset => INTERVAL '5 minutes',
-    schedule_interval => INTERVAL '5 minutes',
-    if_not_exists => TRUE);
+    schedule_interval => INTERVAL '5 minutes');
 
 SELECT add_continuous_aggregate_policy('disk_usage_metrics_1h',
     start_offset => INTERVAL '31 days',
     end_offset => INTERVAL '10 minutes',
-    schedule_interval => INTERVAL '10 minutes',
-    if_not_exists => TRUE);
+    schedule_interval => INTERVAL '10 minutes');
 
 SELECT add_continuous_aggregate_policy('disk_metrics_15m',
     start_offset => INTERVAL '31 days',
     end_offset => INTERVAL '5 minutes',
-    schedule_interval => INTERVAL '5 minutes',
-    if_not_exists => TRUE);
+    schedule_interval => INTERVAL '5 minutes');
 
 SELECT add_continuous_aggregate_policy('disk_metrics_1h',
     start_offset => INTERVAL '31 days',
     end_offset => INTERVAL '10 minutes',
-    schedule_interval => INTERVAL '10 minutes',
-    if_not_exists => TRUE);
+    schedule_interval => INTERVAL '10 minutes');
 
 ALTER TABLE traffic_month_usage
-    ADD COLUMN IF NOT EXISTS covered_from TIMESTAMPTZ;
+    ADD COLUMN covered_from TIMESTAMPTZ;
 
 -- Existing rows predate explicit lower-bound tracking. Preserve their previous
 -- completeness semantics; newly materialized rows record the real first
@@ -474,7 +471,7 @@ ALTER TABLE traffic_month_usage
 
 COMMENT ON COLUMN traffic_month_usage.covered_from IS '统计实际覆盖起点；晚于账期起点时表示部分账期';
 
-CREATE TABLE IF NOT EXISTS traffic_materialization_progress (
+CREATE TABLE traffic_materialization_progress (
     kind                    VARCHAR(16)  PRIMARY KEY,
     scanned_until           TIMESTAMPTZ NOT NULL,
     updated_at              TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -495,7 +492,7 @@ COMMENT ON COLUMN traffic_materialization_progress.scanned_until IS '该时间�
 
 SELECT ensure_updated_at_trigger('traffic_materialization_progress');
 
-CREATE TABLE IF NOT EXISTS traffic_usage_repairs (
+CREATE TABLE traffic_usage_repairs (
     server_id               BIGINT      PRIMARY KEY REFERENCES servers (id) ON DELETE CASCADE,
     scanned_until           TIMESTAMPTZ NOT NULL,
     created_at              TIMESTAMPTZ NOT NULL DEFAULT now(),

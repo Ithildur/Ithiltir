@@ -61,8 +61,8 @@ func TestIntegrationNotificationMigrationRemovesDeletedChannelRefs(t *testing.T)
 	if err != nil {
 		t.Fatalf("rerun notification migration: %v", err)
 	}
-	if result.Applied != 1 {
-		t.Fatalf("applied migrations = %d, want 1", result.Applied)
+	if result.Applied != 2 {
+		t.Fatalf("applied migrations = %d, want 2", result.Applied)
 	}
 
 	var raw string
@@ -118,8 +118,8 @@ func TestIntegrationTrafficCycleMigrationPreservesEffectiveNodeCycles(t *testing
 	if err != nil {
 		t.Fatalf("rerun traffic migration: %v", err)
 	}
-	if result.Applied != 1 {
-		t.Fatalf("applied migrations = %d, want 1", result.Applied)
+	if result.Applied != 2 {
+		t.Fatalf("applied migrations = %d, want 2", result.Applied)
 	}
 
 	type cycleRow struct {
@@ -205,88 +205,6 @@ func TestIntegrationReleaseMigrationWidensNaturalObservationFields(t *testing.T)
 	db, keyPath := pgtest.NewDBAt(t, 10)
 
 	if err := db.Exec(`
-		DROP MATERIALIZED VIEW disk_metrics_15m;
-		DROP MATERIALIZED VIEW disk_metrics_1h;
-		DROP MATERIALIZED VIEW disk_usage_metrics_15m;
-		DROP MATERIALIZED VIEW disk_usage_metrics_1h;
-
-		ALTER TABLE servers
-		    ALTER COLUMN name TYPE VARCHAR(64),
-		    ALTER COLUMN hostname TYPE VARCHAR(128),
-		    ALTER COLUMN platform_version TYPE VARCHAR(64),
-		    ALTER COLUMN kernel_version TYPE VARCHAR(64),
-		    ALTER COLUMN cpu_model TYPE VARCHAR(128),
-		    ALTER COLUMN cpu_vendor TYPE VARCHAR(64),
-		    ALTER COLUMN root_path TYPE VARCHAR(256);
-		ALTER TABLE disk_metrics
-		    ALTER COLUMN name TYPE VARCHAR(128),
-		    ALTER COLUMN ref TYPE VARCHAR(128),
-		    ALTER COLUMN path TYPE VARCHAR(256);
-		ALTER TABLE disk_physical_metrics
-		    ALTER COLUMN name TYPE VARCHAR(128),
-		    ALTER COLUMN ref TYPE VARCHAR(128),
-		    ALTER COLUMN path TYPE VARCHAR(256);
-		ALTER TABLE disk_usage_metrics
-		    ALTER COLUMN name TYPE VARCHAR(128),
-		    ALTER COLUMN ref TYPE VARCHAR(128),
-		    ALTER COLUMN mountpoint TYPE VARCHAR(256),
-		    ALTER COLUMN path TYPE VARCHAR(256);
-		ALTER TABLE server_current_disk_metrics
-		    ALTER COLUMN name TYPE VARCHAR(128),
-		    ALTER COLUMN ref TYPE VARCHAR(128),
-		    ALTER COLUMN path TYPE VARCHAR(256);
-		ALTER TABLE server_current_disk_usage_metrics
-		    ALTER COLUMN name TYPE VARCHAR(128),
-		    ALTER COLUMN ref TYPE VARCHAR(128),
-		    ALTER COLUMN mountpoint TYPE VARCHAR(256),
-		    ALTER COLUMN path TYPE VARCHAR(256);
-
-		CREATE MATERIALIZED VIEW disk_metrics_15m
-		WITH (timescaledb.continuous) AS
-		SELECT time_bucket('15 minutes', collected_at) AS bucket,
-		       server_id,
-		       name,
-		       ref,
-		       avg(read_rate_bytes_per_sec) AS read_bps_avg
-		FROM disk_metrics
-		GROUP BY bucket, server_id, name, ref
-		WITH NO DATA;
-
-		CREATE MATERIALIZED VIEW disk_metrics_1h
-		WITH (timescaledb.continuous) AS
-		SELECT time_bucket('1 hour', collected_at) AS bucket,
-		       server_id,
-		       name,
-		       ref,
-		       avg(read_rate_bytes_per_sec) AS read_bps_avg
-		FROM disk_metrics
-		GROUP BY bucket, server_id, name, ref
-		WITH NO DATA;
-
-		CREATE MATERIALIZED VIEW disk_usage_metrics_15m
-		WITH (timescaledb.continuous) AS
-		SELECT time_bucket('15 minutes', collected_at) AS bucket,
-		       server_id,
-		       name,
-		       ref,
-		       mountpoint,
-		       avg(used) AS used_bytes_avg
-		FROM disk_usage_metrics
-		GROUP BY bucket, server_id, name, ref, mountpoint
-		WITH NO DATA;
-
-		CREATE MATERIALIZED VIEW disk_usage_metrics_1h
-		WITH (timescaledb.continuous) AS
-		SELECT time_bucket('1 hour', collected_at) AS bucket,
-		       server_id,
-		       name,
-		       ref,
-		       mountpoint,
-		       avg(used) AS used_bytes_avg
-		FROM disk_usage_metrics
-		GROUP BY bucket, server_id, name, ref, mountpoint
-		WITH NO DATA;
-
 		INSERT INTO servers (name, hostname, secret)
 		VALUES ('legacy-storage', 'legacy-storage', 'legacy-storage-secret');
 
@@ -312,14 +230,14 @@ func TestIntegrationReleaseMigrationWidensNaturalObservationFields(t *testing.T)
 		SELECT compress_chunk(chunk, true)
 		FROM show_chunks('disk_usage_metrics') AS chunk;
 	`).Error; err != nil {
-		t.Fatalf("restore legacy observation field types: %v", err)
+		t.Fatalf("seed legacy observation rows: %v", err)
 	}
 	result, err := migrate.Run(ctx, db, keyPath)
 	if err != nil {
 		t.Fatalf("rerun release migration: %v", err)
 	}
-	if result.Applied != 1 {
-		t.Fatalf("applied migrations = %d, want 1", result.Applied)
+	if result.Applied != 2 {
+		t.Fatalf("applied migrations = %d, want 2", result.Applied)
 	}
 
 	type columnType struct {
@@ -454,7 +372,7 @@ func TestIntegrationReleaseMigrationWidensNaturalObservationFields(t *testing.T)
 
 func TestIntegrationSchemaVersionGuard(t *testing.T) {
 	ctx := context.Background()
-	db, keyPath := pgtest.NewDBAt(t, 11)
+	db, keyPath := pgtest.NewDBAt(t, 12)
 	if err := migrate.CheckVersion(ctx, db); err != nil {
 		t.Fatalf("CheckVersion(current) error = %v", err)
 	}

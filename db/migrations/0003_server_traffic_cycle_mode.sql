@@ -3,10 +3,10 @@
 -- Per-server billing cycle mode override. Existing servers keep following the global default.
 
 ALTER TABLE servers
-    ADD COLUMN IF NOT EXISTS traffic_cycle_mode VARCHAR(32) NOT NULL DEFAULT 'default',
-    ADD COLUMN IF NOT EXISTS traffic_billing_start_day SMALLINT NOT NULL DEFAULT 1,
-    ADD COLUMN IF NOT EXISTS traffic_billing_anchor_date VARCHAR(10) NOT NULL DEFAULT '',
-    ADD COLUMN IF NOT EXISTS traffic_billing_timezone VARCHAR(64) NOT NULL DEFAULT '';
+    ADD COLUMN traffic_cycle_mode VARCHAR(32) NOT NULL DEFAULT 'default',
+    ADD COLUMN traffic_billing_start_day SMALLINT NOT NULL DEFAULT 1,
+    ADD COLUMN traffic_billing_anchor_date VARCHAR(10) NOT NULL DEFAULT '',
+    ADD COLUMN traffic_billing_timezone VARCHAR(64) NOT NULL DEFAULT '';
 
 UPDATE servers
 SET traffic_cycle_mode = 'default'

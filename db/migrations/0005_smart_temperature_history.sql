@@ -5,13 +5,13 @@
 
 ALTER TABLE server_metrics
     DROP COLUMN IF EXISTS disk_smart,
-    ADD COLUMN IF NOT EXISTS cpu_temp_c DOUBLE PRECISION;
+    ADD COLUMN cpu_temp_c DOUBLE PRECISION;
 
 ALTER TABLE server_current_metrics
     DROP COLUMN IF EXISTS disk_smart,
-    ADD COLUMN IF NOT EXISTS cpu_temp_c DOUBLE PRECISION;
+    ADD COLUMN cpu_temp_c DOUBLE PRECISION;
 
-CREATE TABLE IF NOT EXISTS disk_physical_metrics (
+CREATE TABLE disk_physical_metrics (
     server_id                 BIGINT       NOT NULL REFERENCES servers (id) ON DELETE CASCADE,
     name                      VARCHAR(128) NOT NULL,
     ref                       VARCHAR(128) NOT NULL DEFAULT '',
@@ -25,8 +25,7 @@ CREATE TABLE IF NOT EXISTS disk_physical_metrics (
 SELECT create_hypertable(
     'disk_physical_metrics',
     'collected_at',
-    chunk_time_interval => INTERVAL '1 day',
-    if_not_exists       => TRUE
+    chunk_time_interval => INTERVAL '1 day'
 );
 
 ALTER TABLE disk_physical_metrics
@@ -36,8 +35,8 @@ SET (
     timescaledb.compress_segmentby = 'server_id, name'
 );
 
-SELECT add_compression_policy('disk_physical_metrics', INTERVAL '7 days', if_not_exists => TRUE);
-SELECT add_retention_policy('disk_physical_metrics', INTERVAL '45 days', if_not_exists => TRUE);
+SELECT add_compression_policy('disk_physical_metrics', INTERVAL '7 days');
+SELECT add_retention_policy('disk_physical_metrics', INTERVAL '45 days');
 
 COMMENT ON COLUMN server_metrics.cpu_temp_c IS 'Maximum CPU temperature in Celsius';
 COMMENT ON COLUMN server_current_metrics.cpu_temp_c IS 'Current maximum CPU temperature in Celsius';

@@ -1,14 +1,7 @@
 -- +goose Up
 
--- Store SMART and thermal runtime details with historical and current metrics.
-
-ALTER TABLE server_metrics
-    ADD COLUMN IF NOT EXISTS disk_smart JSONB,
-    ADD COLUMN IF NOT EXISTS thermal JSONB;
-
-ALTER TABLE server_current_metrics
-    ADD COLUMN IF NOT EXISTS disk_smart JSONB,
-    ADD COLUMN IF NOT EXISTS thermal JSONB;
+-- SMART and thermal columns are part of the version 1 baseline. Version 4
+-- standardized their catalog documentation without changing their shape.
 
 COMMENT ON COLUMN server_metrics.disk_smart IS 'SMART 运行时详情（JSON）';
 COMMENT ON COLUMN server_metrics.thermal IS '温度传感器运行时详情（JSON）';

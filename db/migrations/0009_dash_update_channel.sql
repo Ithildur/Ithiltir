@@ -1,8 +1,8 @@
 -- +goose Up
 
 ALTER TABLE system_settings
-    ADD COLUMN IF NOT EXISTS dash_update_channel VARCHAR(16) NOT NULL DEFAULT 'release',
-    ADD COLUMN IF NOT EXISTS dash_update_mode VARCHAR(16) NOT NULL DEFAULT 'manual';
+    ADD COLUMN dash_update_channel VARCHAR(16) NOT NULL DEFAULT 'release',
+    ADD COLUMN dash_update_mode VARCHAR(16) NOT NULL DEFAULT 'manual';
 
 UPDATE system_settings
 SET dash_update_channel = 'release'

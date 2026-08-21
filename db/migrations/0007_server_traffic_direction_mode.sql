@@ -3,7 +3,7 @@
 -- Per-server traffic direction override. Existing servers keep following the global default.
 
 ALTER TABLE servers
-    ADD COLUMN IF NOT EXISTS traffic_direction_mode VARCHAR(16) NOT NULL DEFAULT 'default';
+    ADD COLUMN traffic_direction_mode VARCHAR(16) NOT NULL DEFAULT 'default';
 
 UPDATE servers
 SET traffic_direction_mode = 'default'

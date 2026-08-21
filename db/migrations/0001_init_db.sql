@@ -3,6 +3,7 @@
 -- 服务器监控系统初始化（PostgreSQL + TimescaleDB）
 -- 说明：建表 + Timescale hypertable/策略 + 触发器 + 预置规则
 
+-- TimescaleDB may be provisioned by the database owner before the application schema.
 CREATE EXTENSION IF NOT EXISTS timescaledb;
 
 -- 可选：按需设置时区
@@ -24,17 +25,11 @@ $$ LANGUAGE plpgsql;
 CREATE OR REPLACE FUNCTION ensure_updated_at_trigger(table_name TEXT)
 RETURNS VOID AS $$
 BEGIN
-    IF NOT EXISTS (
-        SELECT 1
-        FROM pg_trigger
-        WHERE tgname = table_name || '_updated_at'
-    ) THEN
-        EXECUTE format(
-            'CREATE TRIGGER %I BEFORE UPDATE ON %I FOR EACH ROW EXECUTE FUNCTION set_updated_at()',
-            table_name || '_updated_at',
-            table_name
-        );
-    END IF;
+    EXECUTE format(
+        'CREATE TRIGGER %I BEFORE UPDATE ON %I FOR EACH ROW EXECUTE FUNCTION set_updated_at()',
+        table_name || '_updated_at',
+        table_name
+    );
 END;
 $$ LANGUAGE plpgsql;
 
@@ -42,39 +37,18 @@ $$ LANGUAGE plpgsql;
 -- 枚举类型
 -- ---------------------------------------------------------
 
-DO $$
-BEGIN
-    IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'service_type') THEN
-        CREATE TYPE service_type AS ENUM ('http', 'tcp', 'ping', 'dns', 'tls');
-    END IF;
-
-    IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'task_type') THEN
-        CREATE TYPE task_type AS ENUM ('shell', 'http', 'script');
-    END IF;
-
-    IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'target_type') THEN
-        CREATE TYPE target_type AS ENUM ('all', 'group', 'server', 'custom');
-    END IF;
-
-    IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'object_type') THEN
-        CREATE TYPE object_type AS ENUM ('server', 'service');
-    END IF;
-
-    IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'alert_status') THEN
-        CREATE TYPE alert_status AS ENUM ('open', 'closed');
-    END IF;
-
-    IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'notify_type') THEN
-        CREATE TYPE notify_type AS ENUM ('telegram', 'email', 'webhook', 'wechat', 'slack', 'discord');
-    END IF;
-END
-$$;
+CREATE TYPE service_type AS ENUM ('http', 'tcp', 'ping', 'dns', 'tls');
+CREATE TYPE task_type AS ENUM ('shell', 'http', 'script');
+CREATE TYPE target_type AS ENUM ('all', 'group', 'server', 'custom');
+CREATE TYPE object_type AS ENUM ('server', 'service');
+CREATE TYPE alert_status AS ENUM ('open', 'closed');
+CREATE TYPE notify_type AS ENUM ('telegram', 'email', 'webhook', 'wechat', 'slack', 'discord');
 
 -- ---------------------------------------------------------
 -- 分组（机器/业务分组）
 -- ---------------------------------------------------------
 
-CREATE TABLE IF NOT EXISTS groups (
+CREATE TABLE groups (
     id         BIGSERIAL   PRIMARY KEY,
     name       VARCHAR(64) NOT NULL,
     remark     VARCHAR(255),
@@ -93,20 +67,14 @@ COMMENT ON COLUMN groups.updated_at IS '更新时间';
 
 SELECT ensure_updated_at_trigger('groups');
 
--- 默认分组（没就补一个）
-DO $$
-BEGIN
-    IF NOT EXISTS (SELECT 1 FROM groups WHERE name = 'default') THEN
-        INSERT INTO groups (name, remark) VALUES ('default', 'default');
-    END IF;
-END
-$$;
+-- 默认分组
+INSERT INTO groups (name, remark) VALUES ('default', 'default');
 
 -- ---------------------------------------------------------
 -- 服务器节点（与 agent/node 实例一一对应）
 -- ---------------------------------------------------------
 
-CREATE TABLE IF NOT EXISTS servers (
+CREATE TABLE servers (
     id                 BIGSERIAL    PRIMARY KEY,
 
     name               VARCHAR(64)  NOT NULL,
@@ -153,7 +121,7 @@ CREATE TABLE IF NOT EXISTS servers (
     CONSTRAINT uk_servers_secret UNIQUE (secret)
 );
 
-CREATE INDEX IF NOT EXISTS idx_servers_display_order ON servers (display_order);
+CREATE INDEX idx_servers_display_order ON servers (display_order);
 
 COMMENT ON TABLE servers IS '服务器节点';
 COMMENT ON COLUMN servers.id IS '主键';
@@ -197,14 +165,14 @@ SELECT ensure_updated_at_trigger('servers');
 -- 服务器 - 分组（多对多）
 -- ---------------------------------------------------------
 
-CREATE TABLE IF NOT EXISTS server_groups (
+CREATE TABLE server_groups (
     server_id  BIGINT      NOT NULL REFERENCES servers (id) ON DELETE CASCADE,
     group_id   BIGINT      NOT NULL REFERENCES groups (id)  ON DELETE CASCADE,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     PRIMARY KEY (server_id, group_id)
 );
 
-CREATE INDEX IF NOT EXISTS idx_server_groups_group ON server_groups (group_id);
+CREATE INDEX idx_server_groups_group ON server_groups (group_id);
 
 COMMENT ON TABLE server_groups IS '服务器分组关系';
 COMMENT ON COLUMN server_groups.server_id IS '服务器 ID';
@@ -215,7 +183,7 @@ COMMENT ON COLUMN server_groups.created_at IS '创建时间';
 -- 服务器历史指标（Timescale hypertable）
 -- ---------------------------------------------------------
 
-CREATE TABLE IF NOT EXISTS server_metrics (
+CREATE TABLE server_metrics (
     server_id            BIGINT      NOT NULL REFERENCES servers (id) ON DELETE CASCADE,
     collected_at         TIMESTAMPTZ NOT NULL,
     reported_at          TIMESTAMPTZ,
@@ -265,14 +233,13 @@ CREATE TABLE IF NOT EXISTS server_metrics (
     PRIMARY KEY (server_id, collected_at)
 );
 
-CREATE INDEX IF NOT EXISTS idx_sm_server_collected_at
+CREATE INDEX idx_sm_server_collected_at
     ON server_metrics (server_id, collected_at DESC);
 
 SELECT create_hypertable(
     'server_metrics',
     'collected_at',
-    chunk_time_interval => INTERVAL '1 day',
-    if_not_exists       => TRUE
+    chunk_time_interval => INTERVAL '1 day'
 );
 
 ALTER TABLE server_metrics
@@ -321,14 +288,14 @@ COMMENT ON COLUMN server_metrics.disk_smart IS 'SMART 运行时详情（JSON）'
 COMMENT ON COLUMN server_metrics.thermal IS '温度传感器运行时详情（JSON）';
 
 -- 默认保留最近 45 天
-SELECT add_retention_policy('server_metrics', INTERVAL '45 days', if_not_exists => TRUE);
-SELECT add_compression_policy('server_metrics', INTERVAL '7 days', if_not_exists => TRUE);
+SELECT add_retention_policy('server_metrics', INTERVAL '45 days');
+SELECT add_compression_policy('server_metrics', INTERVAL '7 days');
 
 -- ---------------------------------------------------------
 -- 网卡时序指标（每接口一行）
 -- ---------------------------------------------------------
 
-CREATE TABLE IF NOT EXISTS nic_metrics (
+CREATE TABLE nic_metrics (
     server_id                  BIGINT      NOT NULL REFERENCES servers (id) ON DELETE CASCADE,
     iface                      VARCHAR(64) NOT NULL,
     collected_at               TIMESTAMPTZ NOT NULL,
@@ -356,8 +323,7 @@ CREATE TABLE IF NOT EXISTS nic_metrics (
 SELECT create_hypertable(
     'nic_metrics',
     'collected_at',
-    chunk_time_interval => INTERVAL '1 day',
-    if_not_exists       => TRUE
+    chunk_time_interval => INTERVAL '1 day'
 );
 
 -- 7 天后压缩；按 server_id + iface 分段
@@ -368,8 +334,8 @@ SET (
     timescaledb.compress_segmentby = 'server_id, iface'
 );
 
-SELECT add_compression_policy('nic_metrics', INTERVAL '7 days', if_not_exists => TRUE);
-SELECT add_retention_policy('nic_metrics', INTERVAL '45 days', if_not_exists => TRUE);
+SELECT add_compression_policy('nic_metrics', INTERVAL '7 days');
+SELECT add_retention_policy('nic_metrics', INTERVAL '45 days');
 
 COMMENT ON TABLE nic_metrics IS '网卡时序指标';
 COMMENT ON COLUMN nic_metrics.server_id IS '服务器 ID';
@@ -393,7 +359,7 @@ COMMENT ON COLUMN nic_metrics.extra IS '扩展字段（JSON）';
 -- 磁盘 IO 时序指标（每设备一行）
 -- ---------------------------------------------------------
 
-CREATE TABLE IF NOT EXISTS disk_metrics (
+CREATE TABLE disk_metrics (
     server_id                 BIGINT       NOT NULL REFERENCES servers (id) ON DELETE CASCADE,
     name                      VARCHAR(128) NOT NULL,
     ref                       VARCHAR(128) NOT NULL,
@@ -422,8 +388,7 @@ CREATE TABLE IF NOT EXISTS disk_metrics (
 SELECT create_hypertable(
     'disk_metrics',
     'collected_at',
-    chunk_time_interval => INTERVAL '1 day',
-    if_not_exists       => TRUE
+    chunk_time_interval => INTERVAL '1 day'
 );
 
 -- 7 天后压缩；按 server_id + name 分段
@@ -434,8 +399,8 @@ SET (
     timescaledb.compress_segmentby = 'server_id, name'
 );
 
-SELECT add_compression_policy('disk_metrics', INTERVAL '7 days', if_not_exists => TRUE);
-SELECT add_retention_policy('disk_metrics', INTERVAL '45 days', if_not_exists => TRUE);
+SELECT add_compression_policy('disk_metrics', INTERVAL '7 days');
+SELECT add_retention_policy('disk_metrics', INTERVAL '45 days');
 
 COMMENT ON TABLE disk_metrics IS '磁盘 IO 时序指标';
 COMMENT ON COLUMN disk_metrics.server_id IS '服务器 ID';
@@ -461,7 +426,7 @@ COMMENT ON COLUMN disk_metrics.service_ms IS '平均服务（ms）';
 -- 磁盘容量时序指标（每逻辑盘一行）
 -- ---------------------------------------------------------
 
-CREATE TABLE IF NOT EXISTS disk_usage_metrics (
+CREATE TABLE disk_usage_metrics (
     server_id     BIGINT       NOT NULL REFERENCES servers (id) ON DELETE CASCADE,
     name          VARCHAR(128) NOT NULL,
     ref           VARCHAR(128) NOT NULL,
@@ -487,8 +452,7 @@ CREATE TABLE IF NOT EXISTS disk_usage_metrics (
 SELECT create_hypertable(
     'disk_usage_metrics',
     'collected_at',
-    chunk_time_interval => INTERVAL '1 day',
-    if_not_exists       => TRUE
+    chunk_time_interval => INTERVAL '1 day'
 );
 
 ALTER TABLE disk_usage_metrics
@@ -498,8 +462,8 @@ SET (
     timescaledb.compress_segmentby = 'server_id, name'
 );
 
-SELECT add_compression_policy('disk_usage_metrics', INTERVAL '7 days', if_not_exists => TRUE);
-SELECT add_retention_policy('disk_usage_metrics', INTERVAL '45 days', if_not_exists => TRUE);
+SELECT add_compression_policy('disk_usage_metrics', INTERVAL '7 days');
+SELECT add_retention_policy('disk_usage_metrics', INTERVAL '45 days');
 
 COMMENT ON TABLE disk_usage_metrics IS '磁盘容量时序指标';
 COMMENT ON COLUMN disk_usage_metrics.server_id IS '服务器 ID';
@@ -522,7 +486,7 @@ COMMENT ON COLUMN disk_usage_metrics.level IS '阵列级别';
 -- 设备目录（可选：快速列出网卡/磁盘）
 -- ---------------------------------------------------------
 
-CREATE TABLE IF NOT EXISTS server_devices (
+CREATE TABLE server_devices (
     server_id      BIGINT      NOT NULL REFERENCES servers (id) ON DELETE CASCADE,
     kind           VARCHAR(8)  NOT NULL, -- 'nic' | 'disk'
     name           VARCHAR(64) NOT NULL, -- iface / device
@@ -532,7 +496,7 @@ CREATE TABLE IF NOT EXISTS server_devices (
     PRIMARY KEY (server_id, kind, name)
 );
 
-CREATE INDEX IF NOT EXISTS idx_server_devices_kind ON server_devices (kind);
+CREATE INDEX idx_server_devices_kind ON server_devices (kind);
 
 COMMENT ON TABLE server_devices IS '服务器设备目录';
 COMMENT ON COLUMN server_devices.server_id IS '服务器 ID';
@@ -546,7 +510,7 @@ COMMENT ON COLUMN server_devices.retired_at IS '下线时间';
 -- 服务监控配置
 -- ---------------------------------------------------------
 
-CREATE TABLE IF NOT EXISTS services (
+CREATE TABLE services (
     id             BIGSERIAL     PRIMARY KEY,
     name           VARCHAR(128)  NOT NULL,
     group_id       BIGINT        REFERENCES groups (id),
@@ -574,8 +538,8 @@ CREATE TABLE IF NOT EXISTS services (
     updated_at     TIMESTAMPTZ   NOT NULL DEFAULT now()
 );
 
-CREATE INDEX IF NOT EXISTS idx_services_type  ON services (type);
-CREATE INDEX IF NOT EXISTS idx_services_group ON services (group_id);
+CREATE INDEX idx_services_type  ON services (type);
+CREATE INDEX idx_services_group ON services (group_id);
 
 COMMENT ON TABLE services IS '服务监控配置';
 COMMENT ON COLUMN services.id IS '主键';
@@ -605,7 +569,7 @@ SELECT ensure_updated_at_trigger('services');
 -- 服务探测结果（Timescale hypertable）
 -- ---------------------------------------------------------
 
-CREATE TABLE IF NOT EXISTS service_checks (
+CREATE TABLE service_checks (
     service_id       BIGINT      NOT NULL REFERENCES services (id) ON DELETE CASCADE,
     probe_server_id  BIGINT      REFERENCES servers (id) ON DELETE SET NULL,
 
@@ -619,14 +583,13 @@ CREATE TABLE IF NOT EXISTS service_checks (
     PRIMARY KEY (service_id, ts)
 );
 
-CREATE INDEX IF NOT EXISTS idx_sc_service_ts ON service_checks (service_id, ts DESC);
-CREATE INDEX IF NOT EXISTS idx_sc_ts         ON service_checks (ts DESC);
+CREATE INDEX idx_sc_service_ts ON service_checks (service_id, ts DESC);
+CREATE INDEX idx_sc_ts         ON service_checks (ts DESC);
 
 SELECT create_hypertable(
     'service_checks',
     'ts',
-    chunk_time_interval => INTERVAL '7 days',
-    if_not_exists       => TRUE
+    chunk_time_interval => INTERVAL '7 days'
 );
 
 ALTER TABLE service_checks
@@ -645,14 +608,14 @@ COMMENT ON COLUMN service_checks.latency_ms IS '延迟（ms）';
 COMMENT ON COLUMN service_checks.http_code IS 'HTTP 状态码';
 COMMENT ON COLUMN service_checks.result IS '结果/错误信息';
 
-SELECT add_retention_policy('service_checks', INTERVAL '45 days', if_not_exists => TRUE);
-SELECT add_compression_policy('service_checks', INTERVAL '7 days', if_not_exists => TRUE);
+SELECT add_retention_policy('service_checks', INTERVAL '45 days');
+SELECT add_compression_policy('service_checks', INTERVAL '7 days');
 
 -- ---------------------------------------------------------
 -- 定时任务配置
 -- ---------------------------------------------------------
 
-CREATE TABLE IF NOT EXISTS tasks (
+CREATE TABLE tasks (
     id           BIGSERIAL    PRIMARY KEY,
     name         VARCHAR(128) NOT NULL,
     type         task_type    NOT NULL DEFAULT 'shell',
@@ -694,7 +657,7 @@ SELECT ensure_updated_at_trigger('tasks');
 -- 定时任务执行日志
 -- ---------------------------------------------------------
 
-CREATE TABLE IF NOT EXISTS task_logs (
+CREATE TABLE task_logs (
     id        BIGSERIAL    PRIMARY KEY,
     task_id   BIGINT       NOT NULL REFERENCES tasks (id)   ON DELETE CASCADE,
     server_id BIGINT       NOT NULL REFERENCES servers (id) ON DELETE CASCADE,
@@ -706,8 +669,8 @@ CREATE TABLE IF NOT EXISTS task_logs (
     output    TEXT
 );
 
-CREATE INDEX IF NOT EXISTS idx_tl_task   ON task_logs (task_id, start_at DESC);
-CREATE INDEX IF NOT EXISTS idx_tl_server ON task_logs (server_id, start_at DESC);
+CREATE INDEX idx_tl_task   ON task_logs (task_id, start_at DESC);
+CREATE INDEX idx_tl_server ON task_logs (server_id, start_at DESC);
 
 COMMENT ON TABLE task_logs IS '任务执行日志';
 COMMENT ON COLUMN task_logs.id IS '主键';
@@ -723,7 +686,7 @@ COMMENT ON COLUMN task_logs.output IS '输出';
 -- 通知渠道配置
 -- ---------------------------------------------------------
 
-CREATE TABLE IF NOT EXISTS notify_channels (
+CREATE TABLE notify_channels (
     id         BIGSERIAL    PRIMARY KEY,
     name       VARCHAR(64)  NOT NULL,
     type       notify_type  NOT NULL,
@@ -734,7 +697,7 @@ CREATE TABLE IF NOT EXISTS notify_channels (
     updated_at TIMESTAMPTZ  NOT NULL DEFAULT now()
 );
 
-CREATE INDEX IF NOT EXISTS idx_notify_type ON notify_channels (type);
+CREATE INDEX idx_notify_type ON notify_channels (type);
 
 COMMENT ON TABLE notify_channels IS '通知渠道';
 COMMENT ON COLUMN notify_channels.id IS '主键';
@@ -752,7 +715,7 @@ SELECT ensure_updated_at_trigger('notify_channels');
 -- 告警规则
 -- ---------------------------------------------------------
 
-CREATE TABLE IF NOT EXISTS alert_settings (
+CREATE TABLE alert_settings (
     id          BIGSERIAL   PRIMARY KEY,
     scope       VARCHAR(32) NOT NULL DEFAULT 'global',
     enabled     BOOLEAN     NOT NULL DEFAULT TRUE,
@@ -774,7 +737,7 @@ SELECT ensure_updated_at_trigger('alert_settings');
 
 -- Alert rule semantics are validated in application code (internal/alertspec)
 -- so the database schema only keeps structural constraints here.
-CREATE TABLE IF NOT EXISTS alert_rules (
+CREATE TABLE alert_rules (
     id               BIGSERIAL        PRIMARY KEY,
     name             VARCHAR(128)     NOT NULL,
     enabled          BOOLEAN          NOT NULL DEFAULT TRUE,
@@ -838,7 +801,7 @@ SELECT setval(
     TRUE
 );
 
-CREATE TABLE IF NOT EXISTS alert_rule_mounts (
+CREATE TABLE alert_rule_mounts (
     rule_id    BIGINT      NOT NULL,
     server_id  BIGINT      NOT NULL REFERENCES servers (id) ON DELETE CASCADE,
     enabled    BOOLEAN     NOT NULL,
@@ -850,7 +813,7 @@ CREATE TABLE IF NOT EXISTS alert_rule_mounts (
         CHECK (rule_id <> 0)
 );
 
-CREATE INDEX IF NOT EXISTS idx_alert_rule_mounts_server
+CREATE INDEX idx_alert_rule_mounts_server
     ON alert_rule_mounts (server_id);
 
 COMMENT ON TABLE alert_rule_mounts IS '告警规则挂载';
@@ -866,7 +829,7 @@ SELECT ensure_updated_at_trigger('alert_rule_mounts');
 -- 告警事件
 -- ---------------------------------------------------------
 
-CREATE TABLE IF NOT EXISTS alert_events (
+CREATE TABLE alert_events (
     id                  BIGSERIAL     PRIMARY KEY,
     rule_id             BIGINT        NOT NULL,
     rule_generation     BIGINT        NOT NULL,
@@ -888,10 +851,10 @@ CREATE TABLE IF NOT EXISTS alert_events (
     message             TEXT
 );
 
-CREATE INDEX IF NOT EXISTS idx_ae_rule        ON alert_events (rule_id);
-CREATE INDEX IF NOT EXISTS idx_ae_object      ON alert_events (object_type, object_id);
-CREATE INDEX IF NOT EXISTS idx_ae_open_object ON alert_events (object_type, object_id, status);
-CREATE UNIQUE INDEX IF NOT EXISTS uniq_alert_event_open
+CREATE INDEX idx_ae_rule        ON alert_events (rule_id);
+CREATE INDEX idx_ae_object      ON alert_events (object_type, object_id);
+CREATE INDEX idx_ae_open_object ON alert_events (object_type, object_id, status);
+CREATE UNIQUE INDEX uniq_alert_event_open
     ON alert_events (rule_id, rule_generation, object_type, object_id)
     WHERE status = 'open';
 
@@ -912,7 +875,7 @@ COMMENT ON COLUMN alert_events.close_reason IS '关闭原因';
 COMMENT ON COLUMN alert_events.title IS '标题';
 COMMENT ON COLUMN alert_events.message IS '内容';
 
-CREATE TABLE IF NOT EXISTS alert_notification_outbox (
+CREATE TABLE alert_notification_outbox (
     id              BIGSERIAL     PRIMARY KEY,
     event_id        BIGINT        NOT NULL REFERENCES alert_events (id) ON DELETE CASCADE,
     transition      VARCHAR(16)   NOT NULL,
@@ -929,10 +892,10 @@ CREATE TABLE IF NOT EXISTS alert_notification_outbox (
     sent_at         TIMESTAMPTZ
 );
 
-CREATE UNIQUE INDEX IF NOT EXISTS uniq_alert_notification_outbox_dedupe
+CREATE UNIQUE INDEX uniq_alert_notification_outbox_dedupe
     ON alert_notification_outbox (dedupe_key);
 
-CREATE INDEX IF NOT EXISTS idx_alert_notification_outbox_pending
+CREATE INDEX idx_alert_notification_outbox_pending
     ON alert_notification_outbox (status, next_attempt_at);
 
 COMMENT ON TABLE alert_notification_outbox IS '告警通知事务型 outbox';
@@ -950,7 +913,7 @@ COMMENT ON COLUMN alert_notification_outbox.leased_until IS '租约截止时间'
 COMMENT ON COLUMN alert_notification_outbox.created_at IS '创建时间';
 COMMENT ON COLUMN alert_notification_outbox.sent_at IS '发送完成时间';
 
-CREATE TABLE IF NOT EXISTS alert_control_tasks (
+CREATE TABLE alert_control_tasks (
     id            BIGSERIAL     PRIMARY KEY,
     task_type     VARCHAR(32)   NOT NULL,
     dedupe_key    VARCHAR(255)  NOT NULL,
@@ -964,10 +927,10 @@ CREATE TABLE IF NOT EXISTS alert_control_tasks (
     updated_at    TIMESTAMPTZ   NOT NULL DEFAULT now()
 );
 
-CREATE UNIQUE INDEX IF NOT EXISTS uniq_alert_control_tasks_dedupe
+CREATE UNIQUE INDEX uniq_alert_control_tasks_dedupe
     ON alert_control_tasks (dedupe_key);
 
-CREATE INDEX IF NOT EXISTS idx_alert_control_tasks_pending
+CREATE INDEX idx_alert_control_tasks_pending
     ON alert_control_tasks (status, available_at);
 
 COMMENT ON TABLE alert_control_tasks IS '告警控制任务';
@@ -988,7 +951,7 @@ SELECT ensure_updated_at_trigger('alert_control_tasks');
 -- Metrics history aggregates and rollups (TimescaleDB)
 -- ---------------------------------------------------------
 
-CREATE MATERIALIZED VIEW IF NOT EXISTS server_metrics_15m
+CREATE MATERIALIZED VIEW server_metrics_15m
 WITH (timescaledb.continuous) AS
 SELECT
     time_bucket('15 minutes', collected_at) AS bucket,
@@ -1041,7 +1004,7 @@ FROM server_metrics
 GROUP BY bucket, server_id
 WITH NO DATA;
 
-CREATE MATERIALIZED VIEW IF NOT EXISTS server_online_30m
+CREATE MATERIALIZED VIEW server_online_30m
 WITH (timescaledb.continuous) AS
 SELECT
     time_bucket('30 minutes', collected_at) AS bucket,
@@ -1051,7 +1014,7 @@ FROM server_metrics
 GROUP BY bucket, server_id
 WITH NO DATA;
 
-CREATE MATERIALIZED VIEW IF NOT EXISTS disk_metrics_15m
+CREATE MATERIALIZED VIEW disk_metrics_15m
 WITH (timescaledb.continuous) AS
 SELECT
     time_bucket('15 minutes', collected_at) AS bucket,
@@ -1082,7 +1045,7 @@ FROM disk_metrics
 GROUP BY bucket, server_id, name, ref
 WITH NO DATA;
 
-CREATE MATERIALIZED VIEW IF NOT EXISTS disk_usage_metrics_15m
+CREATE MATERIALIZED VIEW disk_usage_metrics_15m
 WITH (timescaledb.continuous) AS
 SELECT
     time_bucket('15 minutes', collected_at) AS bucket,
@@ -1102,7 +1065,7 @@ FROM disk_usage_metrics
 GROUP BY bucket, server_id, name, ref, mountpoint
 WITH NO DATA;
 
-CREATE MATERIALIZED VIEW IF NOT EXISTS server_metrics_1h
+CREATE MATERIALIZED VIEW server_metrics_1h
 WITH (timescaledb.continuous) AS
 SELECT
     time_bucket('1 hour', collected_at) AS bucket,
@@ -1155,7 +1118,7 @@ FROM server_metrics
 GROUP BY bucket, server_id
 WITH NO DATA;
 
-CREATE MATERIALIZED VIEW IF NOT EXISTS disk_metrics_1h
+CREATE MATERIALIZED VIEW disk_metrics_1h
 WITH (timescaledb.continuous) AS
 SELECT
     time_bucket('1 hour', collected_at) AS bucket,
@@ -1186,7 +1149,7 @@ FROM disk_metrics
 GROUP BY bucket, server_id, name, ref
 WITH NO DATA;
 
-CREATE MATERIALIZED VIEW IF NOT EXISTS disk_usage_metrics_1h
+CREATE MATERIALIZED VIEW disk_usage_metrics_1h
 WITH (timescaledb.continuous) AS
 SELECT
     time_bucket('1 hour', collected_at) AS bucket,
@@ -1209,44 +1172,37 @@ WITH NO DATA;
 SELECT add_continuous_aggregate_policy('server_metrics_15m',
     start_offset => INTERVAL '31 days',
     end_offset => INTERVAL '5 minutes',
-    schedule_interval => INTERVAL '5 minutes',
-    if_not_exists => TRUE);
+    schedule_interval => INTERVAL '5 minutes');
 
 SELECT add_continuous_aggregate_policy('server_online_30m',
     start_offset => INTERVAL '31 days',
     end_offset => INTERVAL '5 minutes',
-    schedule_interval => INTERVAL '5 minutes',
-    if_not_exists => TRUE);
+    schedule_interval => INTERVAL '5 minutes');
 
 SELECT add_continuous_aggregate_policy('disk_metrics_15m',
     start_offset => INTERVAL '31 days',
     end_offset => INTERVAL '5 minutes',
-    schedule_interval => INTERVAL '5 minutes',
-    if_not_exists => TRUE);
+    schedule_interval => INTERVAL '5 minutes');
 
 SELECT add_continuous_aggregate_policy('disk_usage_metrics_15m',
     start_offset => INTERVAL '31 days',
     end_offset => INTERVAL '5 minutes',
-    schedule_interval => INTERVAL '5 minutes',
-    if_not_exists => TRUE);
+    schedule_interval => INTERVAL '5 minutes');
 
 SELECT add_continuous_aggregate_policy('server_metrics_1h',
     start_offset => INTERVAL '31 days',
     end_offset => INTERVAL '10 minutes',
-    schedule_interval => INTERVAL '10 minutes',
-    if_not_exists => TRUE);
+    schedule_interval => INTERVAL '10 minutes');
 
 SELECT add_continuous_aggregate_policy('disk_metrics_1h',
     start_offset => INTERVAL '31 days',
     end_offset => INTERVAL '10 minutes',
-    schedule_interval => INTERVAL '10 minutes',
-    if_not_exists => TRUE);
+    schedule_interval => INTERVAL '10 minutes');
 
 SELECT add_continuous_aggregate_policy('disk_usage_metrics_1h',
     start_offset => INTERVAL '31 days',
     end_offset => INTERVAL '10 minutes',
-    schedule_interval => INTERVAL '10 minutes',
-    if_not_exists => TRUE);
+    schedule_interval => INTERVAL '10 minutes');
 
 -- ---------------------------------------------------------
 -- Runtime settings
@@ -1329,7 +1285,7 @@ COMMENT ON COLUMN system_settings.updated_at IS '更新时间';
 
 SELECT ensure_updated_at_trigger('system_settings');
 
-CREATE TABLE IF NOT EXISTS metric_settings (
+CREATE TABLE metric_settings (
     id                        SMALLINT     PRIMARY KEY DEFAULT 1,
     history_guest_access_mode VARCHAR(16)  NOT NULL DEFAULT 'disabled',
     created_at                TIMESTAMPTZ  NOT NULL DEFAULT now(),
@@ -1362,7 +1318,7 @@ COMMENT ON COLUMN traffic_settings.updated_at IS '更新时间';
 
 SELECT ensure_updated_at_trigger('traffic_settings');
 
-CREATE TABLE IF NOT EXISTS traffic_month_usage (
+CREATE TABLE traffic_month_usage (
     server_id                  BIGINT       NOT NULL REFERENCES servers (id) ON DELETE CASCADE,
     iface                      VARCHAR(64)  NOT NULL,
     cycle_mode                 VARCHAR(32)  NOT NULL,
@@ -1387,7 +1343,7 @@ CREATE TABLE IF NOT EXISTS traffic_month_usage (
     PRIMARY KEY (server_id, iface, cycle_mode, billing_start_day, cycle_start, cycle_end)
 );
 
-CREATE INDEX IF NOT EXISTS idx_traffic_month_usage_server_cycle
+CREATE INDEX idx_traffic_month_usage_server_cycle
     ON traffic_month_usage (server_id, cycle_start DESC);
 
 COMMENT ON TABLE traffic_month_usage IS '轻量月度网卡用量统计表';
@@ -1401,7 +1357,7 @@ COMMENT ON COLUMN traffic_month_usage.out_peak_bytes_per_sec IS '出站估算峰
 
 SELECT ensure_updated_at_trigger('traffic_month_usage');
 
-CREATE TABLE IF NOT EXISTS traffic_5m (
+CREATE TABLE traffic_5m (
     server_id                  BIGINT       NOT NULL REFERENCES servers (id) ON DELETE CASCADE,
     iface                      VARCHAR(64)  NOT NULL,
     bucket                     TIMESTAMPTZ  NOT NULL,
@@ -1428,8 +1384,7 @@ CREATE TABLE IF NOT EXISTS traffic_5m (
 SELECT create_hypertable(
     'traffic_5m',
     'bucket',
-    chunk_time_interval => INTERVAL '7 days',
-    if_not_exists       => TRUE
+    chunk_time_interval => INTERVAL '7 days'
 );
 
 ALTER TABLE traffic_5m
@@ -1439,8 +1394,8 @@ SET (
     timescaledb.compress_segmentby = 'server_id, iface'
 );
 
-SELECT add_compression_policy('traffic_5m', INTERVAL '30 days', if_not_exists => TRUE);
-SELECT add_retention_policy('traffic_5m', INTERVAL '45 days', if_not_exists => TRUE);
+SELECT add_compression_policy('traffic_5m', INTERVAL '30 days');
+SELECT add_retention_policy('traffic_5m', INTERVAL '45 days');
 
 COMMENT ON TABLE traffic_5m IS '5分钟网卡流量统计事实表';
 COMMENT ON COLUMN traffic_5m.server_id IS '服务器 ID';
@@ -1459,7 +1414,7 @@ COMMENT ON COLUMN traffic_5m.reset_count IS '计数器重置数量';
 
 SELECT ensure_updated_at_trigger('traffic_5m');
 
-CREATE TABLE IF NOT EXISTS traffic_monthly (
+CREATE TABLE traffic_monthly (
     server_id                     BIGINT       NOT NULL REFERENCES servers (id) ON DELETE CASCADE,
     iface                         VARCHAR(64)  NOT NULL,
     cycle_mode                    VARCHAR(32)  NOT NULL,
@@ -1495,7 +1450,7 @@ CREATE TABLE IF NOT EXISTS traffic_monthly (
     PRIMARY KEY (server_id, iface, cycle_mode, billing_start_day, cycle_start, cycle_end)
 );
 
-CREATE INDEX IF NOT EXISTS idx_traffic_monthly_server_cycle
+CREATE INDEX idx_traffic_monthly_server_cycle
     ON traffic_monthly (server_id, cycle_start DESC);
 
 COMMENT ON TABLE traffic_monthly IS '月度网卡流量统计快照';
@@ -1520,7 +1475,7 @@ SELECT ensure_updated_at_trigger('traffic_monthly');
 -- Current metrics projection for fast frontend cache rebuild.
 -- History remains the source of time-series truth; these tables store only the latest accepted sample.
 
-CREATE TABLE IF NOT EXISTS server_current_metrics (
+CREATE TABLE server_current_metrics (
     server_id            BIGINT      PRIMARY KEY REFERENCES servers (id) ON DELETE CASCADE,
     collected_at         TIMESTAMPTZ NOT NULL,
     reported_at          TIMESTAMPTZ,
@@ -1571,7 +1526,7 @@ CREATE TABLE IF NOT EXISTS server_current_metrics (
     updated_at           TIMESTAMPTZ      NOT NULL DEFAULT now()
 );
 
-CREATE INDEX IF NOT EXISTS idx_server_current_metrics_collected_at
+CREATE INDEX idx_server_current_metrics_collected_at
     ON server_current_metrics (collected_at DESC);
 
 COMMENT ON TABLE server_current_metrics IS '服务器当前指标投影';
@@ -1583,7 +1538,7 @@ COMMENT ON COLUMN server_current_metrics.thermal IS '当前温度传感器运行
 
 SELECT ensure_updated_at_trigger('server_current_metrics');
 
-CREATE TABLE IF NOT EXISTS server_current_disk_metrics (
+CREATE TABLE server_current_disk_metrics (
     server_id                 BIGINT       NOT NULL REFERENCES servers (id) ON DELETE CASCADE,
     name                      VARCHAR(128) NOT NULL,
     ref                       VARCHAR(128) NOT NULL DEFAULT '',
@@ -1617,7 +1572,7 @@ COMMENT ON COLUMN server_current_disk_metrics.collected_at IS '当前态对应�
 
 SELECT ensure_updated_at_trigger('server_current_disk_metrics');
 
-CREATE TABLE IF NOT EXISTS server_current_disk_usage_metrics (
+CREATE TABLE server_current_disk_usage_metrics (
     server_id     BIGINT       NOT NULL REFERENCES servers (id) ON DELETE CASCADE,
     name          VARCHAR(128) NOT NULL,
     ref           VARCHAR(128) NOT NULL DEFAULT '',
@@ -1648,7 +1603,7 @@ COMMENT ON COLUMN server_current_disk_usage_metrics.collected_at IS '当前态�
 
 SELECT ensure_updated_at_trigger('server_current_disk_usage_metrics');
 
-CREATE TABLE IF NOT EXISTS server_current_nic_metrics (
+CREATE TABLE server_current_nic_metrics (
     server_id                  BIGINT      NOT NULL REFERENCES servers (id) ON DELETE CASCADE,
     iface                      VARCHAR(64) NOT NULL,
     collected_at               TIMESTAMPTZ NOT NULL,

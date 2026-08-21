@@ -30,8 +30,8 @@ func TestIntegrationNotifyConfigMigrationRemovesPlaintextAndDoesNotReplaceLostKe
 	if err != nil {
 		t.Fatalf("run notification config encryption migration: %v", err)
 	}
-	if result.Applied != 1 {
-		t.Fatalf("applied migrations = %d, want 1", result.Applied)
+	if result.Applied != 2 {
+		t.Fatalf("applied migrations = %d, want 2", result.Applied)
 	}
 	configCipher, err := notify.LoadConfigCipher(keyPath)
 	if err != nil {
@@ -149,7 +149,7 @@ func TestIntegrationNotifyConfigMigrationRecordsVersionAfterSealing(t *testing.T
 	if err := db.Raw("SELECT max(version_id) FROM goose_db_version").Scan(&version).Error; err != nil {
 		t.Fatalf("read schema version after retry: %v", err)
 	}
-	if version != 11 {
-		t.Fatalf("schema version after retry = %d, want 11", version)
+	if version != 12 {
+		t.Fatalf("schema version after retry = %d, want 12", version)
 	}
 }
