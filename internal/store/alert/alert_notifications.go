@@ -151,8 +151,7 @@ func blockedNotificationSchedules(tx *gorm.DB, params []notificationParams) (map
 func (s *Store) EnqueueNotifications(
 	ctx context.Context,
 	key, event string,
-	channels []model.NotifyChannel,
-	payload NotificationPayload,
+	params []NotificationParams,
 	now time.Time,
 ) error {
 	key = strings.TrimSpace(key)
@@ -163,17 +162,17 @@ func (s *Store) EnqueueNotifications(
 	if now.IsZero() {
 		now = time.Now().UTC()
 	}
-	items := make([]notificationParams, 0, len(channels))
-	for _, channel := range channels {
-		dedupeKey := notificationDedupeKey(key, channel.ID)
+	items := make([]notificationParams, 0, len(params))
+	for _, param := range params {
+		dedupeKey := notificationDedupeKey(key, param.ChannelID)
 		if len(dedupeKey) > 255 {
 			return fmt.Errorf("enqueue notifications: dedupe key exceeds 255 bytes")
 		}
 		items = append(items, notificationParams{
 			Transition:  event,
-			ChannelID:   channel.ID,
-			ChannelType: channel.Type,
-			Payload:     payload,
+			ChannelID:   param.ChannelID,
+			ChannelType: param.ChannelType,
+			Payload:     param.Payload,
 			DedupeKey:   dedupeKey,
 		})
 	}

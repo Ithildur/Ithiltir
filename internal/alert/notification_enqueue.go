@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"dash/internal/infra"
+	"dash/internal/model"
 	"dash/internal/notify"
 	alertstore "dash/internal/store/alert"
 )
@@ -16,7 +17,7 @@ import (
 func (s *Service) EnqueueDefault(
 	ctx context.Context,
 	key string,
-	message notify.Message,
+	messages notify.Messages,
 ) (notify.EnqueueStatus, error) {
 	if s == nil || s.store == nil || s.notify == nil {
 		return "", fmt.Errorf("notification service is not initialized")
@@ -25,7 +26,7 @@ func (s *Service) EnqueueDefault(
 		return "", fmt.Errorf("notification context is nil")
 	}
 	key = strings.TrimSpace(key)
-	event := strings.TrimSpace(message.Metadata["event"])
+	event := strings.TrimSpace(messages.For(s.message.Language).Metadata["event"])
 	if key == "" || event == "" {
 		return "", fmt.Errorf("notification key and event metadata are required")
 	}
@@ -43,13 +44,29 @@ func (s *Service) EnqueueDefault(
 		return notify.EnqueueSkippedNoTargets, nil
 	}
 
-	payload := alertstore.NotificationPayload{
-		Title:    message.Title,
-		Body:     message.Body,
-		Metadata: message.Metadata,
+	params := make([]alertstore.NotificationParams, 0, len(targets.Channels))
+	for _, channel := range targets.Channels {
+		language := notify.EffectiveLanguage(channel.Type, channel.Config, s.message.Language)
+		message := messages.For(language)
+		if strings.TrimSpace(message.Metadata["event"]) != event {
+			return "", fmt.Errorf("localized notification event metadata must match")
+		}
+		metadata := message.Metadata
+		if channel.Type == model.NotifyTypeEmail {
+			metadata = emailNotificationMetadata(metadata, language)
+		}
+		params = append(params, alertstore.NotificationParams{
+			ChannelID:   channel.ID,
+			ChannelType: channel.Type,
+			Payload: alertstore.NotificationPayload{
+				Title:    message.Title,
+				Body:     message.Body,
+				Metadata: metadata,
+			},
+		})
 	}
 	_, err := infra.WithPGWriteTimeout(ctx, func(c context.Context) (struct{}, error) {
-		return struct{}{}, s.store.EnqueueNotifications(c, key, event, targets.Channels, payload, time.Now().UTC())
+		return struct{}{}, s.store.EnqueueNotifications(c, key, event, params, time.Now().UTC())
 	})
 	if err != nil {
 		return "", fmt.Errorf("enqueue default notification: %w", err)

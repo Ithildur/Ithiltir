@@ -25,25 +25,34 @@ const (
 
 var errNotificationTargetsUnavailable = errors.New("notification targets are unavailable")
 
-func (s *Service) openNotificationParams(ctx context.Context, transition OpenTransition, message alertMessage) ([]alertstore.AlertNotificationParams, error) {
-	return s.notificationParams(ctx, "opened", message, map[string]string{
+func (s *Service) openNotificationParams(ctx context.Context, transition OpenTransition) ([]alertstore.AlertNotificationParams, error) {
+	return s.notificationParams(ctx, "opened", map[string]string{
 		"rule_id":   fmt.Sprintf("%d", transition.Rule.RuleID),
 		"server_id": fmt.Sprintf("%d", transition.ObjectID),
+	}, func(cfg MessageConfig) alertMessage {
+		return buildOpenMessage(transition, cfg)
 	})
 }
 
-func (s *Service) closeNotificationParams(ctx context.Context, transition CloseTransition, message alertMessage) ([]alertstore.AlertNotificationParams, error) {
+func (s *Service) closeNotificationParams(ctx context.Context, transition CloseTransition) ([]alertstore.AlertNotificationParams, error) {
 	if transition.CloseReason != "condition_cleared" {
 		return nil, nil
 	}
-	return s.notificationParams(ctx, "closed", message, map[string]string{
+	return s.notificationParams(ctx, "closed", map[string]string{
 		"rule_id":      fmt.Sprintf("%d", transition.Rule.RuleID),
 		"server_id":    fmt.Sprintf("%d", transition.ObjectID),
 		"close_reason": transition.CloseReason,
+	}, func(cfg MessageConfig) alertMessage {
+		return buildCloseMessage(transition, cfg)
 	})
 }
 
-func (s *Service) notificationParams(ctx context.Context, transition string, message alertMessage, metadata map[string]string) ([]alertstore.AlertNotificationParams, error) {
+func (s *Service) notificationParams(
+	ctx context.Context,
+	transition string,
+	metadata map[string]string,
+	messageFor func(MessageConfig) alertMessage,
+) ([]alertstore.AlertNotificationParams, error) {
 	targetCtx, cancel := context.WithTimeout(ctx, alertNotifySendTimeout)
 	targets, err := s.notify.Targets(targetCtx)
 	cancel()
@@ -57,9 +66,11 @@ func (s *Service) notificationParams(ctx context.Context, transition string, mes
 	out := make([]alertstore.AlertNotificationParams, 0, len(targets.Channels))
 	for i := range targets.Channels {
 		channel := targets.Channels[i]
+		language := notify.EffectiveLanguage(channel.Type, json.RawMessage(channel.Config), s.message.Language)
+		message := messageFor(MessageConfig{Language: language, Location: s.message.Location})
 		payloadMetadata := metadata
 		if channel.Type == model.NotifyTypeEmail {
-			payloadMetadata = emailNotificationMetadata(metadata, s.message.Language)
+			payloadMetadata = emailNotificationMetadata(metadata, language)
 		}
 		out = append(out, alertstore.AlertNotificationParams{
 			Transition:  transition,

@@ -345,8 +345,11 @@ func TestIntegrationBlockedDeliveryCoalescesChannelQueue(t *testing.T) {
 		ctx,
 		"system:while-blocked",
 		"system",
-		[]model.NotifyChannel{channel},
-		NotificationPayload{Title: "queued", Body: "queued"},
+		[]NotificationParams{{
+			ChannelID:   channel.ID,
+			ChannelType: channel.Type,
+			Payload:     NotificationPayload{Title: "queued", Body: "queued"},
+		}},
 		now.Add(time.Minute),
 	); err != nil {
 		t.Fatalf("EnqueueNotifications(blocked channel) error = %v", err)
@@ -544,8 +547,11 @@ func TestIntegrationEnqueueSystemNotificationIsDurableAndIdempotent(t *testing.T
 			ctx,
 			"dash-update:available:release:v1.2.3",
 			"available",
-			[]model.NotifyChannel{channel},
-			payload,
+			[]NotificationParams{{
+				ChannelID:   channel.ID,
+				ChannelType: channel.Type,
+				Payload:     payload,
+			}},
 			notificationTestTime(),
 		); err != nil {
 			t.Fatalf("EnqueueNotifications() error = %v", err)

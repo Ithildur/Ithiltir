@@ -155,7 +155,7 @@ const AlertChannelsPanel: React.FC<Props> = ({
   return (
     <div className="space-y-4 md:space-y-6">
       <Card className="p-4">
-        <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2">
               <h3 className="text-sm font-semibold text-(--theme-fg-default)">
@@ -267,22 +267,37 @@ const AlertChannelsPanel: React.FC<Props> = ({
 
       <Card className="overflow-hidden">
         <div className="overflow-x-auto">
-          <table className="w-full text-sm text-left bg-(--theme-bg-default) dark:bg-(--theme-bg-default)">
+          <table className="min-w-6xl w-full text-left text-sm bg-(--theme-bg-default) dark:bg-(--theme-bg-default)">
             <thead className="bg-(--theme-bg-muted) dark:bg-(--theme-canvas-subtle) text-(--theme-fg-default) dark:text-(--theme-fg-default) text-xs font-semibold border-b border-(--theme-border-subtle) dark:border-(--theme-border-default)">
               <tr>
-                <th className="px-4 py-3">{t('admin_alerts_channels_col_name')}</th>
-                <th className="px-4 py-3">{t('admin_alerts_channels_col_type')}</th>
-                <th className="px-4 py-3">{t('admin_alerts_channels_col_summary')}</th>
-                <th className="px-4 py-3">{t('admin_alerts_channels_col_status')}</th>
-                <th className="px-4 py-3">{t('admin_alerts_channels_col_updated')}</th>
-                <th className="px-4 py-3 text-right">{t('common_actions')}</th>
+                <th scope="col" className="min-w-52 px-4 py-3 align-middle">
+                  {t('admin_alerts_channels_col_name')}
+                </th>
+                <th scope="col" className="min-w-44 px-4 py-3 align-middle">
+                  {t('admin_alerts_channels_col_type')}
+                </th>
+                <th scope="col" className="min-w-56 px-4 py-3 align-middle">
+                  {t('admin_alerts_channels_col_summary')}
+                </th>
+                <th scope="col" className="min-w-64 px-4 py-3 align-middle">
+                  {t('admin_alerts_channels_col_status')}
+                </th>
+                <th scope="col" className="w-24 px-4 py-3 text-center align-middle">
+                  {t('admin_alerts_channels_col_enabled')}
+                </th>
+                <th scope="col" className="min-w-32 px-4 py-3 align-middle">
+                  {t('admin_alerts_channels_col_updated')}
+                </th>
+                <th scope="col" className="w-32 px-4 py-3 text-right align-middle">
+                  {t('common_actions')}
+                </th>
               </tr>
             </thead>
             <tbody className="divide-y divide-(--theme-border-muted) dark:divide-(--theme-canvas-muted)">
               {loading && filteredChannels.length === 0 ? (
                 <tr>
                   <td
-                    colSpan={6}
+                    colSpan={7}
                     className="px-4 py-12 text-center text-(--theme-fg-muted) dark:text-(--theme-fg-neutral)"
                   >
                     {t('loading')}
@@ -290,7 +305,7 @@ const AlertChannelsPanel: React.FC<Props> = ({
                 </tr>
               ) : filteredChannels.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="px-4 py-12">
+                  <td colSpan={7} className="px-4 py-12">
                     <div className="flex flex-col items-center text-center gap-2">
                       <div className="size-12 rounded-full bg-(--theme-bg-interactive-muted) dark:bg-(--theme-bg-interactive-soft) flex items-center justify-center text-(--theme-fg-interactive-strong) dark:text-(--theme-fg-interactive-hover)">
                         <Send className="size-5" aria-hidden="true" />
@@ -315,7 +330,7 @@ const AlertChannelsPanel: React.FC<Props> = ({
                       key={channel.id}
                       className="hover:bg-(--theme-surface-row-hover) dark:hover:bg-(--theme-canvas-subtle) transition-colors"
                     >
-                      <td className="px-4 py-3">
+                      <td className="px-4 py-3 align-middle">
                         <div className="flex flex-col">
                           <span className="font-semibold text-(--theme-fg-default) dark:text-(--theme-fg-default)">
                             {channel.name}
@@ -325,7 +340,7 @@ const AlertChannelsPanel: React.FC<Props> = ({
                           </span>
                         </div>
                       </td>
-                      <td className="px-4 py-3">
+                      <td className="px-4 py-3 align-middle">
                         <div className="flex items-center gap-2">
                           <meta.icon
                             className="size-4 text-(--theme-fg-muted-alt)"
@@ -334,68 +349,68 @@ const AlertChannelsPanel: React.FC<Props> = ({
                           <Badge color={meta.color}>{meta.label}</Badge>
                         </div>
                       </td>
-                      <td className="px-4 py-3 text-xs text-(--theme-fg-muted) dark:text-(--theme-fg-muted) font-mono">
+                      <td className="px-4 py-3 align-middle text-xs text-(--theme-fg-muted) dark:text-(--theme-fg-muted) font-mono">
                         {summary}
                       </td>
-                      <td className="px-4 py-3">
-                        <div className="flex min-w-48 items-start justify-between gap-3">
-                          <div className="min-w-0 space-y-1.5">
-                            {invalidConfig ? (
-                              <Badge color="rose">
-                                {t('admin_alerts_channels_config_invalid')}
-                              </Badge>
-                            ) : (
-                              <Badge color={delivery.color}>{delivery.label}</Badge>
-                            )}
-                            {channel.consecutive_failures > 0 ? (
-                              <p className="text-[11px] text-(--theme-fg-danger-muted)">
-                                {t('admin_alerts_channels_delivery_failures', {
-                                  count: String(channel.consecutive_failures),
-                                })}
-                              </p>
-                            ) : null}
-                            {channel.last_error ? (
-                              <p
-                                className="max-w-64 truncate text-[11px] text-(--theme-fg-danger-muted)"
-                                title={channel.last_error}
-                              >
-                                {channel.last_error}
-                              </p>
-                            ) : channel.pending_count > 0 ? (
-                              <p className="text-[11px] text-(--theme-fg-muted)">
-                                {t('admin_alerts_channels_delivery_pending', {
-                                  count: String(channel.pending_count),
-                                })}
-                              </p>
-                            ) : null}
-                            {channel.next_retry_at ? (
-                              <p className="text-[11px] text-(--theme-fg-muted)">
-                                {t('admin_alerts_channels_delivery_next_retry', {
-                                  time: formatLocalTimestamp(channel.next_retry_at),
-                                })}
-                              </p>
-                            ) : null}
-                            {channel.next_probe_at ? (
-                              <p className="text-[11px] text-(--theme-fg-muted)">
-                                {t('admin_alerts_channels_delivery_next_probe', {
-                                  time: formatLocalDateTime(channel.next_probe_at, lang, {
-                                    dateStyle: 'short',
-                                    timeStyle: 'short',
-                                  }),
-                                })}
-                              </p>
-                            ) : null}
-                            {channel.last_success_at ? (
-                              <p className="text-[11px] text-(--theme-fg-muted)">
-                                {t('admin_alerts_channels_delivery_last_success', {
-                                  time: formatLocalDateTime(channel.last_success_at, lang, {
-                                    dateStyle: 'short',
-                                    timeStyle: 'short',
-                                  }),
-                                })}
-                              </p>
-                            ) : null}
-                          </div>
+                      <td className="px-4 py-3 align-middle">
+                        <div className="min-w-0 space-y-1.5">
+                          {invalidConfig ? (
+                            <Badge color="rose">{t('admin_alerts_channels_config_invalid')}</Badge>
+                          ) : (
+                            <Badge color={delivery.color}>{delivery.label}</Badge>
+                          )}
+                          {channel.consecutive_failures > 0 ? (
+                            <p className="text-[11px] text-(--theme-fg-danger-muted)">
+                              {t('admin_alerts_channels_delivery_failures', {
+                                count: String(channel.consecutive_failures),
+                              })}
+                            </p>
+                          ) : null}
+                          {channel.last_error ? (
+                            <p
+                              className="max-w-64 truncate text-[11px] text-(--theme-fg-danger-muted)"
+                              title={channel.last_error}
+                            >
+                              {channel.last_error}
+                            </p>
+                          ) : channel.pending_count > 0 ? (
+                            <p className="text-[11px] text-(--theme-fg-muted)">
+                              {t('admin_alerts_channels_delivery_pending', {
+                                count: String(channel.pending_count),
+                              })}
+                            </p>
+                          ) : null}
+                          {channel.next_retry_at ? (
+                            <p className="text-[11px] text-(--theme-fg-muted)">
+                              {t('admin_alerts_channels_delivery_next_retry', {
+                                time: formatLocalTimestamp(channel.next_retry_at),
+                              })}
+                            </p>
+                          ) : null}
+                          {channel.next_probe_at ? (
+                            <p className="text-[11px] text-(--theme-fg-muted)">
+                              {t('admin_alerts_channels_delivery_next_probe', {
+                                time: formatLocalDateTime(channel.next_probe_at, lang, {
+                                  dateStyle: 'short',
+                                  timeStyle: 'short',
+                                }),
+                              })}
+                            </p>
+                          ) : null}
+                          {channel.last_success_at ? (
+                            <p className="text-[11px] text-(--theme-fg-muted)">
+                              {t('admin_alerts_channels_delivery_last_success', {
+                                time: formatLocalDateTime(channel.last_success_at, lang, {
+                                  dateStyle: 'short',
+                                  timeStyle: 'short',
+                                }),
+                              })}
+                            </p>
+                          ) : null}
+                        </div>
+                      </td>
+                      <td className="px-4 py-3 text-center align-middle">
+                        <div className="inline-flex items-center justify-center">
                           <IOSSwitch
                             size="sm"
                             checked={channel.enabled}
@@ -410,17 +425,17 @@ const AlertChannelsPanel: React.FC<Props> = ({
                           />
                         </div>
                       </td>
-                      <td className="px-4 py-3 text-xs text-(--theme-fg-muted) dark:text-(--theme-fg-muted) font-mono">
+                      <td className="px-4 py-3 align-middle text-xs text-(--theme-fg-muted) dark:text-(--theme-fg-muted) font-mono whitespace-nowrap">
                         {formatTimeAgo(channel.updated_at, lang)}
                       </td>
-                      <td className="px-4 py-3 text-right">
+                      <td className="px-4 py-3 text-right align-middle">
                         <div className="flex items-center justify-end gap-1">
                           <button
                             type="button"
                             onClick={() => {
                               if (!invalidConfig) onEdit(channel);
                             }}
-                            className="p-1.5 text-(--theme-fg-subtle) hover:text-(--theme-fg-interactive) dark:hover:text-(--theme-fg-interactive-hover) hover:bg-(--theme-bg-interactive-hover) dark:hover:bg-(--theme-bg-interactive-hover) rounded transition-colors disabled:cursor-not-allowed disabled:opacity-40"
+                            className="ui-focus-ring inline-flex size-8 items-center justify-center rounded-md text-(--theme-fg-subtle) transition-colors hover:bg-(--theme-bg-interactive-hover) hover:text-(--theme-fg-interactive) disabled:cursor-not-allowed disabled:opacity-40 dark:hover:bg-(--theme-bg-interactive-hover) dark:hover:text-(--theme-fg-interactive-hover)"
                             aria-label={t('common_edit')}
                             title={
                               invalidConfig
@@ -429,12 +444,12 @@ const AlertChannelsPanel: React.FC<Props> = ({
                             }
                             disabled={invalidConfig}
                           >
-                            <Edit2 className="size-4.5" />
+                            <Edit2 className="size-4.5" aria-hidden="true" />
                           </button>
                           <button
                             type="button"
                             onClick={() => onTest(channel)}
-                            className="p-1.5 text-(--theme-fg-subtle) hover:text-(--theme-fg-interactive) dark:hover:text-(--theme-fg-interactive-hover) hover:bg-(--theme-bg-interactive-hover) dark:hover:bg-(--theme-bg-interactive-hover) rounded transition-colors disabled:cursor-not-allowed disabled:opacity-40"
+                            className="ui-focus-ring inline-flex size-8 items-center justify-center rounded-md text-(--theme-fg-subtle) transition-colors hover:bg-(--theme-bg-interactive-hover) hover:text-(--theme-fg-interactive) disabled:cursor-not-allowed disabled:opacity-40 dark:hover:bg-(--theme-bg-interactive-hover) dark:hover:text-(--theme-fg-interactive-hover)"
                             aria-label={t('admin_alerts_channels_action_test')}
                             title={
                               invalidConfig
@@ -443,15 +458,15 @@ const AlertChannelsPanel: React.FC<Props> = ({
                             }
                             disabled={invalidConfig || testingIds.includes(channel.id)}
                           >
-                            <FlaskConical className="size-4.5" />
+                            <FlaskConical className="size-4.5" aria-hidden="true" />
                           </button>
                           <button
                             type="button"
                             onClick={() => onDelete(channel)}
-                            className="p-1.5 text-(--theme-fg-danger-muted) hover:text-(--theme-fg-danger) dark:text-(--theme-fg-danger) dark:hover:text-(--theme-fg-danger-soft) hover:bg-(--theme-bg-danger-muted) dark:hover:bg-(--theme-bg-danger-subtle) rounded transition-colors"
+                            className="ui-focus-ring inline-flex size-8 items-center justify-center rounded-md text-(--theme-fg-danger-muted) transition-colors hover:bg-(--theme-bg-danger-muted) hover:text-(--theme-fg-danger) dark:text-(--theme-fg-danger) dark:hover:bg-(--theme-bg-danger-subtle) dark:hover:text-(--theme-fg-danger-soft)"
                             aria-label={t('common_delete')}
                           >
-                            <Trash2 className="size-4.5" />
+                            <Trash2 className="size-4.5" aria-hidden="true" />
                           </button>
                         </div>
                       </td>

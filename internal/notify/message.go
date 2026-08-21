@@ -14,6 +14,18 @@ type Message struct {
 	Metadata map[string]string
 }
 
+type Messages struct {
+	Chinese Message
+	English Message
+}
+
+func (m Messages) For(language string) Message {
+	if lang.Normalize(language) == lang.English {
+		return m.English
+	}
+	return m.Chinese
+}
+
 func (m Message) Text() string {
 	title := strings.TrimSpace(m.Title)
 	body := strings.TrimSpace(m.Body)
@@ -41,8 +53,44 @@ func DefaultTestMessage(language string) Message {
 	}
 }
 
-func TelegramBotExampleMessages() []Message {
+func TelegramBotExampleMessages(language string) []Message {
 	now := time.Now().Local().Format("2006-01-02 15:04:05 MST")
+	if lang.Normalize(language) == lang.English {
+		return []Message{
+			{
+				Title: "Alert test example",
+				Body: strings.Join([]string{
+					"❌ Alert triggered: High CPU usage @ 9900x",
+					"Status: opened",
+					"Server: 9900x",
+					"Rule: High CPU usage",
+					"Metric: cpu.usage_ratio",
+					"Current value: 92.00%",
+					"Threshold: 90.00%",
+					"Duration: 60s",
+					"🕒 Triggered at: " + now,
+					"",
+					"❌ Offline alert: 9900x",
+					"🕒 Triggered at: " + now,
+				}, "\n"),
+			},
+			{
+				Title: "Recovery test example",
+				Body: strings.Join([]string{
+					"✅ Alert recovered: High CPU usage @ 9900x",
+					"Status: closed",
+					"Server: 9900x",
+					"Rule: High CPU usage",
+					"Metric: cpu.usage_ratio",
+					"Current value: 42.00%",
+					"🕒 Recovered at: " + now,
+					"",
+					"✅ Online restored: 9900x",
+					"🕒 Recovered at: " + now,
+				}, "\n"),
+			},
+		}
+	}
 	return []Message{
 		{
 			Title: "告警测试示例",

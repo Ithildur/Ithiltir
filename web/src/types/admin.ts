@@ -146,13 +146,19 @@ export interface AlertSettings {
   updated_at: ISODateString;
 }
 
-export interface TelegramBotConfig {
+export type AlertChannelLanguage = 'system' | 'zh' | 'en';
+
+interface AlertChannelConfig {
+  language: AlertChannelLanguage;
+}
+
+export interface TelegramBotConfig extends AlertChannelConfig {
   mode?: 'bot';
   chat_id: string;
   bot_token: string;
 }
 
-export interface TelegramMtprotoConfig {
+export interface TelegramMtprotoConfig extends AlertChannelConfig {
   mode: 'mtproto';
   api_id: number;
   phone: string;
@@ -162,7 +168,7 @@ export interface TelegramMtprotoConfig {
   username?: string;
 }
 
-export interface EmailConfig {
+export interface EmailConfig extends AlertChannelConfig {
   smtp_host: string;
   smtp_port: number;
   username: string;
@@ -172,17 +178,17 @@ export interface EmailConfig {
   use_tls: boolean;
 }
 
-export interface WebhookConfig {
+export interface WebhookConfig extends AlertChannelConfig {
   url: string;
   secret?: string;
 }
 
-interface TelegramBotViewConfig {
+interface TelegramBotViewConfig extends AlertChannelConfig {
   mode?: 'bot';
   chat_id: string;
 }
 
-interface TelegramMtprotoViewConfig {
+interface TelegramMtprotoViewConfig extends AlertChannelConfig {
   mode: 'mtproto';
   api_id: number;
   phone: string;
@@ -190,7 +196,7 @@ interface TelegramMtprotoViewConfig {
   username?: string;
 }
 
-interface EmailViewConfig {
+interface EmailViewConfig extends AlertChannelConfig {
   smtp_host: string;
   smtp_port: number;
   username: string;
@@ -199,7 +205,7 @@ interface EmailViewConfig {
   use_tls: boolean;
 }
 
-interface WebhookViewConfig {
+interface WebhookViewConfig extends AlertChannelConfig {
   url: string;
 }
 

@@ -39,6 +39,12 @@ type NotificationPayload struct {
 	Metadata map[string]string `json:"metadata,omitempty"`
 }
 
+type NotificationParams struct {
+	ChannelID   int64
+	ChannelType model.NotifyType
+	Payload     NotificationPayload
+}
+
 type AlertNotificationParams struct {
 	Transition  string
 	ChannelID   int64

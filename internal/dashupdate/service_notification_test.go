@@ -26,7 +26,7 @@ type notificationQueueStub struct {
 func (q *notificationQueueStub) EnqueueDefault(
 	context.Context,
 	string,
-	notify.Message,
+	notify.Messages,
 ) (notify.EnqueueStatus, error) {
 	reply := q.replies[min(q.calls, len(q.replies)-1)]
 	q.calls++

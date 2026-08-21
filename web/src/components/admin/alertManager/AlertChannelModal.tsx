@@ -9,8 +9,9 @@ import type { LucideIcon } from 'lucide-react';
 import Button from '@components/ui/Button';
 import Input from '@components/ui/Input';
 import { Modal, ModalBody, ModalFooter, ModalHeader } from '@components/ui/Modal';
+import Select from '@components/ui/Select';
 import { useI18n } from '@i18n';
-import type { AlertChannelType, AlertTelegramMode } from '@app-types/admin';
+import type { AlertChannelLanguage, AlertChannelType, AlertTelegramMode } from '@app-types/admin';
 import type { AlertChannelForm } from './alertChannelForm';
 import EmailChannelForm from './channelForms/EmailChannelForm';
 import TelegramBotForm from './channelForms/TelegramBotForm';
@@ -61,6 +62,8 @@ const AlertChannelModal: React.FC<Props> = ({
 }) => {
   const { t } = useI18n();
   const titleId = React.useId();
+  const nameId = React.useId();
+  const languageId = React.useId();
   const form = useAlertChannelForm({
     isOpen,
     sourceKey: `${mode}:${channelId ?? 'new'}`,
@@ -96,16 +99,42 @@ const AlertChannelModal: React.FC<Props> = ({
             <h3 className="text-sm font-semibold text-(--theme-fg-default) dark:text-(--theme-fg-strong) uppercase tracking-wider">
               {t('admin_alerts_channels_section_details')}
             </h3>
-            <div className="space-y-1.5">
-              <label className="text-xs font-medium text-(--theme-fg-muted) dark:text-(--theme-fg-strong) ml-1">
-                {t('admin_alerts_channels_label_name')}
-              </label>
-              <Input
-                value={form.channelName}
-                onChange={(event) => form.setChannelName(event.target.value)}
-                placeholder={t('admin_alerts_channels_placeholder_name')}
-                className="dark:bg-(--theme-bg-inset)"
-              />
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <div className="space-y-1.5">
+                <label
+                  htmlFor={nameId}
+                  className="text-xs font-medium text-(--theme-fg-muted) dark:text-(--theme-fg-strong) ml-1"
+                >
+                  {t('admin_alerts_channels_label_name')}
+                </label>
+                <Input
+                  id={nameId}
+                  value={form.channelName}
+                  onChange={(event) => form.setChannelName(event.target.value)}
+                  placeholder={t('admin_alerts_channels_placeholder_name')}
+                  className="dark:bg-(--theme-bg-inset)"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <label
+                  htmlFor={languageId}
+                  className="text-xs font-medium text-(--theme-fg-muted) dark:text-(--theme-fg-strong) ml-1"
+                >
+                  {t('admin_alerts_channels_label_language')}
+                </label>
+                <Select
+                  id={languageId}
+                  value={form.language}
+                  onChange={(event) => form.setLanguage(event.target.value as AlertChannelLanguage)}
+                >
+                  <option value="system">{t('admin_alerts_channels_language_system')}</option>
+                  <option value="zh">{t('admin_alerts_channels_language_zh')}</option>
+                  <option value="en">{t('admin_alerts_channels_language_en')}</option>
+                </Select>
+                <p className="ml-1 text-xs/relaxed text-(--theme-fg-muted)">
+                  {t('admin_alerts_channels_help_language')}
+                </p>
+              </div>
             </div>
           </div>
 

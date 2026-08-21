@@ -2,6 +2,7 @@ package alert
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -24,9 +25,13 @@ func TestEnqueueDefaultSkipsWithoutTargets(t *testing.T) {
 	cache.ready = true
 	service := &Service{store: store, notify: cache}
 
-	status, err := service.EnqueueDefault(context.Background(), "system:test", notify.Message{
+	message := notify.Message{
 		Title:    "test",
 		Metadata: map[string]string{"event": "test"},
+	}
+	status, err := service.EnqueueDefault(context.Background(), "system:test", notify.Messages{
+		Chinese: message,
+		English: message,
 	})
 	if err != nil {
 		t.Fatalf("EnqueueDefault() error = %v", err)
@@ -43,18 +48,32 @@ func TestIntegrationEnqueueDefaultResolvesTargetsAndPersistsOnce(t *testing.T) {
 	service := &Service{
 		store:  store,
 		notify: newNotifyCache(store, 0),
+		message: MessageConfig{
+			Language: messageLanguageZH,
+			Location: time.UTC,
+		},
 	}
-	message := notify.Message{
-		Title: "Dash update available",
-		Body:  "1.1.0",
-		Metadata: map[string]string{
-			"kind":  "dash_update",
-			"event": "available",
+	messages := notify.Messages{
+		Chinese: notify.Message{
+			Title: "Dash 有可用更新",
+			Body:  "1.1.0",
+			Metadata: map[string]string{
+				"kind":  "dash_update",
+				"event": "available",
+			},
+		},
+		English: notify.Message{
+			Title: "Dash update available",
+			Body:  "1.1.0",
+			Metadata: map[string]string{
+				"kind":  "dash_update",
+				"event": "available",
+			},
 		},
 	}
 	key := "dash-update:available:release:1.1.0"
 
-	status, err := service.EnqueueDefault(ctx, key, message)
+	status, err := service.EnqueueDefault(ctx, key, messages)
 	if err != nil {
 		t.Fatalf("EnqueueDefault(no targets) error = %v", err)
 	}
@@ -62,21 +81,32 @@ func TestIntegrationEnqueueDefaultResolvesTargetsAndPersistsOnce(t *testing.T) {
 		t.Fatalf("EnqueueDefault(no targets) status = %q, want %q", status, notify.EnqueueSkippedNoTargets)
 	}
 
-	channel := model.NotifyChannel{
-		Name:     "updates",
-		Type:     model.NotifyTypeWebhook,
-		Config:   datatypes.JSON(`{"url":"https://example.com/hook"}`),
-		Enabled:  true,
-		Revision: 1,
+	channels := []model.NotifyChannel{
+		{
+			Name:     "system-updates",
+			Type:     model.NotifyTypeWebhook,
+			Config:   datatypes.JSON(`{"language":"system","url":"https://example.com/system"}`),
+			Enabled:  true,
+			Revision: 1,
+		},
+		{
+			Name:     "english-updates",
+			Type:     model.NotifyTypeWebhook,
+			Config:   datatypes.JSON(`{"language":"en","url":"https://example.com/en"}`),
+			Enabled:  true,
+			Revision: 1,
+		},
 	}
-	if err := store.CreateChannel(ctx, &channel); err != nil {
-		t.Fatalf("CreateChannel() error = %v", err)
+	for i := range channels {
+		if err := store.CreateChannel(ctx, &channels[i]); err != nil {
+			t.Fatalf("CreateChannel() error = %v", err)
+		}
 	}
-	if err := store.ReplaceSettings(ctx, true, []int64{channel.ID}); err != nil {
+	if err := store.ReplaceSettings(ctx, true, []int64{channels[0].ID, channels[1].ID}); err != nil {
 		t.Fatalf("ReplaceSettings() error = %v", err)
 	}
 	for range 2 {
-		status, err = service.EnqueueDefault(ctx, key, message)
+		status, err = service.EnqueueDefault(ctx, key, messages)
 		if err != nil {
 			t.Fatalf("EnqueueDefault() error = %v", err)
 		}
@@ -86,14 +116,28 @@ func TestIntegrationEnqueueDefaultResolvesTargetsAndPersistsOnce(t *testing.T) {
 	}
 
 	var rows []model.AlertNotificationOutbox
-	if err := db.Where("channel_id = ?", channel.ID).Find(&rows).Error; err != nil {
+	channelIDs := []int64{channels[0].ID, channels[1].ID}
+	if err := db.Where("channel_id IN ?", channelIDs).Order("channel_id ASC").Find(&rows).Error; err != nil {
 		t.Fatalf("load notification outbox: %v", err)
 	}
-	if len(rows) != 1 {
-		t.Fatalf("notification outbox rows = %d, want 1", len(rows))
+	if len(rows) != 2 {
+		t.Fatalf("notification outbox rows = %d, want 2", len(rows))
 	}
-	if rows[0].EventID != nil || rows[0].Transition != "available" || rows[0].Status != model.OutboxStatusPending {
-		t.Fatalf("notification outbox row = %+v", rows[0])
+	wantTitles := map[int64]string{
+		channels[0].ID: "Dash 有可用更新",
+		channels[1].ID: "Dash update available",
+	}
+	for _, row := range rows {
+		if row.EventID != nil || row.Transition != "available" || row.Status != model.OutboxStatusPending {
+			t.Fatalf("notification outbox row = %+v", row)
+		}
+		var payload alertstore.NotificationPayload
+		if err := json.Unmarshal(row.Payload, &payload); err != nil {
+			t.Fatalf("decode notification payload: %v", err)
+		}
+		if payload.Title != wantTitles[row.ChannelID] {
+			t.Fatalf("channel %d title = %q, want %q", row.ChannelID, payload.Title, wantTitles[row.ChannelID])
+		}
 	}
 }
 

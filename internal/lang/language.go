@@ -3,6 +3,7 @@ package lang
 import "strings"
 
 const (
+	System  = "system"
 	Chinese = "zh"
 	English = "en"
 )
@@ -15,5 +16,16 @@ func Normalize(raw string) string {
 		return Chinese
 	default:
 		return Chinese
+	}
+}
+
+func Resolve(preferred, fallback string) string {
+	switch strings.ToLower(strings.TrimSpace(preferred)) {
+	case English:
+		return English
+	case Chinese:
+		return Chinese
+	default:
+		return Normalize(fallback)
 	}
 }

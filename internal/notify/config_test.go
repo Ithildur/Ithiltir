@@ -5,6 +5,7 @@ import (
 	"errors"
 	"testing"
 
+	"dash/internal/lang"
 	"dash/internal/model"
 )
 
@@ -145,6 +146,44 @@ func TestConfigValidation(t *testing.T) {
 	}
 	if _, err := parseWebhookURL("http://:8080"); err == nil {
 		t.Fatal("parseWebhookURL() accepted a missing hostname")
+	}
+}
+
+func TestNotificationLanguageConfig(t *testing.T) {
+	legacy := json.RawMessage(`{"url":"https://example.com/hook"}`)
+	viewAny, err := SanitizeConfig(model.NotifyTypeWebhook, legacy)
+	if err != nil {
+		t.Fatalf("SanitizeConfig() error = %v", err)
+	}
+	view, ok := viewAny.(WebhookView)
+	if !ok || view.Language != lang.System {
+		t.Fatalf("SanitizeConfig() = %#v, want language %q", viewAny, lang.System)
+	}
+	if got := EffectiveLanguage(model.NotifyTypeWebhook, legacy, lang.English); got != lang.English {
+		t.Fatalf("EffectiveLanguage(legacy) = %q, want %q", got, lang.English)
+	}
+
+	explicit := json.RawMessage(`{"language":"zh","url":"https://example.com/hook"}`)
+	if got := EffectiveLanguage(model.NotifyTypeWebhook, explicit, lang.English); got != lang.Chinese {
+		t.Fatalf("EffectiveLanguage(explicit) = %q, want %q", got, lang.Chinese)
+	}
+	if _, err := NormalizeConfig(model.NotifyTypeWebhook, json.RawMessage(
+		`{"language":"fr","url":"https://example.com/hook"}`,
+	)); err == nil {
+		t.Fatal("NormalizeConfig() accepted unsupported language")
+	}
+
+	updated, err := NormalizeConfigForUpdate(
+		model.NotifyTypeWebhook,
+		json.RawMessage(`{"url":"https://example.com/new"}`),
+		model.NotifyTypeWebhook,
+		json.RawMessage(`{"language":"en","url":"https://example.com/old"}`),
+	)
+	if err != nil {
+		t.Fatalf("NormalizeConfigForUpdate() error = %v", err)
+	}
+	if want := `{"language":"en","url":"https://example.com/new"}`; string(updated) != want {
+		t.Fatalf("NormalizeConfigForUpdate() = %s, want %s", updated, want)
 	}
 }
 

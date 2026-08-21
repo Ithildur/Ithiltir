@@ -81,8 +81,7 @@ func (s *Service) processServer(ctx context.Context, serverID int64, snapshot *m
 	result.OpenTransitions = filterStartupOpens(result.OpenTransitions, now, s.openAfter)
 	closingStateKeys := make(map[string]struct{}, len(result.CloseTransitions))
 	for _, transition := range result.CloseTransitions {
-		message := buildCloseMessage(transition, s.message)
-		notifications, notifyErr := s.closeNotificationParams(ctx, transition, message)
+		notifications, notifyErr := s.closeNotificationParams(ctx, transition)
 		if notifyErr != nil {
 			s.logNotificationTargetError(notifyErr, serverID, transition.StateKey, notifications)
 			if errors.Is(notifyErr, errNotificationTargetsUnavailable) {
@@ -123,7 +122,7 @@ func (s *Service) processServer(ctx context.Context, serverID int64, snapshot *m
 			return fmt.Errorf("prepare open transition: %w", err)
 		}
 		message := buildOpenMessage(transition, s.message)
-		notifications, notifyErr := s.openNotificationParams(ctx, transition, message)
+		notifications, notifyErr := s.openNotificationParams(ctx, transition)
 		if notifyErr != nil {
 			s.logNotificationTargetError(notifyErr, serverID, transition.StateKey, notifications)
 			if errors.Is(notifyErr, errNotificationTargetsUnavailable) {

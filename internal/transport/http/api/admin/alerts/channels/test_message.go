@@ -60,6 +60,7 @@ func (h *handler) testMessageHandler(w http.ResponseWriter, r *http.Request, raw
 	}
 	sendCtx, cancelSend := context.WithTimeout(r.Context(), testMessageSendTimeout)
 	defer cancelSend()
+	language := notify.EffectiveLanguage(item.Type, item.Config, h.language)
 
 	var messages []notify.Message
 	if item.Type == model.NotifyTypeTelegram {
@@ -81,12 +82,12 @@ func (h *handler) testMessageHandler(w http.ResponseWriter, r *http.Request, raw
 			return
 		}
 		if !isMTProto {
-			messages = notify.TelegramBotExampleMessages()
+			messages = notify.TelegramBotExampleMessages(language)
 		}
 	}
 
 	if messages == nil {
-		msg := notify.DefaultTestMessage(h.language)
+		msg := notify.DefaultTestMessage(language)
 		if title := strings.TrimSpace(in.Title); title != "" {
 			msg.Title = title
 		}

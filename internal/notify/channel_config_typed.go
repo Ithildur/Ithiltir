@@ -10,16 +10,19 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"dash/internal/lang"
 	"dash/internal/model"
 )
 
 type TelegramBotConfig struct {
+	Language string `json:"language,omitempty"`
 	Mode     string `json:"mode,omitempty"`
 	BotToken string `json:"bot_token"`
 	ChatID   string `json:"chat_id"`
 }
 
 type TelegramMTProtoConfig struct {
+	Language string `json:"language,omitempty"`
 	Mode     string `json:"mode"`
 	APIID    int    `json:"api_id"`
 	APIHash  string `json:"api_hash"`
@@ -30,6 +33,7 @@ type TelegramMTProtoConfig struct {
 }
 
 type EmailConfig struct {
+	Language string   `json:"language,omitempty"`
 	SMTPHost string   `json:"smtp_host"`
 	SMTPPort int      `json:"smtp_port"`
 	Username string   `json:"username"`
@@ -40,16 +44,19 @@ type EmailConfig struct {
 }
 
 type WebhookConfig struct {
-	URL    string `json:"url"`
-	Secret string `json:"secret,omitempty"`
+	Language string `json:"language,omitempty"`
+	URL      string `json:"url"`
+	Secret   string `json:"secret,omitempty"`
 }
 
 type TelegramBotView struct {
-	Mode   string `json:"mode,omitempty"`
-	ChatID string `json:"chat_id"`
+	Language string `json:"language"`
+	Mode     string `json:"mode,omitempty"`
+	ChatID   string `json:"chat_id"`
 }
 
 type TelegramMTProtoView struct {
+	Language string `json:"language"`
 	Mode     string `json:"mode"`
 	APIID    int    `json:"api_id"`
 	Phone    string `json:"phone"`
@@ -58,6 +65,7 @@ type TelegramMTProtoView struct {
 }
 
 type EmailView struct {
+	Language string   `json:"language"`
 	SMTPHost string   `json:"smtp_host"`
 	SMTPPort int      `json:"smtp_port"`
 	Username string   `json:"username"`
@@ -67,7 +75,8 @@ type EmailView struct {
 }
 
 type WebhookView struct {
-	URL string `json:"url"`
+	Language string `json:"language"`
+	URL      string `json:"url"`
 }
 
 type rawConfig map[string]json.RawMessage
@@ -109,11 +118,13 @@ func SanitizeConfig(typ model.NotifyType, raw json.RawMessage) (any, error) {
 	switch typed := cfg.(type) {
 	case TelegramBotConfig:
 		return TelegramBotView{
-			Mode:   typed.Mode,
-			ChatID: typed.ChatID,
+			Language: viewLanguage(typed.Language),
+			Mode:     typed.Mode,
+			ChatID:   typed.ChatID,
 		}, nil
 	case TelegramMTProtoConfig:
 		return TelegramMTProtoView{
+			Language: viewLanguage(typed.Language),
 			Mode:     typed.Mode,
 			APIID:    typed.APIID,
 			Phone:    typed.Phone,
@@ -122,6 +133,7 @@ func SanitizeConfig(typ model.NotifyType, raw json.RawMessage) (any, error) {
 		}, nil
 	case EmailConfig:
 		return EmailView{
+			Language: viewLanguage(typed.Language),
 			SMTPHost: typed.SMTPHost,
 			SMTPPort: typed.SMTPPort,
 			Username: typed.Username,
@@ -131,7 +143,8 @@ func SanitizeConfig(typ model.NotifyType, raw json.RawMessage) (any, error) {
 		}, nil
 	case WebhookConfig:
 		return WebhookView{
-			URL: typed.URL,
+			Language: viewLanguage(typed.Language),
+			URL:      typed.URL,
 		}, nil
 	default:
 		return nil, ErrInvalidConfig
@@ -160,6 +173,7 @@ func NormalizeConfigForUpdate(typ model.NotifyType, raw json.RawMessage, prevTyp
 	if err != nil {
 		return nil, err
 	}
+	inheritLanguageIfMissing(fields, previous)
 
 	switch typ {
 	case model.NotifyTypeTelegram:
@@ -262,6 +276,17 @@ func inheritStringIfEmpty(fields rawConfig, key, value string) {
 	}
 }
 
+func inheritLanguageIfMissing(fields rawConfig, previous any) {
+	if _, ok := fields["language"]; ok {
+		return
+	}
+	previousLanguage := typedLanguage(previous)
+	if previousLanguage == "" {
+		return
+	}
+	fields["language"] = json.RawMessage(strconv.Quote(previousLanguage))
+}
+
 func emptyStringField(fields rawConfig, key string) bool {
 	raw, ok := fields[key]
 	if !ok {
@@ -280,10 +305,14 @@ func decodeTelegram(raw json.RawMessage) (any, error) {
 	if err != nil {
 		return nil, err
 	}
+	language, err := readLanguage(fields)
+	if err != nil {
+		return nil, err
+	}
 
 	switch mode {
 	case TelegramModeBot:
-		if err := rejectUnknownFields(fields, "mode", "bot_token", "chat_id"); err != nil {
+		if err := rejectUnknownFields(fields, "language", "mode", "bot_token", "chat_id"); err != nil {
 			return nil, err
 		}
 		botToken, err := readRawStringNonEmpty(fields, "bot_token")
@@ -301,12 +330,13 @@ func decodeTelegram(raw json.RawMessage) (any, error) {
 			return nil, err
 		}
 		return TelegramBotConfig{
+			Language: language,
 			Mode:     TelegramModeBot,
 			BotToken: botToken,
 			ChatID:   chatID,
 		}, nil
 	case TelegramModeMTProto:
-		if err := rejectUnknownFields(fields, "mode", "api_id", "api_hash", "phone", "chat_id", "session", "username"); err != nil {
+		if err := rejectUnknownFields(fields, "language", "mode", "api_id", "api_hash", "phone", "chat_id", "session", "username"); err != nil {
 			return nil, err
 		}
 		apiID, err := readPositiveInt(fields, "api_id")
@@ -349,6 +379,7 @@ func decodeTelegram(raw json.RawMessage) (any, error) {
 			}
 		}
 		return TelegramMTProtoConfig{
+			Language: language,
 			Mode:     TelegramModeMTProto,
 			APIID:    apiID,
 			APIHash:  apiHash,
@@ -367,7 +398,11 @@ func decodeEmail(raw json.RawMessage) (EmailConfig, error) {
 	if err != nil {
 		return EmailConfig{}, err
 	}
-	if err := rejectUnknownFields(fields, "smtp_host", "smtp_port", "username", "password", "from", "to", "use_tls"); err != nil {
+	if err := rejectUnknownFields(fields, "language", "smtp_host", "smtp_port", "username", "password", "from", "to", "use_tls"); err != nil {
+		return EmailConfig{}, err
+	}
+	language, err := readLanguage(fields)
+	if err != nil {
 		return EmailConfig{}, err
 	}
 	smtpHost, err := readString(fields, "smtp_host")
@@ -428,6 +463,7 @@ func decodeEmail(raw json.RawMessage) (EmailConfig, error) {
 		return EmailConfig{}, fmt.Errorf("from is invalid")
 	}
 	return EmailConfig{
+		Language: language,
 		SMTPHost: smtpHost,
 		SMTPPort: smtpPort,
 		Username: username,
@@ -443,7 +479,11 @@ func decodeWebhook(raw json.RawMessage) (WebhookConfig, error) {
 	if err != nil {
 		return WebhookConfig{}, err
 	}
-	if err := rejectUnknownFields(fields, "url", "secret"); err != nil {
+	if err := rejectUnknownFields(fields, "language", "url", "secret"); err != nil {
+		return WebhookConfig{}, err
+	}
+	language, err := readLanguage(fields)
+	if err != nil {
 		return WebhookConfig{}, err
 	}
 	url, err := readString(fields, "url")
@@ -464,8 +504,9 @@ func decodeWebhook(raw json.RawMessage) (WebhookConfig, error) {
 		return WebhookConfig{}, err
 	}
 	return WebhookConfig{
-		URL:    url,
-		Secret: secret,
+		Language: language,
+		URL:      url,
+		Secret:   secret,
 	}, nil
 }
 
@@ -502,6 +543,56 @@ func readTelegramMode(fields rawConfig) (string, error) {
 		return mode, nil
 	}
 	return TelegramModeBot, nil
+}
+
+func readLanguage(fields rawConfig) (string, error) {
+	raw, ok := fields["language"]
+	if !ok {
+		return "", nil
+	}
+	value, err := unmarshalString(raw, "language")
+	if err != nil {
+		return "", err
+	}
+	value = strings.ToLower(strings.TrimSpace(value))
+	switch value {
+	case lang.System, lang.Chinese, lang.English:
+		return value, nil
+	case "":
+		return "", fmt.Errorf("language cannot be empty")
+	default:
+		return "", fmt.Errorf("language is not supported")
+	}
+}
+
+func typedLanguage(cfg any) string {
+	switch typed := cfg.(type) {
+	case TelegramBotConfig:
+		return typed.Language
+	case TelegramMTProtoConfig:
+		return typed.Language
+	case EmailConfig:
+		return typed.Language
+	case WebhookConfig:
+		return typed.Language
+	default:
+		return ""
+	}
+}
+
+func viewLanguage(raw string) string {
+	if raw == "" {
+		return lang.System
+	}
+	return raw
+}
+
+func EffectiveLanguage(typ model.NotifyType, raw []byte, system string) string {
+	cfg, err := DecodeConfig(typ, json.RawMessage(raw))
+	if err != nil {
+		return lang.Normalize(system)
+	}
+	return lang.Resolve(typedLanguage(cfg), system)
 }
 
 func readString(fields rawConfig, key string) (string, error) {

@@ -109,6 +109,8 @@ Bearer 可选端点会把缺失、格式错误、过期、已撤销或其他非�
 - 投递健康字段包括 `last_success_at`、`last_failure_at`、`consecutive_failures`、`last_error_code`、`last_error`、`next_retry_at`、`next_probe_at`、`pending_count` 和 `blocked_count`。没有值的可选时间及错误字段为 `null`。`next_retry_at` 是最早的瞬时失败重试时间，管理端按本地时间显示为 `YYYYMMDD HH:mm:ss`；`next_probe_at` 是最早的阻塞恢复探测时间。`pending_count` 包含待发送、发送中、重试、阻塞和暂停通知；`blocked_count` 是其中等待低频恢复探测的通知数。
 - `updated_at` 表示最近一次渠道配置或启停状态变更；后台健康状态更新不会改变 API 返回的该时间。
 - 渠道名会 trim，不能为空，最多 64 个 Unicode 字符，且不得含控制字符。非法创建或全量替换请求返回 `400 invalid_fields`。
+- Telegram、邮件和 Webhook 的 `config.language` 均接受 `system`、`zh` 或 `en`。`system` 在消息入队时跟随后端 `app.language`；创建渠道或读取存量配置时，缺少该字段等同于 `system`。同类型渠道全量替换时，省略该字段会保留已有显式语言，以兼容旧客户端；改变渠道类型且省略时恢复为 `system`。告警、渠道测试消息和 Dash 更新通知都使用渠道语言。
+- 通知标题和正文按渠道语言渲染后写入 outbox。修改渠道语言只影响之后入队的通知；已经入队的通知保留原有文本和语言。
 - password、token、hash、session 和 Webhook secret 都是不透明凭据。兼容更新时，字段省略或严格为空字符串才继承存量值；强类型配置字段不接受 JSON `null`。通过校验的非空值不会 trim 或做其他规范化，首尾空白会保留。
 - Webhook `url` 必须是包含非空主机名的绝对 HTTP 或 HTTPS URL，不允许用户信息或 fragment。
 - `PUT /api/admin/alerts/channels/{id}` 全量替换渠道配置。保存同类型渠道后，处于重试、阻塞或暂停状态的通知会立即唤醒并重置重试次数预算；改变渠道类型会丢弃按旧类型创建的通知。如果请求读取当前 secret/session 后、提交前渠道已发生变化，请求会返回 `409 channel_changed`，不会覆盖更新的 revision。

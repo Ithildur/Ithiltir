@@ -1,5 +1,5 @@
 import React from 'react';
-import type { AlertChannelType, AlertTelegramMode } from '@app-types/admin';
+import type { AlertChannelLanguage, AlertChannelType, AlertTelegramMode } from '@app-types/admin';
 import {
   DEFAULT_CHANNEL_KIND,
   channelTypeFromKind,
@@ -23,6 +23,7 @@ type FormState = {
   sourceKey: string;
   dirty: boolean;
   channelName: string;
+  language: AlertChannelLanguage;
   kind: AlertChannelFormKind;
   drafts: ChannelDrafts;
   visibleSecrets: Record<SecretKey, boolean>;
@@ -32,6 +33,7 @@ const createFormState = (sourceKey: string, form?: AlertChannelForm): FormState 
   sourceKey,
   dirty: false,
   channelName: form?.name ?? '',
+  language: form?.language ?? 'system',
   kind: form?.kind ?? DEFAULT_CHANNEL_KIND,
   drafts: draftsFor(form),
   visibleSecrets: createVisibleSecrets(),
@@ -65,6 +67,10 @@ export const useAlertChannelForm = ({
 
   const setChannelNameDraft = React.useCallback((nextName: string) => {
     setFormState((current) => ({ ...current, dirty: true, channelName: nextName }));
+  }, []);
+
+  const setLanguage = React.useCallback((language: AlertChannelLanguage) => {
+    setFormState((current) => ({ ...current, dirty: true, language }));
   }, []);
 
   const setChannelType = React.useCallback((nextType: AlertChannelType) => {
@@ -150,31 +156,33 @@ export const useAlertChannelForm = ({
     }));
   }, []);
 
-  const { channelName, drafts, kind, visibleSecrets } = formState;
+  const { channelName, language, drafts, kind, visibleSecrets } = formState;
   const channelType = channelTypeFromKind(kind);
   const telegramMode = telegramModeFromKind(kind);
 
   const currentForm = React.useCallback((): AlertChannelForm => {
     if (kind === 'telegram_bot') {
-      return { name: channelName, ...drafts.telegram_bot };
+      return { name: channelName, language, ...drafts.telegram_bot };
     }
     if (kind === 'telegram_mtproto') {
-      return { name: channelName, ...drafts.telegram_mtproto };
+      return { name: channelName, language, ...drafts.telegram_mtproto };
     }
     if (kind === 'email') {
-      return { name: channelName, ...drafts.email };
+      return { name: channelName, language, ...drafts.email };
     }
-    return { name: channelName, ...drafts.webhook };
-  }, [channelName, drafts, kind]);
+    return { name: channelName, language, ...drafts.webhook };
+  }, [channelName, drafts, kind, language]);
 
   return {
     channelName,
+    language,
     drafts,
     kind,
     visibleSecrets,
     channelType,
     telegramMode,
     setChannelName: setChannelNameDraft,
+    setLanguage,
     setChannelType,
     setTelegramMode,
     patchTelegramBot,

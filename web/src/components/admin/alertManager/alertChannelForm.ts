@@ -1,10 +1,16 @@
-import type { AlertChannelType, AlertTelegramMode, ValidAlertChannel } from '@app-types/admin';
+import type {
+  AlertChannelLanguage,
+  AlertChannelType,
+  AlertTelegramMode,
+  ValidAlertChannel,
+} from '@app-types/admin';
 import type { AlertChannelInput } from '@lib/adminApi';
 
 export type AlertChannelFormKind = 'telegram_bot' | 'telegram_mtproto' | 'email' | 'webhook';
 
 interface Base {
   name: string;
+  language: AlertChannelLanguage;
 }
 
 interface TelegramBotChannelForm extends Base {
@@ -47,10 +53,10 @@ type AlertChannelFormResult =
   { ok: true; input: AlertChannelInput } | { ok: false; issue: AlertChannelFormIssue };
 
 export interface ChannelDrafts {
-  telegram_bot: Omit<TelegramBotChannelForm, 'name'>;
-  telegram_mtproto: Omit<TelegramMtprotoChannelForm, 'name'>;
-  email: Omit<EmailChannelForm, 'name'>;
-  webhook: Omit<WebhookChannelForm, 'name'>;
+  telegram_bot: Omit<TelegramBotChannelForm, 'name' | 'language'>;
+  telegram_mtproto: Omit<TelegramMtprotoChannelForm, 'name' | 'language'>;
+  email: Omit<EmailChannelForm, 'name' | 'language'>;
+  webhook: Omit<WebhookChannelForm, 'name' | 'language'>;
 }
 
 export const DEFAULT_CHANNEL_KIND: AlertChannelFormKind = 'telegram_bot';
@@ -163,6 +169,7 @@ export const channelInputFromForm = (
         type: 'telegram',
         enabled,
         config: {
+          language: form.language,
           mode: 'mtproto',
           api_id: apiId,
           api_hash: form.apiHash,
@@ -181,6 +188,7 @@ export const channelInputFromForm = (
         type: 'telegram',
         enabled,
         config: {
+          language: form.language,
           mode: 'bot',
           bot_token: form.botToken,
           chat_id: form.chatId.trim(),
@@ -200,6 +208,7 @@ export const channelInputFromForm = (
         type: 'email',
         enabled,
         config: {
+          language: form.language,
           smtp_host: form.emailHost.trim(),
           smtp_port: smtpPort,
           username: form.emailUsername.trim(),
@@ -220,6 +229,7 @@ export const channelInputFromForm = (
       type: 'webhook',
       enabled,
       config: {
+        language: form.language,
         url: form.webhookUrl.trim(),
         ...(secret !== '' ? { secret } : {}),
       },
@@ -228,7 +238,7 @@ export const channelInputFromForm = (
 };
 
 export const formFromChannel = (channel: ValidAlertChannel): AlertChannelForm => {
-  const base = { name: channel.name };
+  const base = { name: channel.name, language: channel.config.language };
 
   if (channel.type === 'telegram') {
     const config = channel.config;

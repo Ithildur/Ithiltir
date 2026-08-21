@@ -34,7 +34,7 @@ type Service struct {
 }
 
 type notificationQueue interface {
-	EnqueueDefault(context.Context, string, notify.Message) (notify.EnqueueStatus, error)
+	EnqueueDefault(context.Context, string, notify.Messages) (notify.EnqueueStatus, error)
 }
 
 type autoState struct {
@@ -137,7 +137,7 @@ func (s *Service) checkAndAct(ctx context.Context) error {
 		if err := s.enqueueNotification(
 			ctx,
 			"dash-update:available:"+availableKey,
-			s.availableMessage(check),
+			availableMessages(check),
 		); err != nil {
 			return err
 		}
@@ -169,7 +169,7 @@ func (s *Service) checkAndAct(ctx context.Context) error {
 		notifyErr := s.enqueueNotification(
 			ctx,
 			"dash-update:auto-start-failed:"+availableKey,
-			s.startFailedMessage(check, err),
+			startFailedMessages(check, err),
 		)
 		if notifyErr != nil {
 			return errors.Join(err, notifyErr)
@@ -194,7 +194,7 @@ func (s *Service) notifyFinishedAutoUpdate(ctx context.Context) {
 		err := s.enqueueNotification(
 			ctx,
 			"dash-update:finished:"+job.status.ID,
-			s.finishedMessage(job.status),
+			finishedMessages(job.status),
 		)
 		if err != nil {
 			s.logger.Warn("enqueue dash update finish notification failed", err)
@@ -232,7 +232,7 @@ func (s *Service) notifyLegacyFinishedAutoUpdate(ctx context.Context, paths runn
 	if err := s.enqueueNotification(
 		ctx,
 		"dash-update:finished:"+state.LastStartedID,
-		s.finishedMessage(status),
+		finishedMessages(status),
 	); err != nil {
 		s.logger.Warn("enqueue dash update finish notification failed", err)
 		return
@@ -249,8 +249,8 @@ func (s *Service) loadPolicy(ctx context.Context) (systemstore.DashUpdatePolicy,
 	})
 }
 
-func (s *Service) enqueueNotification(ctx context.Context, key string, msg notify.Message) error {
-	status, err := s.notifications.EnqueueDefault(ctx, key, msg)
+func (s *Service) enqueueNotification(ctx context.Context, key string, messages notify.Messages) error {
+	status, err := s.notifications.EnqueueDefault(ctx, key, messages)
 	switch status {
 	case notify.EnqueueQueued, notify.EnqueueSkippedNoTargets:
 		if err != nil {
@@ -265,68 +265,74 @@ func (s *Service) enqueueNotification(ctx context.Context, key string, msg notif
 	}
 }
 
-func (s *Service) availableMessage(check Check) notify.Message {
-	if s.isEnglish() {
-		return notify.Message{
+func availableMessages(check Check) notify.Messages {
+	metadata := updateMessageMetadata("available", check)
+	return notify.Messages{
+		Chinese: notify.Message{
+			Title: "Dash 有可用更新",
+			Body: strings.Join([]string{
+				"当前版本: " + check.CurrentVersion,
+				"最新版本: " + check.LatestVersion,
+				"更新通道: " + string(check.TargetChannel),
+			}, "\n"),
+			Metadata: metadata,
+		},
+		English: notify.Message{
 			Title: "Dash update available",
 			Body: strings.Join([]string{
 				"Current: " + check.CurrentVersion,
 				"Latest: " + check.LatestVersion,
 				"Channel: " + string(check.TargetChannel),
 			}, "\n"),
-			Metadata: updateMessageMetadata("available", check),
-		}
-	}
-	return notify.Message{
-		Title: "Dash 有可用更新",
-		Body: strings.Join([]string{
-			"当前版本: " + check.CurrentVersion,
-			"最新版本: " + check.LatestVersion,
-			"更新通道: " + string(check.TargetChannel),
-		}, "\n"),
-		Metadata: updateMessageMetadata("available", check),
+			Metadata: metadata,
+		},
 	}
 }
 
-func (s *Service) startFailedMessage(check Check, startErr error) notify.Message {
-	body := updateStartFailedBody(check, startErr, s.isEnglish())
-	title := "Dash auto update failed to start"
-	if !s.isEnglish() {
-		title = "Dash 自动更新启动失败"
-	}
-	return notify.Message{
-		Title:    title,
-		Body:     body,
-		Metadata: updateMessageMetadata("auto_start_failed", check),
+func startFailedMessages(check Check, startErr error) notify.Messages {
+	metadata := updateMessageMetadata("auto_start_failed", check)
+	return notify.Messages{
+		Chinese: notify.Message{
+			Title:    "Dash 自动更新启动失败",
+			Body:     updateStartFailedBody(check, startErr, false),
+			Metadata: metadata,
+		},
+		English: notify.Message{
+			Title:    "Dash auto update failed to start",
+			Body:     updateStartFailedBody(check, startErr, true),
+			Metadata: metadata,
+		},
 	}
 }
 
-func (s *Service) finishedMessage(status State) notify.Message {
+func finishedMessages(status State) notify.Messages {
 	if status.Status == StatusCompleted {
-		if s.isEnglish() {
-			return notify.Message{
+		metadata := statusMessageMetadata("auto_completed", status)
+		return notify.Messages{
+			Chinese: notify.Message{
+				Title:    "Dash 自动更新完成",
+				Body:     finishedBody(status, false),
+				Metadata: metadata,
+			},
+			English: notify.Message{
 				Title:    "Dash auto update completed",
 				Body:     finishedBody(status, true),
-				Metadata: statusMessageMetadata("auto_completed", status),
-			}
-		}
-		return notify.Message{
-			Title:    "Dash 自动更新完成",
-			Body:     finishedBody(status, false),
-			Metadata: statusMessageMetadata("auto_completed", status),
+				Metadata: metadata,
+			},
 		}
 	}
-	if s.isEnglish() {
-		return notify.Message{
+	metadata := statusMessageMetadata("auto_failed", status)
+	return notify.Messages{
+		Chinese: notify.Message{
+			Title:    "Dash 自动更新失败",
+			Body:     finishedBody(status, false),
+			Metadata: metadata,
+		},
+		English: notify.Message{
 			Title:    "Dash auto update failed",
 			Body:     finishedBody(status, true),
-			Metadata: statusMessageMetadata("auto_failed", status),
-		}
-	}
-	return notify.Message{
-		Title:    "Dash 自动更新失败",
-		Body:     finishedBody(status, false),
-		Metadata: statusMessageMetadata("auto_failed", status),
+			Metadata: metadata,
+		},
 	}
 }
 
