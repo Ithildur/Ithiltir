@@ -25,7 +25,7 @@ Ithiltir Dash is a single-instance, self-hosted server monitoring dashboard. One
 
 - PostgreSQL 16+ with TimescaleDB built for the same PostgreSQL major version
 - Redis persists admin sessions by default and stores the disposable frontend cache; `--no-redis` keeps both in process memory. Alert runtime and MTProto login handshakes always stay in memory and reset on restart
-- Go 1.26.5+ to run from source or build packages
+- Go 1.26.6+ to run from source or build packages
 - Bun 1.3.11 to build the frontend
 
 ## Quick Start

@@ -25,7 +25,7 @@ Ithiltir Dash 是单实例、自托管的服务器监控面板。一个 Dash 进
 
 - PostgreSQL 16+ 和按相同 PostgreSQL 主版本构建的 TimescaleDB
 - Redis 默认持久化管理员会话，并保存可丢弃的前台缓存；`--no-redis` 把两者都放入进程内存。告警运行态和 MTProto 登录握手始终在内存中，重启后重置
-- 从源码运行或打包需要 Go 1.26.5+
+- 从源码运行或打包需要 Go 1.26.6+
 - 构建前端需要 Bun 1.3.11
 
 ## 快速启动
