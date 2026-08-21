@@ -23,7 +23,7 @@ Ithiltir Dash 是单实例、自托管的服务器监控面板。一个 Dash 进
 
 ## 运行要求
 
-- PostgreSQL 16+ 和按相同 PostgreSQL 主版本构建的 TimescaleDB
+- PostgreSQL 16+ 和按相同 PostgreSQL 主版本构建的 TimescaleDB。已有兼容版本继续受支持；自动补齐全新环境依赖时锁定 PostgreSQL 16.15 和 TimescaleDB 2.29.1
 - Redis 默认持久化管理员会话，并保存可丢弃的前台缓存；`--no-redis` 把两者都放入进程内存。告警运行态和 MTProto 登录握手始终在内存中，重启后重置
 - 从源码运行或打包需要 Go 1.26.6+
 - 构建前端需要 Bun 1.3.11
@@ -83,10 +83,10 @@ Redis 配置和 `REDIS_*` 覆盖只在启用 Redis 模式时加载。连接池�
 
 ## 部署基线
 
-- 默认部署形态：`PostgreSQL 16+ + 主版本匹配的 TimescaleDB + Redis`
-- `install_dash_linux.sh` 使用带签名的 PostgreSQL/TimescaleDB 仓库，并优先通过系统包管理器安装 Redis。安装器以推荐的 Redis `8.2.3+` 为部署目标；系统仓库没有 Redis 或版本更低时，可选择从源码安装或升级（默认 `8.2.5`）。覆盖现有 Redis 配置或服务、停止 6379 端口监听进程前，安装器会明确确认且默认继续，并备份被覆盖的文件。切换安装前，安装器使用包内 Dash 二进制按实际配置的 `redis.addr` 和可选 `redis.password` 执行 `PING`、`INFO server` 和支持下限 `6.2.0+` 校验，不再以本机 `redis-server` 可执行文件推断远端服务状态；正常启动会重复同一端点校验，低于推荐版本 `8.2.3` 时记录警告。`--no-redis` 会跳过 Redis 连接和版本校验。
+- 全新环境安装目标：`PostgreSQL 16.15 + TimescaleDB 2.29.1 + Redis`。已有 PostgreSQL 16+ 和主版本匹配的 TimescaleDB 保持不变。
+- `install_dash_linux.sh` 使用带签名的 PostgreSQL/TimescaleDB 仓库。缺少任一数据库依赖时，安装器会解析锁定上游版本对应的发行版包修订号，并校验实际安装的服务器或扩展版本；配置的仓库不再保留该锁定版本时直接停止，不会静默漂移到更高上游版本。安装器优先通过系统包管理器安装 Redis，以推荐的 Redis `8.2.3+` 为部署目标；系统仓库没有 Redis 或版本更低时，可选择从源码安装或升级（默认 `8.2.5`）。覆盖现有 Redis 配置或服务、停止 6379 端口监听进程前，安装器会明确确认且默认继续，并备份被覆盖的文件。切换安装前，安装器使用包内 Dash 二进制按实际配置的 `redis.addr` 和可选 `redis.password` 执行 `PING`、`INFO server` 和支持下限 `6.2.0+` 校验，不再以本机 `redis-server` 可执行文件推断远端服务状态；正常启动会重复同一端点校验，低于推荐版本 `8.2.3` 时记录警告。`--no-redis` 会跳过 Redis 连接和版本校验。
 - 节点安装脚本提示语言跟随 `app.language`。
-- Dash Linux 安装器只在 systemd 确实运行时注册服务。安装器要求 `pgrep`，以便切换时停止仍从已安装二进制手动启动的进程。非 systemd 主机必须显式使用 `--service-manager=none`；该模式只安装文件和手动启动脚本，不声称服务已启动或已开机自启。其受支持生命周期是在全新主机上执行一次首次安装：它不是重装、修复、回滚或版本更新入口，也不会与更新器并发执行。安装器只安装 `install_dash_linux.sh` 旁的软件包内容并校验其中的 `dash` 二进制，不会选择线上 release。首次安装后，所有版本变更都由 `/opt/Ithiltir-dash/bin/dash update` 执行；`update_dash_linux.sh` 只保留为兼容包装。受管安装包写入 `/opt/Ithiltir-dash/releases`，由单一原子 `current` 符号链接选择当前版本；`/opt/Ithiltir-dash/bin/dash` 等旧路径作为兼容别名保留，`configs`、`runtime`、`logs`、`themes` 和 `install_id` 等可变数据位于 release 目录之外。安装器中的备份和恢复路径只负责约束这一次首次安装的失败范围，不构成受支持的重复执行或降级契约。更新器用 root 所有的跨进程锁覆盖已安装状态校验到切换的完整事务。数据库迁移开始前失败时恢复切换前状态；迁移开始后绝不恢复旧二进制。持久化事务和 systemd 启动保护会让中断的迁移保持停止，直到 `dash update recover` 向前完成。安装包暂存使用 `/opt/Ithiltir-dash` 旁的 sibling 目录；首次安装的原子切换仍要求 GNU coreutils `mv`。Alpine 上还必须预先安装并启动 PostgreSQL 16+、按该 PostgreSQL 主版本构建的 TimescaleDB 和 Redis 6.2.0+；仍推荐 Redis 8.2.3+。
+- Dash Linux 安装器只在 systemd 确实运行时注册服务。安装器要求 `pgrep`，以便切换时停止仍从已安装二进制手动启动的进程。非 systemd 主机必须显式使用 `--service-manager=none`；该模式只安装文件和手动启动脚本，不声称服务已启动或已开机自启。其受支持生命周期是在全新主机上执行一次首次安装：它不是重装、修复、回滚或版本更新入口，也不会与更新器并发执行。安装器只安装 `install_dash_linux.sh` 旁的软件包内容并校验其中的 `dash` 二进制，不会选择线上 release。首次安装后，所有版本变更都由 `/opt/Ithiltir-dash/bin/dash update` 执行；`update_dash_linux.sh` 只保留为兼容包装。受管安装包写入 `/opt/Ithiltir-dash/releases`，由单一原子 `current` 符号链接选择当前版本；`/opt/Ithiltir-dash/bin/dash` 等旧路径作为兼容别名保留，`configs`、`runtime`、`logs`、`themes` 和 `install_id` 等可变数据位于 release 目录之外。安装器中的备份和恢复路径只负责约束这一次首次安装的失败范围，不构成受支持的重复执行或降级契约。更新器用 root 所有的跨进程锁覆盖已安装状态校验到切换的完整事务。数据库迁移开始前失败时恢复切换前状态；迁移开始后绝不恢复旧二进制。持久化事务和 systemd 启动保护会让中断的迁移保持停止，直到 `dash update recover` 向前完成。安装包暂存使用 `/opt/Ithiltir-dash` 旁的 sibling 目录；首次安装的原子切换仍要求 GNU coreutils `mv`。Alpine 上还必须预先安装并启动 PostgreSQL 16+、按该 PostgreSQL 主版本构建的 TimescaleDB 和 Redis 6.2.0+；全新环境目标是 PostgreSQL 16.15 和 TimescaleDB 2.29.1，已有兼容版本仍可使用；仍推荐 Redis 8.2.3+。
 - Linux 节点安装器正式支持 systemd 和 Alpine/OpenRC；其他 OpenRC 发行版仅尽力兼容。Alpine 执行 Bash 安装器前必须已有 `bash`、`ca-certificates`、`curl`、`coreutils`。该安装器始终覆盖受管节点 release、上报配置、服务定义和采集器；节点版本升级由独立的节点自更新路径负责。安装器先在 `/var/lib/ithiltir-node/releases` 下暂存下载的二进制并执行 `--version`，再停止已有运行方式、强制替换目标 release，并原子切换 `current`。运行用户拥有数据和 release 树，使非特权自更新器可以创建和切换 release。下载最多跟随五次指向初始主机的重定向；同协议跳转保持有效端口，只允许 HTTP 升级到 HTTPS。systemd 使用 service/timer 调度 SMART、连接数和检测到的 LVM thin-pool 采集器；OpenRC 用 `supervise-daemon` 管理节点进程，BusyBox `crond` 每 5 分钟刷新 SMART、每分钟刷新 LVM。1 秒周期的 root 连接数 helper 不会错误降级为分钟级 cron，OpenRC 下改用节点自带统计，可能缺失容器连接数据。
 - systemd 下，Linux 节点安装器会在存在 `cc`、`gcc` 或 `clang` 时编译 root 侧连接数 helper，用于完整统计主机和容器网络命名空间的 TCP/UDP 连接数。安装编译器后重新运行安装脚本即可启用。
 - 推荐最小配置：`1 vCPU / 2 GB RAM / 40 GB SSD/NVMe`

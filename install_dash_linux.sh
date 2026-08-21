@@ -9,6 +9,10 @@ set -euo pipefail
 
 APP="dash"
 
+readonly POSTGRES_VERSION="16.15"
+readonly POSTGRES_MAJOR="${POSTGRES_VERSION%%.*}"
+readonly TIMESCALEDB_VERSION="2.29.1"
+
 INSTALL_DIR="/opt/Ithiltir-dash"
 RELEASES_DIR="${INSTALL_DIR}/releases"
 CURRENT_LINK="${INSTALL_DIR}/current"
@@ -429,6 +433,42 @@ version_ge() {
 	return 0
 }
 
+package_version_matches() {
+	local version="${1#*:}" want="$2"
+	case "$version" in
+	"$want" | "$want"-* | "$want"+* | "$want"~*) return 0 ;;
+	*) return 1 ;;
+	esac
+}
+
+apt_package_version() {
+	local package="$1" want="$2" version
+	while IFS='|' read -r _ version _; do
+		version="$(trim_spaces "$version")"
+		if package_version_matches "$version" "$want"; then
+			printf '%s\n' "$version"
+			return 0
+		fi
+	done < <(apt-cache madison "$package" 2>/dev/null)
+	return 1
+}
+
+arch_package_version() {
+	local package="$1"
+	LC_ALL=C pacman -Si "$package" 2>/dev/null |
+		awk -F: '$1 ~ /^Version[[:space:]]*$/ {sub(/^[[:space:]]*/, "", $2); print $2; exit}'
+}
+
+require_arch_package_version() {
+	local package="$1" want="$2" version
+	version="$(arch_package_version "$package" || true)"
+	if [[ -z "$version" ]]; then
+		die "$(txt "仓库中没有软件包 ${package}" "Package ${package} is unavailable in the configured repository")"
+	fi
+	package_version_matches "$version" "$want" ||
+		die "$(txt "仓库中的 ${package}=${version} 不符合新装锁定版本 ${want}；请预装兼容依赖后重试" "Repository package ${package}=${version} does not match the fresh-install pin ${want}; preinstall compatible dependencies and retry")"
+}
+
 find_listening_pids_on_port() {
 	local port="$1"
 
@@ -695,7 +735,7 @@ detect_os() {
 		OS_FAMILY="manual"
 		PKG_MANAGER=""
 		PKG_MANAGER_LABEL="manual"
-		say_err "警告：Alpine 上的 Dash 仅支持显式手动模式；PostgreSQL 16+、匹配其主版本的 TimescaleDB 和 Redis 必须预先安装并运行。" "WARNING: Dash supports only explicit manual mode on Alpine; PostgreSQL 16+, TimescaleDB for that PostgreSQL major, and Redis must already be installed and running."
+		say_err "警告：Alpine 上的 Dash 仅支持显式手动模式；PostgreSQL ${POSTGRES_MAJOR}+、匹配其主版本的 TimescaleDB 和 Redis 必须预先安装并运行；全新环境目标为 PostgreSQL ${POSTGRES_VERSION} / TimescaleDB ${TIMESCALEDB_VERSION}。" "WARNING: Dash supports only explicit manual mode on Alpine; PostgreSQL ${POSTGRES_MAJOR}+, TimescaleDB for that PostgreSQL major, and Redis must already be installed and running; the fresh-environment target is PostgreSQL ${POSTGRES_VERSION} / TimescaleDB ${TIMESCALEDB_VERSION}."
 		return 0
 		;;
 	*)
@@ -822,7 +862,7 @@ ensure_postgres_binaries_on_path() {
 	fi
 
 	local dir major best_dir="" best_major=0
-	if [[ "$current_major" =~ ^[0-9]+$ ]] && ((current_major >= 16)); then
+	if [[ "$current_major" =~ ^[0-9]+$ ]] && ((current_major >= POSTGRES_MAJOR)); then
 		best_major="$current_major"
 	fi
 	local -a dirs=()
@@ -832,7 +872,7 @@ ensure_postgres_binaries_on_path() {
 	for dir in "${dirs[@]}"; do
 		[[ -x "${dir}/psql" ]] || continue
 		major="$("${dir}/psql" --version 2>/dev/null | sed -nE 's/.* ([0-9]+)(\.[0-9]+)?.*/\1/p')"
-		if [[ "$major" =~ ^[0-9]+$ ]] && ((major >= 16 && major > best_major)); then
+		if [[ "$major" =~ ^[0-9]+$ ]] && ((major >= POSTGRES_MAJOR && major > best_major)); then
 			best_dir="$dir"
 			best_major="$major"
 		fi
@@ -865,7 +905,7 @@ systemd_restart_first() {
 enable_postgres_service() {
 	local pg_major
 	pg_major="$(postgres_major_version)"
-	[[ "$pg_major" =~ ^[0-9]+$ ]] || pg_major="16"
+	[[ "$pg_major" =~ ^[0-9]+$ ]] || pg_major="$POSTGRES_MAJOR"
 	case "$SERVICE_MANAGER" in
 	systemd)
 		case "${OS_FAMILY}" in
@@ -1027,9 +1067,9 @@ EOF"
 postgres_cluster_initialized() {
 	local pg_version_file
 	for pg_version_file in \
-		/var/lib/postgresql/16/main/PG_VERSION \
+		"/var/lib/postgresql/${POSTGRES_MAJOR}/main/PG_VERSION" \
 		/var/lib/postgresql/data/PG_VERSION \
-		/var/lib/pgsql/16/data/PG_VERSION \
+		"/var/lib/pgsql/${POSTGRES_MAJOR}/data/PG_VERSION" \
 		/var/lib/pgsql/data/PG_VERSION \
 		/var/lib/postgres/data/PG_VERSION; do
 		if [[ -f "$pg_version_file" ]]; then
@@ -1045,12 +1085,13 @@ init_postgres_cluster_if_needed() {
 	ensure_postgres_binaries_on_path
 	case "${OS_FAMILY}" in
 	debian)
-		need_cmd pg_createcluster || die "$(txt "缺少 pg_createcluster，无法初始化 PostgreSQL 16" "pg_createcluster is required to initialize PostgreSQL 16")"
-		as_root pg_createcluster 16 main
+		need_cmd pg_createcluster || die "$(txt "缺少 pg_createcluster，无法初始化 PostgreSQL ${POSTGRES_MAJOR}" "pg_createcluster is required to initialize PostgreSQL ${POSTGRES_MAJOR}")"
+		as_root pg_createcluster "$POSTGRES_MAJOR" main
 		;;
 	rhel | fedora)
-		[[ -x /usr/pgsql-16/bin/postgresql-16-setup ]] || die "$(txt "缺少 postgresql-16-setup" "postgresql-16-setup is missing")"
-		as_root /usr/pgsql-16/bin/postgresql-16-setup initdb
+		local setup="/usr/pgsql-${POSTGRES_MAJOR}/bin/postgresql-${POSTGRES_MAJOR}-setup"
+		[[ -x "$setup" ]] || die "$(txt "缺少 postgresql-${POSTGRES_MAJOR}-setup" "postgresql-${POSTGRES_MAJOR}-setup is missing")"
+		as_root "$setup" initdb
 		;;
 	arch)
 		need_cmd initdb || die "$(txt "缺少 initdb" "initdb is missing")"
@@ -1071,12 +1112,21 @@ install_postgresql16() {
 
 	case "${OS_FAMILY}" in
 	debian)
-		pkg_install postgresql-16 postgresql-client-16
+		local server="postgresql-${POSTGRES_MAJOR}" client="postgresql-client-${POSTGRES_MAJOR}"
+		local server_version client_version
+		server_version="$(apt_package_version "$server" "$POSTGRES_VERSION" || true)"
+		client_version="$(apt_package_version "$client" "$POSTGRES_VERSION" || true)"
+		[[ -n "$server_version" && -n "$client_version" ]] ||
+			die "$(txt "PGDG 仓库没有新装锁定的 PostgreSQL ${POSTGRES_VERSION}" "The PGDG repository does not provide the pinned fresh-install PostgreSQL ${POSTGRES_VERSION}")"
+		pkg_install "${server}=${server_version}" "${client}=${client_version}"
 		;;
 	rhel | fedora)
-		pkg_install postgresql16-server postgresql16
+		pkg_install \
+			"postgresql${POSTGRES_MAJOR}-server-${POSTGRES_VERSION}-*" \
+			"postgresql${POSTGRES_MAJOR}-${POSTGRES_VERSION}-*"
 		;;
 	arch)
+		require_arch_package_version postgresql "$POSTGRES_VERSION"
 		pkg_install postgresql
 		;;
 	*)
@@ -1087,6 +1137,20 @@ install_postgresql16() {
 	ensure_postgres_binaries_on_path
 	init_postgres_cluster_if_needed
 	enable_postgres_service
+
+	local installed_version
+	installed_version="$(postgres_server_version || true)"
+	[[ "$installed_version" == "$POSTGRES_VERSION" ]] ||
+		die "$(txt "新装 PostgreSQL 版本校验失败：当前 ${installed_version:-unknown}，要求 ${POSTGRES_VERSION}" "Fresh PostgreSQL version check failed: got ${installed_version:-unknown}, require ${POSTGRES_VERSION}")"
+}
+
+postgres_server_version() {
+	ensure_postgres_binaries_on_path
+	need_cmd psql || return 1
+	local server_num
+	server_num="$(as_postgres psql -d postgres -tAc 'SHOW server_version_num' 2>/dev/null | tr -d '[:space:]')"
+	[[ "$server_num" =~ ^[0-9]+$ ]] && ((server_num >= 10000)) || return 1
+	printf '%s.%s\n' "$((server_num / 10000))" "$((server_num % 10000))"
 }
 
 postgres_major_version() {
@@ -1111,14 +1175,14 @@ ensure_postgresql16_and_password() {
 	major="$(postgres_major_version)"
 
 	if [[ -z "$major" ]] || ! [[ "$major" =~ ^[0-9]+$ ]]; then
-		if prompt_yes_no "$(txt "未检测到 PostgreSQL，是否安装 PostgreSQL 16？" "PostgreSQL not detected. Install PostgreSQL 16?")"; then
+		if prompt_yes_no "$(txt "未检测到 PostgreSQL，是否安装新装锁定版本 PostgreSQL ${POSTGRES_VERSION}？" "PostgreSQL not detected. Install the pinned fresh-install version ${POSTGRES_VERSION}?")"; then
 			install_postgresql16
 			installed_by_script="1"
 		else
 			die "$(txt "未安装 PostgreSQL，无法继续" "PostgreSQL is required")"
 		fi
-	elif ((major < 16)); then
-		if prompt_yes_no "$(txt "检测到 PostgreSQL ${major}，需要 16+。是否安装 PostgreSQL 16？" "Detected PostgreSQL ${major}. Need 16+. Install PostgreSQL 16?")"; then
+	elif ((major < POSTGRES_MAJOR)); then
+		if prompt_yes_no "$(txt "检测到 PostgreSQL ${major}，需要 ${POSTGRES_MAJOR}+。是否安装 PostgreSQL ${POSTGRES_VERSION}？" "Detected PostgreSQL ${major}. Need ${POSTGRES_MAJOR}+. Install PostgreSQL ${POSTGRES_VERSION}?")"; then
 			install_postgresql16
 			installed_by_script="1"
 		else
@@ -1162,7 +1226,7 @@ install_timescaledb_for_postgres() {
 	ensure_pkg_prereqs
 	local pg_major
 	pg_major="$(postgres_major_version)"
-	[[ "$pg_major" =~ ^[0-9]+$ ]] && ((pg_major >= 16)) || die "$(txt "无法确定受支持的 PostgreSQL 主版本" "Cannot determine a supported PostgreSQL major version")"
+	[[ "$pg_major" =~ ^[0-9]+$ ]] && ((pg_major >= POSTGRES_MAJOR)) || die "$(txt "无法确定受支持的 PostgreSQL 主版本" "Cannot determine a supported PostgreSQL major version")"
 
 	case "${OS_FAMILY}" in
 	debian)
@@ -1177,7 +1241,14 @@ install_timescaledb_for_postgres() {
 deb [signed-by=${keyring}] https://packagecloud.io/timescale/timescaledb/${APT_REPO_ID} ${APT_REPO_CODENAME} main
 EOF"
 		pkg_update
-		pkg_install "timescaledb-2-postgresql-${pg_major}"
+		local extension="timescaledb-2-postgresql-${pg_major}"
+		local loader="timescaledb-2-loader-postgresql-${pg_major}"
+		local extension_version loader_version
+		extension_version="$(apt_package_version "$extension" "$TIMESCALEDB_VERSION" || true)"
+		loader_version="$(apt_package_version "$loader" "$TIMESCALEDB_VERSION" || true)"
+		[[ -n "$extension_version" && -n "$loader_version" ]] ||
+			die "$(txt "TimescaleDB 仓库没有新装锁定的 TimescaleDB ${TIMESCALEDB_VERSION}（PostgreSQL ${pg_major}）" "The TimescaleDB repository does not provide the pinned fresh-install TimescaleDB ${TIMESCALEDB_VERSION} for PostgreSQL ${pg_major}")"
+		pkg_install "${extension}=${extension_version}" "${loader}=${loader_version}"
 		;;
 	rhel | fedora)
 		local repo_os="fedora"
@@ -1202,9 +1273,12 @@ sslverify=1
 metadata_expire=300
 EOF"
 		pkg_update
-		pkg_install "timescaledb-2-postgresql-${pg_major}"
+		pkg_install \
+			"timescaledb-2-postgresql-${pg_major}-${TIMESCALEDB_VERSION}-*" \
+			"timescaledb-2-loader-postgresql-${pg_major}-${TIMESCALEDB_VERSION}-*"
 		;;
 	arch)
+		require_arch_package_version timescaledb "$TIMESCALEDB_VERSION"
 		pkg_install timescaledb
 		;;
 	*)
@@ -1221,7 +1295,7 @@ ensure_timescaledb_enabled() {
 		return 0
 	fi
 
-	if prompt_yes_no "$(txt "未检测到匹配 PostgreSQL ${pg_major} 的 TimescaleDB，是否安装并配置？" "TimescaleDB for PostgreSQL ${pg_major} was not detected. Install and configure it?")"; then
+	if prompt_yes_no "$(txt "未检测到匹配 PostgreSQL ${pg_major} 的 TimescaleDB，是否安装新装锁定版本 ${TIMESCALEDB_VERSION}？" "TimescaleDB for PostgreSQL ${pg_major} was not detected. Install the pinned fresh-install version ${TIMESCALEDB_VERSION}?")"; then
 		install_timescaledb_for_postgres
 	else
 		die "$(txt "TimescaleDB 未安装，无法继续" "TimescaleDB is required")"
@@ -1231,6 +1305,11 @@ ensure_timescaledb_enabled() {
 		as_root timescaledb-tune --quiet --yes
 	fi
 	restart_postgres_service
+
+	local installed_version
+	installed_version="$(as_postgres psql -d postgres -tAc "SELECT default_version FROM pg_available_extensions WHERE name = 'timescaledb'" 2>/dev/null | tr -d '[:space:]' || true)"
+	[[ "$installed_version" == "$TIMESCALEDB_VERSION" ]] ||
+		die "$(txt "新装 TimescaleDB 版本校验失败：当前 ${installed_version:-unknown}，要求 ${TIMESCALEDB_VERSION}" "Fresh TimescaleDB version check failed: got ${installed_version:-unknown}, require ${TIMESCALEDB_VERSION}")"
 }
 
 redis_version() {
@@ -1428,7 +1507,7 @@ ensure_redis_82plus() {
 check_preinstalled_dependencies() {
 	local major
 	major="$(postgres_major_version)"
-	[[ "$major" =~ ^[0-9]+$ ]] && ((major >= 16)) || die "$(txt "手动依赖模式要求已安装 PostgreSQL 16+" "Manual dependency mode requires PostgreSQL 16+")"
+	[[ "$major" =~ ^[0-9]+$ ]] && ((major >= POSTGRES_MAJOR)) || die "$(txt "手动依赖模式要求已安装 PostgreSQL ${POSTGRES_MAJOR}+" "Manual dependency mode requires PostgreSQL ${POSTGRES_MAJOR}+")"
 	timescaledb_installed || die "$(txt "手动依赖模式要求已安装与当前 PostgreSQL 匹配的 TimescaleDB" "Manual dependency mode requires TimescaleDB for the installed PostgreSQL")"
 	as_postgres psql -d postgres -tAc 'SELECT 1' >/dev/null || die "$(txt "无法连接本机 PostgreSQL；请先启动服务" "Cannot connect to local PostgreSQL; start it before continuing")"
 }
@@ -2197,7 +2276,7 @@ main() {
 		enable_time_sync
 	fi
 
-	say "1) 检测并准备数据库依赖（PostgreSQL 16+ / 匹配主版本的 TimescaleDB；Redis 地址将在配置后校验；模式：${PKG_MANAGER_LABEL}）" "1) Checking database dependencies (PostgreSQL 16+ / matching TimescaleDB major; the configured Redis endpoint is validated next; mode: ${PKG_MANAGER_LABEL})"
+	say "1) 检测并准备数据库依赖（已有兼容安装保持不变；缺失时锁定 PostgreSQL ${POSTGRES_VERSION} / TimescaleDB ${TIMESCALEDB_VERSION}；Redis 地址将在配置后校验；模式：${PKG_MANAGER_LABEL}）" "1) Checking database dependencies (existing compatible installations stay unchanged; missing dependencies are pinned to PostgreSQL ${POSTGRES_VERSION} / TimescaleDB ${TIMESCALEDB_VERSION}; the configured Redis endpoint is validated next; mode: ${PKG_MANAGER_LABEL})"
 	if [[ "$OS_FAMILY" == "manual" || "$SERVICE_MANAGER" == "none" ]]; then
 		check_preinstalled_dependencies
 	else
