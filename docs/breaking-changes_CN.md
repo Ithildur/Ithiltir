@@ -76,7 +76,7 @@
 - `GET /api/statistics/traffic/monthly` 只接受 1 到 24 的 `months`；超出范围返回 `400 invalid_request`，不再自动截断到 24。
 - 节点流量重建只在 Billing 模式可用；Lite 模式返回 `409 traffic_rebuild_requires_billing`。运行中切换为 Lite 时，重建在下一分块检查停止。
 - 升级迁移会把已有 `traffic_month_usage` 的 `covered_from` 初始化为对应 `cycle_start`，以保持旧版本“完整账期”的展示语义；这个值是兼容性假设，不是由历史原始采样证明的覆盖范围。
-- 新的流量物化进度从升级时最近 30 分钟开始。升级前更早、但仍在原始指标保留期内的积压不会自动重放；Billing 模式可按节点重建 5 分钟事实，Lite 的既有累计行则继续按上一条兼容性假设展示。
+- 新的流量物化进度从升级时最近 30 分钟开始。升级前更早、但仍在网卡 raw 保留期内的积压不会自动重放；Billing 模式可按节点重建 5 分钟事实，Lite 的既有累计行则继续按上一条兼容性假设展示。
 
 ### 请求错误
 

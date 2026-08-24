@@ -7,20 +7,26 @@ import (
 	"gorm.io/gorm"
 )
 
-var retentionTables = []string{
+var metricsRawTables = []string{
 	"server_metrics",
-	"nic_metrics",
 	"disk_metrics",
 	"disk_physical_metrics",
 	"disk_usage_metrics",
+}
+
+var retentionTables = []string{
+	"nic_metrics",
 	"service_checks",
 }
 
 // SyncRetentionPolicies aligns Timescale retention policies with the configured day window.
 // It runs at startup/bootstrap only; business paths must not touch database policies.
-func SyncRetentionPolicies(ctx context.Context, db *gorm.DB, days, trafficDays int) error {
+func SyncRetentionPolicies(ctx context.Context, db *gorm.DB, metricsDays, days, trafficDays int) error {
 	if db == nil {
 		return fmt.Errorf("sync retention policies: db is nil")
+	}
+	if metricsDays < 2 {
+		return fmt.Errorf("sync retention policies: metrics days must be at least 2")
 	}
 	if days <= 0 {
 		return fmt.Errorf("sync retention policies: days must be positive")
@@ -29,6 +35,11 @@ func SyncRetentionPolicies(ctx context.Context, db *gorm.DB, days, trafficDays i
 		return fmt.Errorf("sync retention policies: traffic days must be positive")
 	}
 
+	for _, table := range metricsRawTables {
+		if err := syncRetentionPolicy(ctx, db, table, metricsDays); err != nil {
+			return err
+		}
+	}
 	for _, table := range retentionTables {
 		if err := syncRetentionPolicy(ctx, db, table, days); err != nil {
 			return err

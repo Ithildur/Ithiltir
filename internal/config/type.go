@@ -29,18 +29,19 @@ type AppConfig struct {
 
 // DatabaseConfig holds database settings.
 type DatabaseConfig struct {
-	Driver               string `yaml:"driver"`
-	Host                 string `yaml:"host"`
-	Port                 int    `yaml:"port"`
-	User                 string `yaml:"user"`
-	Password             string `yaml:"password"`
-	Name                 string `yaml:"name"`
-	SSLMode              string `yaml:"sslmode"`
-	MaxOpenConns         int    `yaml:"max_open_conns"`
-	MaxIdleConns         int    `yaml:"max_idle_conns"`
-	ConnMaxLifetime      string `yaml:"conn_max_lifetime"`
-	RetentionDays        int    `yaml:"retention_days"`
-	TrafficRetentionDays int    `yaml:"traffic_retention_days"`
+	Driver                  string `yaml:"driver"`
+	Host                    string `yaml:"host"`
+	Port                    int    `yaml:"port"`
+	User                    string `yaml:"user"`
+	Password                string `yaml:"password"`
+	Name                    string `yaml:"name"`
+	SSLMode                 string `yaml:"sslmode"`
+	MaxOpenConns            int    `yaml:"max_open_conns"`
+	MaxIdleConns            int    `yaml:"max_idle_conns"`
+	ConnMaxLifetime         string `yaml:"conn_max_lifetime"`
+	MetricsRawRetentionDays int    `yaml:"metrics_raw_retention_days"`
+	RetentionDays           int    `yaml:"retention_days"`
+	TrafficRetentionDays    int    `yaml:"traffic_retention_days"`
 
 	ConnMaxLifetimeDur time.Duration `yaml:"-"`
 }

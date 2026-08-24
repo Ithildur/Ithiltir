@@ -124,7 +124,13 @@ func main() {
 	if err := migrate.CheckNotifyConfigs(ctx, db, configCipher); err != nil {
 		infra.Fatal("validate encrypted notification configs failed", err)
 	}
-	if err := migrate.SyncRetentionPolicies(ctx, db, cfg.Database.EffectiveRetentionDays(), cfg.Database.EffectiveTrafficRetentionDays()); err != nil {
+	if err := migrate.SyncRetentionPolicies(
+		ctx,
+		db,
+		cfg.Database.EffectiveMetricsRawRetentionDays(),
+		cfg.Database.EffectiveRetentionDays(),
+		cfg.Database.EffectiveTrafficRetentionDays(),
+	); err != nil {
 		infra.Fatal("sync retention policies failed", err)
 	}
 

@@ -28,12 +28,8 @@ func TestIntegrationNotifyConfigMigrationRemovesPlaintextAndDoesNotReplaceLostKe
 		t.Fatalf("create legacy notification channel: %v", err)
 	}
 
-	result, err := kitmigration.Run(ctx, migrationConfig(t, db, keyPath))
-	if err != nil {
+	if _, err := kitmigration.Run(ctx, migrationConfig(t, db, keyPath)); err != nil {
 		t.Fatalf("run notification config encryption migration: %v", err)
-	}
-	if result.Applied != 2 {
-		t.Fatalf("applied migrations = %d, want 2", result.Applied)
 	}
 	configCipher, err := notify.LoadConfigCipher(keyPath)
 	if err != nil {
@@ -148,10 +144,7 @@ func TestIntegrationNotifyConfigMigrationRecordsVersionAfterSealing(t *testing.T
 	if _, err := kitmigration.Run(ctx, migrationConfig(t, db, keyPath)); err != nil {
 		t.Fatalf("retry notification config migration: %v", err)
 	}
-	if err := db.Raw("SELECT max(version_id) FROM goose_db_version").Scan(&version).Error; err != nil {
-		t.Fatalf("read schema version after retry: %v", err)
-	}
-	if version != 12 {
-		t.Fatalf("schema version after retry = %d, want 12", version)
+	if err := kitmigration.RequireCurrent(ctx, migrationConfig(t, db, "")); err != nil {
+		t.Fatalf("schema is not current after retry: %v", err)
 	}
 }

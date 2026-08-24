@@ -56,6 +56,13 @@ func (c DatabaseConfig) EffectiveRetentionDays() int {
 	return DefaultRetentionDays
 }
 
+func (c DatabaseConfig) EffectiveMetricsRawRetentionDays() int {
+	if c.MetricsRawRetentionDays > 0 {
+		return c.MetricsRawRetentionDays
+	}
+	return DefaultMetricsRawRetentionDays
+}
+
 func (c DatabaseConfig) EffectiveTrafficRetentionDays() int {
 	if c.TrafficRetentionDays > 0 {
 		return c.TrafficRetentionDays

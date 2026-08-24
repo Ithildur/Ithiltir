@@ -76,7 +76,7 @@ No known breaking changes.
 - `GET /api/statistics/traffic/monthly` rejects `months` values outside 1 through 24 with `400 invalid_request`. Values above 24 are no longer capped automatically.
 - Per-node traffic rebuild is available only in Billing mode. It returns `409 traffic_rebuild_requires_billing` in Lite mode. Switching to Lite while a rebuild is running stops it at the next chunk check.
 - The upgrade migration initializes `covered_from` on existing `traffic_month_usage` rows to the corresponding `cycle_start` to preserve the legacy full-cycle presentation. This is a compatibility assumption, not coverage proven from historical raw samples.
-- New traffic materialization progress starts at the most recent 30 minutes at upgrade time. Older pre-upgrade backlog is not replayed automatically even when the raw metrics remain retained; Billing can rebuild 5-minute facts per node, while existing Lite rows retain the compatibility assumption described above.
+- New traffic materialization progress starts at the most recent 30 minutes at upgrade time. Older pre-upgrade backlog is not replayed automatically even when raw NIC metrics remain retained; Billing can rebuild 5-minute facts per node, while existing Lite rows retain the compatibility assumption described above.
 
 ### Request errors
 

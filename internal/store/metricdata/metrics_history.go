@@ -9,11 +9,19 @@ import (
 
 type HistoryAggregation string
 
+type HistoryResolution uint8
+
 const (
 	HistoryAggregationAvg  HistoryAggregation = "avg"
 	HistoryAggregationMax  HistoryAggregation = "max"
 	HistoryAggregationMin  HistoryAggregation = "min"
 	HistoryAggregationLast HistoryAggregation = "last"
+)
+
+const (
+	HistoryResolutionRaw HistoryResolution = iota
+	HistoryResolution15m
+	HistoryResolution1h
 )
 
 type HistoryQuery struct {
@@ -24,8 +32,7 @@ type HistoryQuery struct {
 	Step        time.Duration
 	Since       time.Time
 	Until       time.Time
-	UseRollup   bool
-	RollupBase  time.Duration
+	Resolution  HistoryResolution
 }
 
 type HistoryPoint struct {
@@ -55,7 +62,7 @@ var historyDefs = map[string]metricDef{
 	"cpu.load1":                   {Source: metricSourceServer, Column: "load1", RollupPrefix: "load1"},
 	"cpu.load5":                   {Source: metricSourceServer, Column: "load5", RollupPrefix: "load5"},
 	"cpu.load15":                  {Source: metricSourceServer, Column: "load15", RollupPrefix: "load15"},
-	"cpu.temp_c":                  {Source: metricSourceServer, Column: "cpu_temp_c"},
+	"cpu.temp_c":                  {Source: metricSourceServer, Column: "cpu_temp_c", RollupPrefix: "cpu_temp_c"},
 	"mem.used":                    {Source: metricSourceServer, Column: "mem_used", RollupPrefix: "mem_used"},
 	"mem.used_ratio":              {Source: metricSourceServer, Column: "mem_used_ratio", RollupPrefix: "mem_used_ratio"},
 	"proc.count":                  {Source: metricSourceServer, Column: "process_count", RollupPrefix: "process_count"},
@@ -63,24 +70,25 @@ var historyDefs = map[string]metricDef{
 	"net.sent_bps":                {Source: metricSourceServer, Column: "net_out_bps", RollupPrefix: "net_out_bps"},
 	"conn.tcp":                    {Source: metricSourceServer, Column: "tcp_conn", RollupPrefix: "tcp_conn"},
 	"conn.udp":                    {Source: metricSourceServer, Column: "udp_conn", RollupPrefix: "udp_conn"},
-	"pressure.cpu.some_avg10":     {Source: metricSourceServer, Column: "psi_cpu_some_avg10"},
-	"pressure.cpu.some_avg60":     {Source: metricSourceServer, Column: "psi_cpu_some_avg60"},
-	"pressure.cpu.some_avg300":    {Source: metricSourceServer, Column: "psi_cpu_some_avg300"},
-	"pressure.memory.some_avg10":  {Source: metricSourceServer, Column: "psi_memory_some_avg10"},
-	"pressure.memory.some_avg60":  {Source: metricSourceServer, Column: "psi_memory_some_avg60"},
-	"pressure.memory.some_avg300": {Source: metricSourceServer, Column: "psi_memory_some_avg300"},
-	"pressure.memory.full_avg10":  {Source: metricSourceServer, Column: "psi_memory_full_avg10"},
-	"pressure.memory.full_avg60":  {Source: metricSourceServer, Column: "psi_memory_full_avg60"},
-	"pressure.memory.full_avg300": {Source: metricSourceServer, Column: "psi_memory_full_avg300"},
-	"pressure.io.some_avg10":      {Source: metricSourceServer, Column: "psi_io_some_avg10"},
-	"pressure.io.some_avg60":      {Source: metricSourceServer, Column: "psi_io_some_avg60"},
-	"pressure.io.some_avg300":     {Source: metricSourceServer, Column: "psi_io_some_avg300"},
-	"pressure.io.full_avg10":      {Source: metricSourceServer, Column: "psi_io_full_avg10"},
-	"pressure.io.full_avg60":      {Source: metricSourceServer, Column: "psi_io_full_avg60"},
-	"pressure.io.full_avg300":     {Source: metricSourceServer, Column: "psi_io_full_avg300"},
+	"pressure.cpu.some_avg10":     {Source: metricSourceServer, Column: "psi_cpu_some_avg10", RollupPrefix: "psi_cpu_some_avg10"},
+	"pressure.cpu.some_avg60":     {Source: metricSourceServer, Column: "psi_cpu_some_avg60", RollupPrefix: "psi_cpu_some_avg60"},
+	"pressure.cpu.some_avg300":    {Source: metricSourceServer, Column: "psi_cpu_some_avg300", RollupPrefix: "psi_cpu_some_avg300"},
+	"pressure.memory.some_avg10":  {Source: metricSourceServer, Column: "psi_memory_some_avg10", RollupPrefix: "psi_memory_some_avg10"},
+	"pressure.memory.some_avg60":  {Source: metricSourceServer, Column: "psi_memory_some_avg60", RollupPrefix: "psi_memory_some_avg60"},
+	"pressure.memory.some_avg300": {Source: metricSourceServer, Column: "psi_memory_some_avg300", RollupPrefix: "psi_memory_some_avg300"},
+	"pressure.memory.full_avg10":  {Source: metricSourceServer, Column: "psi_memory_full_avg10", RollupPrefix: "psi_memory_full_avg10"},
+	"pressure.memory.full_avg60":  {Source: metricSourceServer, Column: "psi_memory_full_avg60", RollupPrefix: "psi_memory_full_avg60"},
+	"pressure.memory.full_avg300": {Source: metricSourceServer, Column: "psi_memory_full_avg300", RollupPrefix: "psi_memory_full_avg300"},
+	"pressure.io.some_avg10":      {Source: metricSourceServer, Column: "psi_io_some_avg10", RollupPrefix: "psi_io_some_avg10"},
+	"pressure.io.some_avg60":      {Source: metricSourceServer, Column: "psi_io_some_avg60", RollupPrefix: "psi_io_some_avg60"},
+	"pressure.io.some_avg300":     {Source: metricSourceServer, Column: "psi_io_some_avg300", RollupPrefix: "psi_io_some_avg300"},
+	"pressure.io.full_avg10":      {Source: metricSourceServer, Column: "psi_io_full_avg10", RollupPrefix: "psi_io_full_avg10"},
+	"pressure.io.full_avg60":      {Source: metricSourceServer, Column: "psi_io_full_avg60", RollupPrefix: "psi_io_full_avg60"},
+	"pressure.io.full_avg300":     {Source: metricSourceServer, Column: "psi_io_full_avg300", RollupPrefix: "psi_io_full_avg300"},
 	"disk.temp_c": {
 		Source:        metricSourceDiskPhysical,
 		Column:        "temp_c",
+		RollupPrefix:  "temp_c",
 		DeviceColumns: []string{"name", "ref", "path"},
 	},
 	"disk.read_bps": {
@@ -174,11 +182,16 @@ func (s *Store) FetchHistory(ctx context.Context, q HistoryQuery) ([]HistoryPoin
 	}
 
 	interval := formatInterval(q.Step)
-	switch {
-	case !q.UseRollup || def.RollupPrefix == "":
+	switch q.Resolution {
+	case HistoryResolutionRaw:
 		return s.fetchRaw(ctx, def, q, interval)
-	default:
+	case HistoryResolution15m, HistoryResolution1h:
+		if def.RollupPrefix == "" {
+			return nil, fmt.Errorf("metric %q has no rollup source", q.Metric)
+		}
 		return s.fetchRollup(ctx, def, q, interval)
+	default:
+		return nil, fmt.Errorf("invalid history resolution %d", q.Resolution)
 	}
 }
 
@@ -209,36 +222,22 @@ func (s *Store) fetchRaw(ctx context.Context, def metricDef, q HistoryQuery, int
 }
 
 func (s *Store) fetchRollup(ctx context.Context, def metricDef, q HistoryQuery, interval string) ([]HistoryPoint, error) {
-	base := q.RollupBase
-	if base <= 0 {
-		return nil, fmt.Errorf("invalid rollup base")
+	base, err := rollupBase(q.Resolution)
+	if err != nil {
+		return nil, err
+	}
+	if q.Step < base || q.Step%base != 0 {
+		return nil, fmt.Errorf("history step %s is not aligned with %s rollup", q.Step, base)
 	}
 	table, err := rollupTableName(def.Source, base)
 	if err != nil {
 		return nil, err
 	}
-	rollupCol := fmt.Sprintf("%s_%s", def.RollupPrefix, q.Aggregation)
-	where, vals := deviceFilter(def, q.Device)
-	if base == q.Step {
-		query := fmt.Sprintf(
-			"SELECT bucket AS ts, %s AS value FROM %s WHERE server_id = ? AND bucket >= ? AND bucket <= ?%s ORDER BY bucket",
-			rollupCol,
-			table,
-			where,
-		)
-		points := make([]HistoryPoint, 0)
-		args := []any{q.ServerID, q.Since, q.Until}
-		args = append(args, vals...)
-		if err := s.db.WithContext(ctx).Raw(query, args...).Scan(&points).Error; err != nil {
-			return nil, err
-		}
-		return points, nil
-	}
-
-	expr, err := aggregationSelect(q.Aggregation, rollupCol, "bucket")
+	expr, err := rollupAggregationSelect(q.Aggregation, def.RollupPrefix, q.Resolution)
 	if err != nil {
 		return nil, err
 	}
+	where, vals := deviceFilter(def, q.Device)
 	query := fmt.Sprintf(
 		"SELECT time_bucket(?, bucket) AS ts, %s AS value FROM %s WHERE server_id = ? AND bucket >= ? AND bucket <= ?%s GROUP BY ts ORDER BY ts",
 		expr,
@@ -278,10 +277,23 @@ func rollupTableName(source metricSource, base time.Duration) (string, error) {
 		prefix = "disk_metrics"
 	case metricSourceDiskUsage:
 		prefix = "disk_usage_metrics"
+	case metricSourceDiskPhysical:
+		prefix = "disk_physical_metrics"
 	default:
 		return "", fmt.Errorf("invalid rollup metric source %d", source)
 	}
 	return rollupTableByBase(prefix, base)
+}
+
+func rollupBase(resolution HistoryResolution) (time.Duration, error) {
+	switch resolution {
+	case HistoryResolution15m:
+		return 15 * time.Minute, nil
+	case HistoryResolution1h:
+		return time.Hour, nil
+	default:
+		return 0, fmt.Errorf("invalid rollup resolution %d", resolution)
+	}
 }
 
 func rollupTableByBase(prefix string, base time.Duration) (string, error) {
@@ -313,6 +325,30 @@ func aggregationSelect(aggregation HistoryAggregation, col, ts string) (string, 
 		return fmt.Sprintf("min(%s)", col), nil
 	case HistoryAggregationLast:
 		return fmt.Sprintf("last(%s, %s)", col, ts), nil
+	default:
+		return "", fmt.Errorf("invalid history aggregation %q", aggregation)
+	}
+}
+
+func rollupAggregationSelect(aggregation HistoryAggregation, prefix string, resolution HistoryResolution) (string, error) {
+	col := fmt.Sprintf("%s_%s", prefix, aggregation)
+	switch aggregation {
+	case HistoryAggregationAvg:
+		if resolution == HistoryResolution15m {
+			return fmt.Sprintf(
+				"sum(%s_avg * %s_count) / nullif(sum(%s_count), 0)",
+				prefix,
+				prefix,
+				prefix,
+			), nil
+		}
+		return fmt.Sprintf("avg(%s)", col), nil
+	case HistoryAggregationMax:
+		return fmt.Sprintf("max(%s)", col), nil
+	case HistoryAggregationMin:
+		return fmt.Sprintf("min(%s)", col), nil
+	case HistoryAggregationLast:
+		return fmt.Sprintf("last(%s, bucket)", col), nil
 	default:
 		return "", fmt.Errorf("invalid history aggregation %q", aggregation)
 	}

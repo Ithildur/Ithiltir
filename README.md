@@ -70,6 +70,8 @@ Redis configuration and `REDIS_*` overrides are loaded only when Redis mode is e
 
 `app.timezone` is optional. Empty uses the local timezone; a non-empty value must be a valid IANA timezone name such as `Asia/Shanghai` or `UTC`, otherwise startup stops with a config error.
 
+`app.node_offline_threshold` defaults to `17s`, including when the field is omitted. `install_dash_linux.sh` writes this value during a first installation. Version updates do not rewrite an explicitly configured value.
+
 Config lookup order:
 
 - `config.local.yaml`
@@ -79,7 +81,9 @@ Config lookup order:
 - `$DASH_HOME/configs/config.local.yaml`
 - `$DASH_HOME/configs/config.yaml`
 
-`database.retention_days` is optional and defaults to `45` days. The 5-minute traffic fact table uses independent `database.traffic_retention_days`; when omitted it uses `max(database.retention_days, 45)`. It is kept writable and pruned by rolling retention; historical 95th percentile billing values are stored in monthly snapshots. For 95th percentile billing history, set it to `90` or higher.
+`database.metrics_raw_retention_days` controls exact raw recovery for server, disk I/O, disk usage, and physical-disk temperature metrics. It defaults to `8` days and must be at least `2`; data older than that remains available only through 15-minute and 1-hour aggregates. `database.retention_days` continues to control raw NIC metrics and service checks and defaults to `45` days. The independent `database.traffic_retention_days` controls writable 5-minute traffic facts and defaults to `max(database.retention_days, 45)`; monthly snapshots retain historical 95th-percentile billing results.
+
+History queries keep their existing response contract and select storage by range: `30m`, `1h`, `12h`, and `24h` use raw data; `1w` uses 15-minute aggregates; `15d` re-aggregates 15-minute data into 30-minute points; and `30d` uses 1-hour aggregates.
 
 ## Deployment Baseline
 
@@ -91,6 +95,8 @@ Config lookup order:
 - On systemd, Linux node installation compiles a small root-side connections helper when `cc`, `gcc`, or `clang` is available. This helper is required for full host/container network-namespace TCP/UDP counts because the node service runs with low privileges. Install a C compiler with the system package manager and rerun the installer to enable it.
 - Recommended minimum: `1 vCPU / 2 GB RAM / 40 GB SSD/NVMe`
 - Setups below `4 GB RAM` should enable `SWAP`
+- Planning baseline for 100 nodes: about `24–26 GiB` of core time-series storage, `6–8 GiB RAM`, and `80–100 GiB SSD`
+- Planning baseline for 500 nodes: about `120 GiB` of core time-series storage, `16 GiB RAM`, and `250 GiB SSD/NVMe`
 - Reverse proxies must preserve same-origin paths: proxy `/api`, `/theme`, and `/deploy` to Dash, and let Dash serve the SPA at `/`
 - Prefer HTTPS when exposing Dash beyond a trusted network. Node install commands and asset downloads carry the node secret.
 - Do not point browser requests directly at a cross-origin backend unless CORS, cookie, and CSRF policies are designed together
@@ -175,8 +181,7 @@ The Linux updater treats the official GitHub release source as the root of trust
 | `internal` | backend application code |
 | `web` | SPA source bundled into the app |
 | `configs` | sample config |
-| `db/migrations` | SQL migrations executed directly by Goose |
-| `db/migrationdata` | SQL bodies executed by Go-owned migrations |
+| `db/migrations` | Goose SQL and Go migrations, with Go-owned SQL in matching version subdirectories |
 | `scripts` | frontend build and release packaging entry points |
 | `deploy/node` | local node binaries for offline packaging |
 

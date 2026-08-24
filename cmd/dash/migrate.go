@@ -64,7 +64,13 @@ func runMigrate(args []string) {
 		infra.Log().Error("migrate failed", err)
 		os.Exit(1)
 	}
-	if err := migrate.SyncRetentionPolicies(ctx, db, cfg.Database.EffectiveRetentionDays(), cfg.Database.EffectiveTrafficRetentionDays()); err != nil {
+	if err := migrate.SyncRetentionPolicies(
+		ctx,
+		db,
+		cfg.Database.EffectiveMetricsRawRetentionDays(),
+		cfg.Database.EffectiveRetentionDays(),
+		cfg.Database.EffectiveTrafficRetentionDays(),
+	); err != nil {
 		infra.Log().Error("sync retention policies failed", err)
 		os.Exit(1)
 	}

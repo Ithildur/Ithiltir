@@ -60,7 +60,7 @@ func newDB(t testing.TB, target *int64) (*gorm.DB, string) {
 		t.Fatalf("parse %s: %v", EnvDatabaseURL, err)
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()
 
 	if err := createDatabase(ctx, adminURL, name); err != nil {

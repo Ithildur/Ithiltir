@@ -371,6 +371,9 @@ func validateRuntime(cfg *Config, redisEnabled bool) error {
 	if cfg.Database.RetentionDays < 0 {
 		return fmt.Errorf("config: database.retention_days must be >= 0")
 	}
+	if cfg.Database.MetricsRawRetentionDays < 0 || cfg.Database.MetricsRawRetentionDays == 1 {
+		return fmt.Errorf("config: database.metrics_raw_retention_days must be 0 or >= 2")
+	}
 	if cfg.Database.TrafficRetentionDays < 0 {
 		return fmt.Errorf("config: database.traffic_retention_days must be >= 0")
 	}
@@ -397,6 +400,9 @@ func validateMigrate(cfg *Config) error {
 	}
 	if cfg.Database.RetentionDays < 0 {
 		return fmt.Errorf("config: database.retention_days must be >= 0")
+	}
+	if cfg.Database.MetricsRawRetentionDays < 0 || cfg.Database.MetricsRawRetentionDays == 1 {
+		return fmt.Errorf("config: database.metrics_raw_retention_days must be 0 or >= 2")
 	}
 	if cfg.Database.TrafficRetentionDays < 0 {
 		return fmt.Errorf("config: database.traffic_retention_days must be >= 0")
@@ -522,6 +528,9 @@ func overrideFromEnv(cfg *Config, redisEnabled bool) error {
 		return err
 	}
 	envString("DB_CONN_MAX_LIFETIME", &cfg.Database.ConnMaxLifetime)
+	if err := envInt("DB_METRICS_RAW_RETENTION_DAYS", &cfg.Database.MetricsRawRetentionDays); err != nil {
+		return err
+	}
 	if err := envInt("DB_RETENTION_DAYS", &cfg.Database.RetentionDays); err != nil {
 		return err
 	}

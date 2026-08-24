@@ -43,8 +43,7 @@ type historyInput struct {
 type rangeSpec struct {
 	Duration   time.Duration
 	Step       time.Duration
-	UseRollup  bool
-	RollupBase time.Duration
+	Resolution metricdata.HistoryResolution
 }
 
 type historyView struct {
@@ -103,8 +102,7 @@ func (h *handler) historyHandler(w http.ResponseWriter, r *http.Request) {
 			Step:        in.Spec.Step,
 			Since:       since,
 			Until:       now,
-			UseRollup:   in.Spec.UseRollup,
-			RollupBase:  in.Spec.RollupBase,
+			Resolution:  in.Spec.Resolution,
 		})
 	})
 	if err != nil {
@@ -244,7 +242,7 @@ var rangeSpecs = map[string]rangeSpec{
 	"1h":  {Duration: time.Hour, Step: 6 * time.Second},
 	"12h": {Duration: 12 * time.Hour, Step: 60 * time.Second},
 	"24h": {Duration: 24 * time.Hour, Step: 120 * time.Second},
-	"1w":  {Duration: 7 * 24 * time.Hour, Step: 15 * time.Minute, UseRollup: true, RollupBase: 15 * time.Minute},
-	"15d": {Duration: 15 * 24 * time.Hour, Step: 30 * time.Minute, UseRollup: true, RollupBase: 15 * time.Minute},
-	"30d": {Duration: 30 * 24 * time.Hour, Step: time.Hour, UseRollup: true, RollupBase: time.Hour},
+	"1w":  {Duration: 7 * 24 * time.Hour, Step: 15 * time.Minute, Resolution: metricdata.HistoryResolution15m},
+	"15d": {Duration: 15 * 24 * time.Hour, Step: 30 * time.Minute, Resolution: metricdata.HistoryResolution15m},
+	"30d": {Duration: 30 * 24 * time.Hour, Step: time.Hour, Resolution: metricdata.HistoryResolution1h},
 }

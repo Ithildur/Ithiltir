@@ -12,6 +12,7 @@ APP="dash"
 readonly POSTGRES_VERSION="16.15"
 readonly POSTGRES_MAJOR="${POSTGRES_VERSION%%.*}"
 readonly TIMESCALEDB_VERSION="2.29.1"
+readonly DEFAULT_NODE_OFFLINE_THRESHOLD="17s"
 
 INSTALL_DIR="/opt/Ithiltir-dash"
 RELEASES_DIR="${INSTALL_DIR}/releases"
@@ -178,6 +179,7 @@ print_config_summary() {
 	echo "  database.user: ${db_user}"
 	say "  database.password: (已隐藏，长度 ${#db_pass})" "  database.password: (hidden, length ${#db_pass})"
 	echo "  database.name: ${db_name}"
+	echo "  database.metrics_raw_retention_days: 8"
 	echo "  database.retention_days: ${retention_label}"
 	echo "  app.node_offline_threshold: ${offline_threshold}"
 	echo "  redis.addr: ${redis_addr}"
@@ -345,7 +347,7 @@ prompt_language() {
 prompt_retention_days() {
 	local default="${1:-1}" ans
 	while true; do
-		say_err "请选择历史保留时长（database.retention_days）：" "Select history retention (database.retention_days):"
+		say_err "请选择网卡 raw 和服务检查保留时长（database.retention_days）：" "Select raw NIC metric and service-check retention (database.retention_days):"
 		say_err "如需掌握流量历史或 95 计费历史，建议选择 90 days 或更高。" "Choose 90 days or higher if you need traffic history or 95th percentile billing history."
 		say_err "  1) default（45 days）" "  1) default (45 days)"
 		echo "  2) 90 days" >&2
@@ -1581,7 +1583,7 @@ render_config_local() {
 	local retention_days="${7:-default}"
 	local redis_addr="$8"
 	local redis_password="$9"
-	local offline_threshold="${10:-14s}"
+	local offline_threshold="${10:-${DEFAULT_NODE_OFFLINE_THRESHOLD}}"
 	local language="${11:-${INSTALL_LANG:-zh}}"
 	local trusted_proxies_yaml="${12:-[]}"
 
@@ -1600,7 +1602,7 @@ render_config_local() {
 	redis_addr="$(one_line "$redis_addr")"
 	redis_password="$(one_line "$redis_password")"
 	offline_threshold="$(one_line "$offline_threshold")"
-	offline_threshold="${offline_threshold:-14s}"
+	offline_threshold="${offline_threshold:-${DEFAULT_NODE_OFFLINE_THRESHOLD}}"
 	language="$(one_line "$language")"
 	case "${language}" in
 	zh | en) ;;
@@ -2328,7 +2330,7 @@ main() {
 		fi
 		say_err "无法使用该 Redis 地址，请确认服务可达、允许 PING/INFO server，且版本不低于 6.2.0。" "Cannot use this Redis endpoint. Ensure it is reachable, permits PING and INFO server, and runs Redis 6.2.0 or newer."
 	done
-	offline_threshold="$(prompt_string "$(txt "请输入离线判定阈值（app.node_offline_threshold，例如：14s/30s/1m）" "app.node_offline_threshold (e.g. 14s/30s/1m)")" "14s")"
+	offline_threshold="$(prompt_string "$(txt "请输入离线判定阈值（app.node_offline_threshold，例如：17s/30s/1m）" "app.node_offline_threshold (e.g. 17s/30s/1m)")" "${DEFAULT_NODE_OFFLINE_THRESHOLD}")"
 	language="$(prompt_language)"
 
 	echo ""

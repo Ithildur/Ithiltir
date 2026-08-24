@@ -25,7 +25,8 @@ database:
   max_open_conns: 50 # 0 means no explicit open-connection limit.
   max_idle_conns: 10 # Must not exceed a positive max_open_conns.
   conn_max_lifetime: "1h" # 0 disables age-based connection expiry.
-  # retention_days omitted means default 45 days.
+  metrics_raw_retention_days: 8 # Exact raw recovery window for server and disk metrics; must be at least 2 days.
+  # retention_days controls nic_metrics and service_checks; omitted means default 45 days.
   # traffic_retention_days is independent; omitted means max(retention_days, 45).
   # traffic_5m uses rolling retention and stays writable for rebuilds.
   __DB_RETENTION_DAYS_LINE__

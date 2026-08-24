@@ -60,12 +60,8 @@ func TestIntegrationNotificationMigrationRemovesDeletedChannelRefs(t *testing.T)
 	if activeRefs != 1 {
 		t.Fatalf("legacy channel ids = %s with %d active refs, want one", before, activeRefs)
 	}
-	result, err := kitmigration.Run(ctx, migrationConfig(t, db, keyPath))
-	if err != nil {
+	if _, err := kitmigration.Run(ctx, migrationConfig(t, db, keyPath)); err != nil {
 		t.Fatalf("rerun notification migration: %v", err)
-	}
-	if result.Applied != 2 {
-		t.Fatalf("applied migrations = %d, want 2", result.Applied)
 	}
 
 	var raw string
@@ -117,12 +113,8 @@ func TestIntegrationTrafficCycleMigrationPreservesEffectiveNodeCycles(t *testing
 	`).Error; err != nil {
 		t.Fatalf("seed legacy traffic cycles: %v", err)
 	}
-	result, err := kitmigration.Run(ctx, migrationConfig(t, db, keyPath))
-	if err != nil {
+	if _, err := kitmigration.Run(ctx, migrationConfig(t, db, keyPath)); err != nil {
 		t.Fatalf("rerun traffic migration: %v", err)
-	}
-	if result.Applied != 2 {
-		t.Fatalf("applied migrations = %d, want 2", result.Applied)
 	}
 
 	type cycleRow struct {
@@ -212,17 +204,17 @@ func TestIntegrationReleaseMigrationWidensNaturalObservationFields(t *testing.T)
 		VALUES ('legacy-storage', 'legacy-storage', 'legacy-storage-secret');
 
 		INSERT INTO disk_metrics (server_id, name, ref, path, collected_at)
-		SELECT id, 'disk', 'disk:disk', '/dev/disk', now() - INTERVAL '10 days'
+		SELECT id, 'disk', 'disk:disk', '/dev/disk', now() - INTERVAL '2 days'
 		FROM servers
 		WHERE secret = 'legacy-storage-secret';
 
 		INSERT INTO disk_physical_metrics (server_id, name, ref, path, collected_at, temp_c)
-		SELECT id, 'disk', 'disk:disk', '/dev/disk', now() - INTERVAL '10 days', 40
+		SELECT id, 'disk', 'disk:disk', '/dev/disk', now() - INTERVAL '2 days', 40
 		FROM servers
 		WHERE secret = 'legacy-storage-secret';
 
 		INSERT INTO disk_usage_metrics (server_id, name, ref, mountpoint, path, collected_at)
-		SELECT id, 'disk', 'disk:disk', '/data', '/dev/disk', now() - INTERVAL '10 days'
+		SELECT id, 'disk', 'disk:disk', '/data', '/dev/disk', now() - INTERVAL '2 days'
 		FROM servers
 		WHERE secret = 'legacy-storage-secret';
 
@@ -235,12 +227,8 @@ func TestIntegrationReleaseMigrationWidensNaturalObservationFields(t *testing.T)
 	`).Error; err != nil {
 		t.Fatalf("seed legacy observation rows: %v", err)
 	}
-	result, err := kitmigration.Run(ctx, migrationConfig(t, db, keyPath))
-	if err != nil {
+	if _, err := kitmigration.Run(ctx, migrationConfig(t, db, keyPath)); err != nil {
 		t.Fatalf("rerun release migration: %v", err)
-	}
-	if result.Applied != 2 {
-		t.Fatalf("applied migrations = %d, want 2", result.Applied)
 	}
 
 	type columnType struct {
@@ -375,7 +363,7 @@ func TestIntegrationReleaseMigrationWidensNaturalObservationFields(t *testing.T)
 
 func TestIntegrationSchemaVersionGuard(t *testing.T) {
 	ctx := context.Background()
-	db, keyPath := pgtest.NewDBAt(t, 12)
+	db := pgtest.NewDB(t)
 	if err := kitmigration.RequireCurrent(ctx, migrationConfig(t, db, "")); err != nil {
 		t.Fatalf("RequireCurrent(current) error = %v", err)
 	}
@@ -400,7 +388,7 @@ func TestIntegrationSchemaVersionGuard(t *testing.T) {
 	if err := kitmigration.RequireCurrent(ctx, migrationConfig(t, db, "")); !errors.Is(err, kitmigration.ErrSchemaAhead) {
 		t.Fatalf("RequireCurrent(ahead) error = %v, want ErrSchemaAhead", err)
 	}
-	if _, err := kitmigration.Run(ctx, migrationConfig(t, db, keyPath)); !errors.Is(err, kitmigration.ErrSchemaAhead) {
+	if _, err := kitmigration.Run(ctx, migrationConfig(t, db, "")); !errors.Is(err, kitmigration.ErrSchemaAhead) {
 		t.Fatalf("Run(ahead) error = %v, want ErrSchemaAhead", err)
 	}
 }

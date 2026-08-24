@@ -2,7 +2,8 @@ package config
 
 import "time"
 
-const DefaultNodeOfflineThreshold = 14 * time.Second
+const DefaultNodeOfflineThreshold = 17 * time.Second
+const DefaultMetricsRawRetentionDays = 8
 const DefaultRetentionDays = 45
 const DefaultTrafficRetentionDays = 45
 

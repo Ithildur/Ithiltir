@@ -70,6 +70,8 @@ Redis 配置和 `REDIS_*` 覆盖只在启用 Redis 模式时加载。连接池�
 
 `app.timezone` 可选。空值使用本地时区；非空值必须是有效的 IANA 时区名，例如 `Asia/Shanghai` 或 `UTC`，否则启动会因配置错误停止。
 
+`app.node_offline_threshold` 默认使用 `17s`，省略该字段时同样适用；`install_dash_linux.sh` 首次安装时会显式写入该值。版本更新不会改写已有的显式配置值。
+
 配置查找顺序：
 
 - `config.local.yaml`
@@ -79,7 +81,9 @@ Redis 配置和 `REDIS_*` 覆盖只在启用 Redis 模式时加载。连接池�
 - `$DASH_HOME/configs/config.local.yaml`
 - `$DASH_HOME/configs/config.yaml`
 
-`database.retention_days` 可选，省略时默认 `45` 天。流量 5 分钟事实表使用独立的 `database.traffic_retention_days`，省略时取 `max(database.retention_days, 45)`。它保持可写并通过滚动保留删除；历史 95 计费值保存在月度快照中。如果需要 95 计费历史，建议设置为 `90` 或更高。
+`database.metrics_raw_retention_days` 控制服务器、磁盘 IO、磁盘容量和物理盘温度指标的完整 raw 恢复窗口，默认 `8` 天且最小为 `2`；更早的数据只保留 15 分钟和 1 小时聚合。`database.retention_days` 继续控制网卡 raw 和服务检查，默认 `45` 天。独立的 `database.traffic_retention_days` 控制可写的 5 分钟流量事实，省略时取 `max(database.retention_days, 45)`；历史 95 计费结果保存在月度快照中。
+
+历史查询的响应契约不变，并按区间固定选择数据源：`30m`、`1h`、`12h`、`24h` 查询 raw；`1w` 查询 15 分钟聚合；`15d` 将 15 分钟聚合重组为 30 分钟点；`30d` 查询 1 小时聚合。
 
 ## 部署基线
 
@@ -91,6 +95,8 @@ Redis 配置和 `REDIS_*` 覆盖只在启用 Redis 模式时加载。连接池�
 - systemd 下，Linux 节点安装器会在存在 `cc`、`gcc` 或 `clang` 时编译 root 侧连接数 helper，用于完整统计主机和容器网络命名空间的 TCP/UDP 连接数。安装编译器后重新运行安装脚本即可启用。
 - 推荐最小配置：`1 vCPU / 2 GB RAM / 40 GB SSD/NVMe`
 - `4 GB RAM` 以下推荐启用 `SWAP`
+- 100 节点容量基线：核心时序存储约 `24–26 GiB`，`6–8 GiB RAM`，`80–100 GiB SSD`
+- 500 节点容量基线：核心时序存储约 `120 GiB`，`16 GiB RAM`，`250 GiB SSD/NVMe`
 - 反向代理必须保留同源路径：`/api`、`/theme`、`/deploy` 转发到 Dash 后端，`/` 交给 Dash SPA
 - Dash 暴露到不可信网络时建议使用 HTTPS；节点安装命令和资产下载会携带节点密钥。
 - 跨域后端地址需要同时配置 CORS、cookie 和 CSRF 策略
@@ -175,8 +181,7 @@ Linux 更新器把官方 GitHub release 源作为根信任源。GitHub 账号、
 | `internal` | 后端应用代码 |
 | `web` | 随应用一起打包的 SPA 前端源码 |
 | `configs` | 示例配置 |
-| `db/migrations` | 由 Goose 直接执行的 SQL 迁移 |
-| `db/migrationdata` | 由 Go 迁移执行的 SQL 内容 |
+| `db/migrations` | Goose SQL 与 Go 迁移；Go 迁移所属 SQL 放在同版本子目录 |
 | `scripts` | 前端构建和发布打包入口 |
 | `deploy/node` | 离线打包用本地节点二进制 |
 
