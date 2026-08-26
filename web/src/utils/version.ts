@@ -101,3 +101,11 @@ export const isVersionUpdateTarget = (current: string, target: string): boolean 
   if (compared === null || currentValue === targetValue) return false;
   return compared <= 0;
 };
+
+export const isVersionAtLeast = (current: string, target: string): boolean => {
+  const currentValue = current.trim();
+  const targetValue = target.trim();
+  if (!currentValue || !targetValue) return false;
+  const compared = compareVersions(currentValue, targetValue);
+  return compared === null ? currentValue === targetValue : compared >= 0;
+};

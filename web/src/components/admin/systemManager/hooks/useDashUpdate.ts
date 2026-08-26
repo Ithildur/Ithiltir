@@ -5,7 +5,13 @@ import { useApiErrorHandler } from '@hooks/useApiErrorHandler';
 import { useConfirmDialog } from '@hooks/useConfirmDialog';
 import { useI18n } from '@i18n';
 import * as adminApi from '@lib/adminApi';
-import { clearDashUpdateReload, readDashUpdateReload } from '@lib/dashUpdateSession';
+import {
+  clearDashUpdateReload,
+  clearDashUpdateTarget,
+  failDashUpdateTarget,
+  readDashUpdateReload,
+  rememberDashUpdateTarget,
+} from '@lib/dashUpdateSession';
 import { fetchAppVersion } from '@lib/versionApi';
 import { pushTopBanner } from '@runtime/topBannerRuntime';
 import { isCanceledRequestError } from '@utils/errors';
@@ -221,6 +227,9 @@ export const useDashUpdate = ({ enabled, channel, onChannelChange }: Options) =>
 
     const current = status.value;
     if (!current) return;
+    if (statusValue === 'failed') {
+      failDashUpdateTarget(current.target_version);
+    }
     const reload = readDashUpdateReload();
     if (reload) {
       if (statusValue === 'failed') {
@@ -391,8 +400,11 @@ export const useDashUpdate = ({ enabled, channel, onChannelChange }: Options) =>
           startRequestRef.current = controller;
           const previousStatus = status.value;
           const previousStatusKey = previousStatus ? updateStatusKey(previousStatus) : '';
+          const targetVersion = checked.latest_version;
+          const tracksTarget = action === 'update';
           statusGate.invalidate();
           setStartingUpdate(action);
+          if (tracksTarget) rememberDashUpdateTarget(targetVersion);
           try {
             const next = await adminApi.runDashUpdate(
               {
@@ -406,11 +418,26 @@ export const useDashUpdate = ({ enabled, channel, onChannelChange }: Options) =>
               { signal: controller.signal },
             );
             acceptStatus(next);
+            if (tracksTarget && next.status === 'failed') {
+              failDashUpdateTarget(targetVersion);
+            }
             pushTopBanner(t('admin_dash_update_started'), { tone: 'info', durationMs: 5000 });
           } catch (error) {
-            if (controller.signal.aborted || isCanceledRequestError(error)) return;
+            if (controller.signal.aborted || isCanceledRequestError(error)) {
+              if (tracksTarget) clearDashUpdateTarget(targetVersion);
+              return;
+            }
             const current = conflictStatus(error);
             if (current) {
+              if (tracksTarget) {
+                const targetMatches =
+                  current.target_version === undefined || current.target_version === targetVersion;
+                if (current.status === 'failed' && targetMatches) {
+                  failDashUpdateTarget(targetVersion);
+                } else if (current.status === 'idle' || !targetMatches) {
+                  clearDashUpdateTarget(targetVersion);
+                }
+              }
               acceptStatus(current);
               return;
             }
@@ -421,6 +448,16 @@ export const useDashUpdate = ({ enabled, channel, onChannelChange }: Options) =>
               });
               const confirmedKey = updateStatusKey(confirmed);
               if (confirmed.status !== 'idle' && confirmedKey !== previousStatusKey) {
+                if (tracksTarget) {
+                  const targetMatches =
+                    confirmed.target_version === undefined ||
+                    confirmed.target_version === targetVersion;
+                  if (confirmed.status === 'failed' && targetMatches) {
+                    failDashUpdateTarget(targetVersion);
+                  } else if (!targetMatches) {
+                    clearDashUpdateTarget(targetVersion);
+                  }
+                }
                 acceptStatus(confirmed);
                 if (confirmed.status === 'completed') {
                   cancelCheck();
@@ -434,8 +471,12 @@ export const useDashUpdate = ({ enabled, channel, onChannelChange }: Options) =>
                 }
                 return;
               }
+              if (tracksTarget) clearDashUpdateTarget(targetVersion);
             } catch (confirmError) {
-              if (controller.signal.aborted || isCanceledRequestError(confirmError)) return;
+              if (controller.signal.aborted || isCanceledRequestError(confirmError)) {
+                if (tracksTarget) clearDashUpdateTarget(targetVersion);
+                return;
+              }
             }
             apiError(error, { key: 'admin_dash_update_run_failed' });
           } finally {

@@ -224,6 +224,21 @@ export const en = {
   admin_dash_update_run_reinstall: 'Reinstall',
   admin_dash_update_starting: 'Starting...',
   admin_dash_update_started: 'Update started. Dash may disconnect briefly.',
+  admin_dash_update_overlay_updating_title: 'Updating Dash',
+  admin_dash_update_overlay_updating_message:
+    'The update is running. Dash may disconnect during cutover; this page will keep checking progress.',
+  admin_dash_update_overlay_reconnecting_title: 'Waiting for Dash to recover',
+  admin_dash_update_overlay_reconnecting_message:
+    'Dash is temporarily unreachable. This page retries every 10 seconds with a 5-second request timeout.',
+  admin_dash_update_overlay_success_title: 'Update complete',
+  admin_dash_update_overlay_success_message:
+    'Dash {{version}} is now available. You can load the updated page.',
+  admin_dash_update_overlay_failed_title: 'Update failed',
+  admin_dash_update_overlay_failed_message:
+    'The update task has failed. Close this message to review the failed phase and recent logs on the update page.',
+  admin_dash_update_overlay_target: 'Target version',
+  admin_dash_update_overlay_reload: 'Confirm and reload',
+  admin_dash_update_overlay_failed_dismiss: 'Close and view details',
   admin_dash_update_success_title: 'Update successful',
   admin_dash_update_success_message:
     'Dash was successfully updated to {{version}}. This page has been reloaded.',

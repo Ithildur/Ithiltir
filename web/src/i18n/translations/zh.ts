@@ -219,6 +219,20 @@ export const zh = {
   admin_dash_update_run_reinstall: '重新安装',
   admin_dash_update_starting: '启动中...',
   admin_dash_update_started: '已开始更新，Dash 可能会短暂断开。',
+  admin_dash_update_overlay_updating_title: '正在更新 Dash',
+  admin_dash_update_overlay_updating_message:
+    '更新任务正在执行。服务切换期间可能会短暂断开，页面会自动检查进度。',
+  admin_dash_update_overlay_reconnecting_title: '正在等待 Dash 恢复',
+  admin_dash_update_overlay_reconnecting_message:
+    'Dash 暂时无法连接。页面会每 10 秒重试一次，单次请求最多等待 5 秒。',
+  admin_dash_update_overlay_success_title: '更新完成',
+  admin_dash_update_overlay_success_message: '已检测到 Dash {{version}}，可以加载新版本。',
+  admin_dash_update_overlay_failed_title: '更新失败',
+  admin_dash_update_overlay_failed_message:
+    '更新任务已明确失败。关闭提示后可在更新页面查看失败阶段和最近日志。',
+  admin_dash_update_overlay_target: '目标版本',
+  admin_dash_update_overlay_reload: '确定并刷新页面',
+  admin_dash_update_overlay_failed_dismiss: '关闭并查看详情',
   admin_dash_update_success_title: '更新成功',
   admin_dash_update_success_message: 'Dash 已成功更新至 {{version}}，当前页面已重新加载。',
   admin_dash_update_run_failed: '启动 Dash 更新失败。',
