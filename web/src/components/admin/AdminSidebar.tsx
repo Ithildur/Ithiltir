@@ -18,9 +18,12 @@ interface Props {
   versionLabel: string;
 }
 
+const langMenuHoverDelayMs = 250;
+
 const AdminSidebar: React.FC<Props> = ({ tabs, activeTab, onTabChange, versionLabel }) => {
   const [isLangMenuOpen, setIsLangMenuOpen] = React.useState(false);
   const langMenuRef = React.useRef<HTMLDivElement | null>(null);
+  const langHoverTimerRef = React.useRef<number | null>(null);
   const brand = useSiteBrandStore((state) => state.brand);
   const { lang, setLang, t } = useI18n();
   const visibleTabs = React.useMemo(() => tabs.filter((tab) => !tab.hidden), [tabs]);
@@ -30,6 +33,32 @@ const AdminSidebar: React.FC<Props> = ({ tabs, activeTab, onTabChange, versionLa
         ? 'border-(--theme-border-underline-nav-active) bg-(--theme-bg-accent-muted) font-semibold text-(--theme-fg-accent)'
         : 'border-transparent text-(--theme-fg-default) hover:bg-(--theme-bg-muted) hover:text-(--theme-fg-accent)'
     }`;
+
+  const cancelLangHover = React.useCallback(() => {
+    if (langHoverTimerRef.current === null) return;
+    window.clearTimeout(langHoverTimerRef.current);
+    langHoverTimerRef.current = null;
+  }, []);
+
+  const openLangMenuAfterHover = React.useCallback(() => {
+    cancelLangHover();
+    langHoverTimerRef.current = window.setTimeout(() => {
+      langHoverTimerRef.current = null;
+      setIsLangMenuOpen(true);
+    }, langMenuHoverDelayMs);
+  }, [cancelLangHover]);
+
+  const openLangMenu = React.useCallback(() => {
+    cancelLangHover();
+    setIsLangMenuOpen(true);
+  }, [cancelLangHover]);
+
+  const closeLangMenu = React.useCallback(() => {
+    cancelLangHover();
+    setIsLangMenuOpen(false);
+  }, [cancelLangHover]);
+
+  React.useEffect(() => cancelLangHover, [cancelLangHover]);
 
   React.useEffect(() => {
     if (!isLangMenuOpen) return;
@@ -86,12 +115,12 @@ const AdminSidebar: React.FC<Props> = ({ tabs, activeTab, onTabChange, versionLa
           <div
             className="group/lang relative col-span-3"
             ref={langMenuRef}
-            onMouseEnter={() => setIsLangMenuOpen(true)}
-            onMouseLeave={() => setIsLangMenuOpen(false)}
+            onMouseEnter={openLangMenuAfterHover}
+            onMouseLeave={closeLangMenu}
           >
             <button
               type="button"
-              onClick={() => setIsLangMenuOpen(true)}
+              onClick={openLangMenu}
               className="inline-flex h-10 w-full items-center justify-center gap-2.5 rounded-xl text-(--theme-fg-default) transition-[color,background-color] duration-300 hover:bg-(--theme-bg-muted) hover:text-(--theme-fg-accent) focus:outline-none focus-visible:ring-2 focus-visible:ring-(--theme-focus-ring) focus-visible:ring-offset-2 focus-visible:ring-offset-(--theme-bg-default) motion-reduce:transition-none"
               title={t('admin_change_lang')}
               aria-label={t('admin_change_lang')}
