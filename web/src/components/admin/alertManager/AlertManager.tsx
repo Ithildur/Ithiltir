@@ -22,8 +22,8 @@ import { useAlertRules } from '@components/admin/alertManager/hooks/useAlertRule
 import { useConfirmDialog } from '@hooks/useConfirmDialog';
 
 const tabs = [
-  { key: 'config', labelKey: 'admin_alerts_tab_config', icon: Bell },
   { key: 'events', labelKey: 'admin_alerts_tab_events', icon: History },
+  { key: 'config', labelKey: 'admin_alerts_tab_config', icon: Bell },
   { key: 'rules', labelKey: 'admin_alerts_tab_rules', icon: SlidersHorizontal },
   { key: 'channels', labelKey: 'admin_alerts_tab_channels', icon: BellRing },
 ] as const;
@@ -34,7 +34,7 @@ const tabKeys = new Set<AlertManagerTab>(tabs.map((tab) => tab.key));
 
 const tabFromParams = (params: URLSearchParams): AlertManagerTab => {
   const raw = params.get('alerts_tab') as AlertManagerTab | null;
-  return raw && tabKeys.has(raw) ? raw : 'config';
+  return raw && tabKeys.has(raw) ? raw : 'events';
 };
 
 const AlertManager: React.FC = () => {
