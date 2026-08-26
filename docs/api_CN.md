@@ -93,7 +93,7 @@ Bearer 可选端点会把缺失、格式错误、过期、已撤销或其他非�
 
 ## 管理告警事件
 
-- `GET /api/admin/alerts/events` 返回活跃节点的告警事件 `{ "items": [...], "next_cursor": "...", "has_more": true }`，不包含已删除节点。`has_more=false` 时 `next_cursor` 为 `null`。每项包含 `id`、`rule_id`、`rule_generation`、`server_id`、`server_name`、`server_hostname`、`status`、`metric`、`rule_name`、`first_trigger_at` 和 `last_trigger_at`。`server_ip`、`closed_at`、`current_value`、`effective_threshold`、`close_reason`、`title` 和 `message` 在有值时返回。
+- `GET /api/admin/alerts/events` 返回活跃节点的告警事件 `{ "items": [...], "next_cursor": "...", "has_more": true }`，不包含已删除节点。`has_more=false` 时 `next_cursor` 为 `null`。每项包含 `id`、`rule_id`、`rule_generation`、`server_id`、`server_name`、`server_hostname`、`status`、`metric`、`rule_name`、`first_trigger_at` 和 `last_trigger_at`。`server_ip`、`closed_at`、`current_value`、`effective_threshold`、`close_reason`、`title` 和 `message` 在有值时返回。节点快照过期或暂时不可用不会关闭已有的非离线告警；只有新鲜样本明确证明条件消失后，事件才会报告为已恢复。
 - 查询参数：`server_id` 可按节点筛选；`status` 允许 `open`、`closed`、`all`，省略时为 `open`；`metric` 按告警指标名筛选；`from` 和 `to` 为可选 RFC3339 时间，提供时按 `last_trigger_at` 过滤；`limit` 默认 200，最大 500；`cursor` 传入上一页响应的 `next_cursor` 后按 `last_trigger_at DESC, id DESC` 继续读取下一页。
 - `GET /api/admin/alerts/events/summary` 返回每台存在未恢复告警的节点摘要 `{ "items": [...] }`。每项包含 `server_id`、`open_count`、`last_trigger_at`、`metric`、`rule_name` 和 `metrics`，用于节点概览显示当前告警状态。`metric` 和 `rule_name` 表示最近一条未恢复事件；`metrics` 按最近触发时间倒序列出未恢复事件指标。摘要不按时间过滤。
 - `GET /api/admin/alerts/events/servers` 返回可用于筛选的活跃服务器选项 `{ "items": [{ "id": 1, "name": "..." }] }`。

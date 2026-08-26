@@ -82,8 +82,19 @@ func TestEvaluateServerRejectsNonFiniteEffectiveThreshold(t *testing.T) {
 	}
 }
 
-func TestEvaluateServerClosesOnStaleSnapshot(t *testing.T) {
+func TestEvaluateServerKeepsFiringOnStaleSnapshot(t *testing.T) {
 	now := time.Date(2026, 4, 5, 12, 5, 0, 0, time.UTC)
+	compiled := mustCompileRules(t, []model.AlertRule{{
+		ID:            1,
+		Name:          "cpu_load1_high",
+		Enabled:       true,
+		Generation:    1,
+		Metric:        "cpu.load1",
+		Operator:      ">=",
+		Threshold:     4,
+		ThresholdMode: "static",
+		UpdatedAt:     now.Add(-time.Hour),
+	}}, now)
 	current := map[string]RuntimeState{
 		ruleStateKey(1, 1): {
 			Phase:      RuntimePhaseFiring,
@@ -93,15 +104,13 @@ func TestEvaluateServerClosesOnStaleSnapshot(t *testing.T) {
 		},
 	}
 	snapshot := testSnapshot(now.Add(-60*time.Second), now.Add(-20*time.Second), 10, 8)
-	result := EvaluateServer(42, snapshot, mustCompileRules(t, nil, now), current, now)
-	if len(result.CloseTransitions) != 1 {
-		t.Fatalf("expected one close transition, got %d", len(result.CloseTransitions))
+	result := EvaluateServer(42, snapshot, compiled, current, now)
+	if len(result.CloseTransitions) != 0 {
+		t.Fatalf("stale snapshot closed a firing alert: %+v", result.CloseTransitions)
 	}
-	if result.CloseTransitions[0].CloseReason != "snapshot_stale" {
-		t.Fatalf("expected snapshot_stale, got %s", result.CloseTransitions[0].CloseReason)
-	}
-	if _, ok := result.Next[ruleStateKey(1, 1)]; !ok {
-		t.Fatalf("expected firing runtime state retained until close succeeds")
+	state, ok := result.Next[ruleStateKey(1, 1)]
+	if !ok || state.Phase != RuntimePhaseFiring || state.EventID != 77 {
+		t.Fatalf("firing state = %+v, want event 77 retained", state)
 	}
 }
 

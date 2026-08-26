@@ -69,6 +69,13 @@ func EvaluateServer(serverID int64, snapshot *metrics.NodeView, compiled *Compil
 		OpenTransitions:  make([]OpenTransition, 0),
 		CloseTransitions: make([]CloseTransition, 0),
 	}
+	seen := make(map[string]struct{})
+	if compiled != nil {
+		seen = make(map[string]struct{}, len(compiled.Rules))
+		for _, rule := range compiled.Rules {
+			seen[rule.StateKey()] = struct{}{}
+		}
+	}
 
 	observedAt, hasObservedAt := snapshotObservedAt(snapshot)
 	online, hasSnapshotTime := snapshotOnline(snapshot, now)
@@ -77,30 +84,25 @@ func EvaluateServer(serverID int64, snapshot *metrics.NodeView, compiled *Compil
 			if state.Phase != RuntimePhaseFiring {
 				continue
 			}
-			rule := ruleForState(compiled, state)
-			if isOfflineRule(rule) {
-				result.Next[key] = keepFiringState(state, state.CurrentValue, state.EffectiveThreshold, state.LastObservedAtTime(), now)
+			result.Next[key] = state
+			if _, ok := seen[key]; ok {
 				continue
 			}
-			result.Next[key] = state
 			result.CloseTransitions = append(result.CloseTransitions, CloseTransition{
-				StateKey:     key,
-				EventID:      state.EventID,
-				Rule:         rule,
-				ObjectID:     serverID,
-				OpenedAt:     state.FiringSinceTime(),
-				ClosedAt:     now,
-				CloseReason:  "snapshot_stale",
-				CurrentValue: nil,
+				StateKey:    key,
+				EventID:     state.EventID,
+				Rule:        ruleForState(compiled, state),
+				ObjectID:    serverID,
+				OpenedAt:    state.FiringSinceTime(),
+				ClosedAt:    now,
+				CloseReason: "rule_unmounted",
 			})
 		}
 		return result
 	}
 
-	seen := make(map[string]struct{}, len(compiled.Rules))
 	for _, rule := range compiled.Rules {
 		key := rule.StateKey()
-		seen[key] = struct{}{}
 		existing, exists := current[key]
 		if exists && existing.Phase == RuntimePhaseCooldown {
 			if cooldownActive(existing, now) {
@@ -108,6 +110,12 @@ func EvaluateServer(serverID int64, snapshot *metrics.NodeView, compiled *Compil
 				continue
 			}
 			exists = false
+		}
+		if !online && !isOfflineRule(rule) {
+			if exists && existing.Phase == RuntimePhaseFiring {
+				result.Next[key] = existing
+			}
+			continue
 		}
 
 		value, ok, evalAt := metricValue(rule, snapshot, online, observedAt, now)
@@ -117,7 +125,7 @@ func EvaluateServer(serverID int64, snapshot *metrics.NodeView, compiled *Compil
 			Value:  rule.Threshold,
 			Offset: rule.ThresholdOffset,
 		}, *snapshot)
-		if online && (err != nil || !ok) {
+		if err != nil || !ok {
 			if exists && existing.Phase == RuntimePhaseFiring {
 				result.Next[key] = existing
 			}
@@ -128,14 +136,6 @@ func EvaluateServer(serverID int64, snapshot *metrics.NodeView, compiled *Compil
 		switch {
 		case !conditionTrue:
 			if exists && existing.Phase == RuntimePhaseFiring {
-				closeReason := "condition_cleared"
-				closedAt := evalAt
-				currentValue := floatPtr(value)
-				if !online && rule.Metric != "node.offline" {
-					closeReason = "snapshot_stale"
-					closedAt = now
-					currentValue = nil
-				}
 				result.Next[key] = keepFiringState(existing, value, threshold, observedAt, now)
 				result.CloseTransitions = append(result.CloseTransitions, CloseTransition{
 					StateKey:     key,
@@ -143,9 +143,9 @@ func EvaluateServer(serverID int64, snapshot *metrics.NodeView, compiled *Compil
 					Rule:         rule,
 					ObjectID:     serverID,
 					OpenedAt:     existing.FiringSinceTime(),
-					ClosedAt:     closedAt,
-					CloseReason:  closeReason,
-					CurrentValue: currentValue,
+					ClosedAt:     evalAt,
+					CloseReason:  "condition_cleared",
+					CurrentValue: floatPtr(value),
 					Snapshot:     snapshot,
 				})
 			}
@@ -198,10 +198,6 @@ func EvaluateServer(serverID int64, snapshot *metrics.NodeView, compiled *Compil
 			continue
 		}
 		result.Next[key] = state
-		closeReason := "rule_unmounted"
-		if !online {
-			closeReason = "snapshot_stale"
-		}
 		result.CloseTransitions = append(result.CloseTransitions, CloseTransition{
 			StateKey:     key,
 			EventID:      state.EventID,
@@ -209,7 +205,7 @@ func EvaluateServer(serverID int64, snapshot *metrics.NodeView, compiled *Compil
 			ObjectID:     serverID,
 			OpenedAt:     state.FiringSinceTime(),
 			ClosedAt:     now,
-			CloseReason:  closeReason,
+			CloseReason:  "rule_unmounted",
 			CurrentValue: nil,
 			Snapshot:     snapshot,
 		})
