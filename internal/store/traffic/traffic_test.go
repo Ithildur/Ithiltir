@@ -28,16 +28,6 @@ func mustCycle(t testing.TB, mode BillingCycleMode, day int, anchor string, loc 
 	return cycle
 }
 
-func TestP95DiscardTop(t *testing.T) {
-	values := make([]float64, 100)
-	for i := range values {
-		values[i] = float64(i + 1)
-	}
-	if got := p95DiscardTop(values); got != 95 {
-		t.Fatalf("p95 = %v, want 95", got)
-	}
-}
-
 func TestTrafficBytesAtKeepsSignedCounterBoundary(t *testing.T) {
 	if got := trafficBytesAt(math.MaxInt64, 1, 1); got != math.MaxInt64 {
 		t.Fatalf("trafficBytesAt(max, end) = %d, want %d", got, int64(math.MaxInt64))

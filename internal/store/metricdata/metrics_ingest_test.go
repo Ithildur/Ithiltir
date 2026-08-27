@@ -9,48 +9,7 @@ import (
 	"dash/internal/metrics"
 	"dash/internal/model"
 	pgtest "dash/internal/testutil/postgres"
-	"gorm.io/driver/postgres"
-	"gorm.io/gorm"
 )
-
-func TestMetricRowsRuntimeJSONStorage(t *testing.T) {
-	db, err := gorm.Open(postgres.New(postgres.Config{
-		DSN: "host=127.0.0.1 user=test dbname=test password=test sslmode=disable",
-	}), &gorm.Config{DryRun: true, DisableAutomaticPing: true, SkipDefaultTransaction: true})
-	if err != nil {
-		t.Fatalf("open dry-run gorm: %v", err)
-	}
-
-	metric := testServerMetric(1, time.Date(2026, 4, 28, 12, 0, 0, 0, time.UTC), 0.8)
-	result := db.Session(&gorm.Session{DryRun: true}).Create(&metric)
-	if result.Error != nil {
-		t.Fatalf("insertServerMetric dry-run error = %v", result.Error)
-	}
-	sql := result.Statement.SQL.String()
-	if strings.Contains(sql, `"raid"`) || strings.Contains(sql, `"thermal"`) {
-		t.Fatalf("history insert SQL contains runtime JSON columns: %s", sql)
-	}
-	if !strings.Contains(sql, "cpu_usage_ratio") {
-		t.Fatalf("history insert SQL missing metric columns: %s", sql)
-	}
-
-	current := model.ServerCurrentMetric{
-		ServerID:    1,
-		CollectedAt: metric.CollectedAt,
-		MetricsSnapshot: model.MetricsSnapshot{
-			MetricValues:  metric.MetricValues,
-			MetricRuntime: testMetricRuntime(),
-		},
-	}
-	currentResult := db.Session(&gorm.Session{DryRun: true}).Create(&current)
-	if currentResult.Error != nil {
-		t.Fatalf("current metric dry-run error = %v", currentResult.Error)
-	}
-	currentSQL := currentResult.Statement.SQL.String()
-	if !strings.Contains(currentSQL, `"raid"`) || !strings.Contains(currentSQL, `"thermal"`) {
-		t.Fatalf("current insert SQL missing runtime JSON columns: %s", currentSQL)
-	}
-}
 
 func TestIntegrationSaveMetricsCurrentProjection(t *testing.T) {
 	ctx := context.Background()

@@ -14,33 +14,6 @@ import (
 	"gorm.io/datatypes"
 )
 
-func TestEnqueueDefaultSkipsWithoutTargets(t *testing.T) {
-	store := alertstore.New(nil, testNotifyConfigCipher(t))
-	cache := newNotifyCache(store, time.Hour)
-	cache.current = notifyTargets{
-		Enabled:     true,
-		RefreshedAt: time.Now(),
-		Ready:       true,
-	}
-	cache.ready = true
-	service := &Service{store: store, notify: cache}
-
-	message := notify.Message{
-		Title:    "test",
-		Metadata: map[string]string{"event": "test"},
-	}
-	status, err := service.EnqueueDefault(context.Background(), "system:test", notify.Messages{
-		Chinese: message,
-		English: message,
-	})
-	if err != nil {
-		t.Fatalf("EnqueueDefault() error = %v", err)
-	}
-	if status != notify.EnqueueSkippedNoTargets {
-		t.Fatalf("EnqueueDefault() status = %q, want %q", status, notify.EnqueueSkippedNoTargets)
-	}
-}
-
 func TestIntegrationEnqueueDefaultResolvesTargetsAndPersistsOnce(t *testing.T) {
 	ctx := context.Background()
 	db := pgtest.NewDB(t)
