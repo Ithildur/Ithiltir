@@ -181,9 +181,11 @@ func (s *Store) ListTrafficIfaces(ctx context.Context, serverID int64) ([]Traffi
 	var rows []TrafficIface
 	if err := s.db.WithContext(ctx).
 		Table("nic_metrics").
-		Distinct("iface AS name").
+		Select("iface AS name").
 		Where("server_id = ?", serverID).
-		Order("name ASC").
+		Group("iface").
+		Order("MAX(collected_at) DESC").
+		Order("iface ASC").
 		Find(&rows).Error; err != nil {
 		return nil, err
 	}
