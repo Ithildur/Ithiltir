@@ -179,14 +179,16 @@ func (s *Store) ListTrafficIfaces(ctx context.Context, serverID int64) ([]Traffi
 		return nil, fmt.Errorf("invalid server id")
 	}
 	var rows []TrafficIface
-	if err := s.db.WithContext(ctx).
-		Table("nic_metrics").
-		Select("iface AS name").
-		Where("server_id = ?", serverID).
-		Group("iface").
-		Order("MAX(collected_at) DESC").
-		Order("iface ASC").
-		Find(&rows).Error; err != nil {
+	if err := s.db.WithContext(ctx).Raw(`
+		SELECT iface AS name
+		FROM (
+			SELECT DISTINCT ON (iface) iface, collected_at
+			FROM nic_metrics
+			WHERE server_id = ?
+			ORDER BY iface, collected_at DESC
+		) AS latest
+		ORDER BY collected_at DESC, iface ASC
+	`, serverID).Scan(&rows).Error; err != nil {
 		return nil, err
 	}
 	return rows, nil
