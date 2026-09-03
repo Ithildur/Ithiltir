@@ -117,10 +117,6 @@ const themePackageRuntime = (): NonNullable<Window['__themePackage']> => {
   return window.__themePackage;
 };
 
-export const ensureThemePackageRuntime = (): void => {
-  themePackageRuntime();
-};
-
 const readThemeManifest = (): ThemeManifest | null => {
   const manifest = themePackageRuntime().manifest;
   if (!manifest) return null;

@@ -7,10 +7,6 @@ const themeRuntime = (): NonNullable<Window['__theme']> => {
   return window.__theme;
 };
 
-export const ensureThemeRuntime = (): void => {
-  themeRuntime();
-};
-
 export const readThemeMode = (): ThemeMode => {
   return themeRuntime().get();
 };

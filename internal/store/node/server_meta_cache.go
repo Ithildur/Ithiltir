@@ -217,32 +217,6 @@ func (s *Store) reconcileCommit(ctx context.Context, ids []int64, commitErr erro
 	return commitErr
 }
 
-func (s *Store) RefreshMetaByID(ctx context.Context, id int64) error {
-	if id <= 0 {
-		return nil
-	}
-
-	var srv model.Server
-	err := s.db.WithContext(ctx).
-		Table("servers").
-		Select(serverMetaSelectColumns).
-		Where("id = ?", id).
-		Take(&srv).
-		Error
-	if err != nil {
-		if !errors.Is(err, gorm.ErrRecordNotFound) {
-			return err
-		}
-		s.removeServerState(id, "")
-		return nil
-	}
-	if srv.IsDeleted {
-		s.removeServerState(srv.ID, srv.Secret)
-		return nil
-	}
-	return s.SyncServerCache(ctx, srv)
-}
-
 func (s *Store) RefreshMetaByIDs(ctx context.Context, ids []int64) error {
 	if len(ids) == 0 {
 		return nil

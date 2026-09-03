@@ -11,8 +11,8 @@ import { TrafficRebuildRuntime } from '@runtime/TrafficRebuildRuntime';
 import { isCanceledRequestError } from '@utils/errors';
 
 const AdminConsolePage = React.lazy(() => import('@pages/AdminConsolePage'));
-const StatisticsPage = React.lazy(() => import('@pages/StatisticsPage'));
-const TrafficPage = React.lazy(() => import('@pages/TrafficPage'));
+const StatisticsPage = React.lazy(() => import('@pages/statistics/Page'));
+const TrafficPage = React.lazy(() => import('@pages/traffic/Page'));
 
 type LoginRedirectState = {
   from?: string;

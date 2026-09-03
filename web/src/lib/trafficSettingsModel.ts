@@ -9,10 +9,8 @@ import type { TranslationKey } from '@i18n';
 
 export type { NodeTrafficPatch } from '@app-types/api';
 
-export type NodeTrafficCycleMode = TrafficCycleMode;
-
 export interface NodeTrafficDraft {
-  cycleMode: NodeTrafficCycleMode;
+  cycleMode: TrafficCycleMode;
   billingStartDay: number;
   billingAnchorDate: string;
   billingTimezone: string;
@@ -20,7 +18,7 @@ export interface NodeTrafficDraft {
 }
 
 interface NodeTrafficPolicy {
-  trafficCycleMode: NodeTrafficCycleMode;
+  trafficCycleMode: TrafficCycleMode;
   trafficBillingStartDay: number;
   trafficBillingAnchorDate: string;
   trafficBillingTimezone: string;
@@ -39,7 +37,7 @@ const nodeTrafficCycleModeSet = new Set<string>(nodeTrafficCycleModes);
 const trafficDirectionModeSet = new Set<string>(trafficDirectionModes);
 const nodeTrafficDirectionModeSet = new Set<string>(nodeTrafficDirectionModes);
 
-export const nodeTrafficCycleLabelKey: Record<NodeTrafficCycleMode, TranslationKey> = {
+export const nodeTrafficCycleLabelKey: Record<TrafficCycleMode, TranslationKey> = {
   calendar_month: 'traffic_cycle_calendar_month',
   whmcs_compatible: 'traffic_cycle_whmcs_compatible',
   clamp_to_month_end: 'traffic_cycle_clamp_to_month_end',
@@ -58,8 +56,8 @@ export const nodeTrafficDirectionLabelKey: Record<NodeTrafficDirectionMode, Tran
   max: trafficDirectionLabelKey.max,
 };
 
-export const parseNodeTrafficCycleMode = (value: string): NodeTrafficCycleMode | null =>
-  nodeTrafficCycleModeSet.has(value) ? (value as NodeTrafficCycleMode) : null;
+export const parseNodeTrafficCycleMode = (value: string): TrafficCycleMode | null =>
+  nodeTrafficCycleModeSet.has(value) ? (value as TrafficCycleMode) : null;
 
 export const parseTrafficDirectionMode = (value: string): TrafficDirectionMode | null =>
   trafficDirectionModeSet.has(value) ? (value as TrafficDirectionMode) : null;
@@ -102,7 +100,7 @@ export const nodeTrafficDraftFromPolicy = (node: NodeTrafficPolicy): NodeTraffic
 
 export const nodeTrafficDraftWithCycleMode = (
   current: NodeTrafficDraft,
-  mode: NodeTrafficCycleMode,
+  mode: TrafficCycleMode,
 ): NodeTrafficDraft => {
   if (mode === 'calendar_month') {
     return { ...current, cycleMode: mode, billingStartDay: 1, billingAnchorDate: '' };

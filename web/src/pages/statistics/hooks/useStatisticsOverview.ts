@@ -1,7 +1,7 @@
 import React from 'react';
 import type { NodeView } from '@app-types/frontMetrics';
 import type { TranslationKey } from '@i18n';
-import { loadStatisticsNodeView } from '../nodeView';
+import { fetchFrontMetrics } from '@lib/frontApi';
 import type { MetricSection } from '../config';
 import { visibleMetricSections } from '../viewModel';
 import { isCanceledRequestError } from '@utils/errors';
@@ -45,7 +45,8 @@ export const useStatisticsOverview = ({
     setServerMissing(false);
     setOverviewErrorKey(null);
 
-    loadStatisticsNodeView(numericServerId, controller.signal)
+    fetchFrontMetrics({ signal: controller.signal })
+      .then((nodes) => nodes.find((node) => Number(node.node.id) === numericServerId) ?? null)
       .then((found) => {
         setNodeView(found);
         setServerMissing(!found);
