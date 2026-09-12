@@ -43,8 +43,5 @@ func (s *Store) Validate() error {
 // the authenticated node. Runtime samples do not count as structural
 // projection mutations.
 func (s *Store) WithMetricsIngest(id int64, fn func() error) error {
-	if s == nil {
-		return fmt.Errorf("store: node store is nil")
-	}
 	return s.mutations.runtime(id, fn)
 }

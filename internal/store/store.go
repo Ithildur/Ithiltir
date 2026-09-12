@@ -80,9 +80,6 @@ func (s *Stores) Validate() error {
 }
 
 func (s *Stores) WithSettingsTx(ctx context.Context, fn func(metric *metricdata.Store, system *system.Store) error) error {
-	if s == nil || s.db == nil {
-		return fmt.Errorf("store: db is nil")
-	}
 	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		return fn(metricdata.New(tx), system.New(tx))
 	})

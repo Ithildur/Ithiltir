@@ -17,17 +17,7 @@ export type DashUpdateTarget = {
 
 let volatileTarget: DashUpdateTarget | null = null;
 
-const sessionStorage = (): Storage | null => {
-  if (typeof window === 'undefined') return null;
-  try {
-    return window.sessionStorage;
-  } catch {
-    return null;
-  }
-};
-
 const onDashUpdatePage = (): boolean => {
-  if (typeof window === 'undefined') return false;
   const path = window.location.pathname.replace(/\/+$/, '');
   if (path !== '/admin') return false;
   const params = new URLSearchParams(window.location.search);
@@ -35,10 +25,8 @@ const onDashUpdatePage = (): boolean => {
 };
 
 export const clearDashUpdateReload = (): void => {
-  const storage = sessionStorage();
-  if (!storage) return;
   try {
-    storage.removeItem(updateReloadKey);
+    window.sessionStorage.removeItem(updateReloadKey);
   } catch {
     // Storage can be unavailable in private or hardened browser modes.
   }
@@ -47,21 +35,17 @@ export const clearDashUpdateReload = (): void => {
 export const rememberDashUpdateReload = (version: string): void => {
   const normalized = version.trim();
   if (!normalized || !onDashUpdatePage()) return;
-  const storage = sessionStorage();
-  if (!storage) return;
   try {
     const value: DashUpdateReload = { version: normalized, recordedAt: Date.now() };
-    storage.setItem(updateReloadKey, JSON.stringify(value));
+    window.sessionStorage.setItem(updateReloadKey, JSON.stringify(value));
   } catch {
     // Storage can be unavailable in private or hardened browser modes.
   }
 };
 
 export const readDashUpdateReload = (): DashUpdateReload | null => {
-  const storage = sessionStorage();
-  if (!storage) return null;
   try {
-    const raw = storage.getItem(updateReloadKey);
+    const raw = window.sessionStorage.getItem(updateReloadKey);
     if (!raw) return null;
     const value = JSON.parse(raw) as Partial<DashUpdateReload>;
     const age = Date.now() - (value.recordedAt ?? 0);
@@ -83,7 +67,6 @@ export const readDashUpdateReload = (): DashUpdateReload | null => {
 };
 
 const emitDashUpdateTarget = (): void => {
-  if (typeof window === 'undefined') return;
   window.dispatchEvent(new Event(dashUpdateTargetEvent));
 };
 
@@ -97,13 +80,10 @@ export const rememberDashUpdateTarget = (version: string): void => {
     status: 'pending',
   };
   volatileTarget = value;
-  const storage = sessionStorage();
-  if (storage) {
-    try {
-      storage.setItem(updateTargetKey, JSON.stringify(value));
-    } catch {
-      // The in-memory value still keeps the active page coordinated.
-    }
+  try {
+    window.sessionStorage.setItem(updateTargetKey, JSON.stringify(value));
+  } catch {
+    // The in-memory value still keeps the active page coordinated.
   }
   emitDashUpdateTarget();
 };
@@ -111,10 +91,8 @@ export const rememberDashUpdateTarget = (version: string): void => {
 export const readDashUpdateTarget = (): DashUpdateTarget | null => {
   if (volatileTarget) return volatileTarget;
 
-  const storage = sessionStorage();
-  if (!storage) return null;
   try {
-    const raw = storage.getItem(updateTargetKey);
+    const raw = window.sessionStorage.getItem(updateTargetKey);
     if (!raw) return null;
     const value = JSON.parse(raw) as Partial<DashUpdateTarget>;
     if (
@@ -124,7 +102,7 @@ export const readDashUpdateTarget = (): DashUpdateTarget | null => {
       !Number.isFinite(value.recordedAt) ||
       (value.status !== 'pending' && value.status !== 'failed')
     ) {
-      storage.removeItem(updateTargetKey);
+      window.sessionStorage.removeItem(updateTargetKey);
       return null;
     }
     volatileTarget = {
@@ -135,7 +113,7 @@ export const readDashUpdateTarget = (): DashUpdateTarget | null => {
     return volatileTarget;
   } catch {
     try {
-      storage.removeItem(updateTargetKey);
+      window.sessionStorage.removeItem(updateTargetKey);
     } catch {
       // Storage can become unavailable after an earlier successful read.
     }
@@ -152,13 +130,10 @@ export const failDashUpdateTarget = (expectedVersion?: string): boolean => {
 
   const next: DashUpdateTarget = { ...current, status: 'failed' };
   volatileTarget = next;
-  const storage = sessionStorage();
-  if (storage) {
-    try {
-      storage.setItem(updateTargetKey, JSON.stringify(next));
-    } catch {
-      // The in-memory value still keeps the active page coordinated.
-    }
+  try {
+    window.sessionStorage.setItem(updateTargetKey, JSON.stringify(next));
+  } catch {
+    // The in-memory value still keeps the active page coordinated.
   }
   emitDashUpdateTarget();
   return true;
@@ -171,13 +146,10 @@ export const clearDashUpdateTarget = (expectedVersion?: string): boolean => {
   if (!current) return false;
 
   volatileTarget = null;
-  const storage = sessionStorage();
-  if (storage) {
-    try {
-      storage.removeItem(updateTargetKey);
-    } catch {
-      // The active page is still cleared through the in-memory value and event.
-    }
+  try {
+    window.sessionStorage.removeItem(updateTargetKey);
+  } catch {
+    // The active page is still cleared through the in-memory value and event.
   }
   emitDashUpdateTarget();
   return true;

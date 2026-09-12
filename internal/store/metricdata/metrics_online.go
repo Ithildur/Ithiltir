@@ -30,9 +30,6 @@ type onlineRow struct {
 }
 
 func (s *Store) FetchOnlinePoints(ctx context.Context, serverID int64, rng OnlineRange) ([]OnlinePoint, time.Duration, error) {
-	if s == nil || s.db == nil {
-		return nil, 0, fmt.Errorf("store: db is nil")
-	}
 	if serverID <= 0 {
 		return nil, 0, fmt.Errorf("invalid server id")
 	}

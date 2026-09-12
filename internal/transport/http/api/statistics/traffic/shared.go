@@ -56,14 +56,11 @@ type trafficQueryInput struct {
 }
 
 func (h *handler) isAuthorized(r *http.Request) bool {
-	return r != nil && routes.Authenticated(r.Context())
+	return routes.Authenticated(r.Context())
 }
 
 func (h *handler) canReadTraffic(ctx context.Context, r *http.Request, serverID int64) (bool, error) {
 	if h.isAuthorized(r) {
-		if h.node == nil {
-			return false, errors.New("node store is unavailable")
-		}
 		exists, err := infra.WithPGReadTimeout(ctx, func(c context.Context) (bool, error) {
 			return h.node.NodeExists(c, serverID)
 		})
@@ -94,9 +91,6 @@ func writeTrafficAccessError(w http.ResponseWriter, err error) {
 }
 
 func (h *handler) isGuestVisible(ctx context.Context, serverID int64) (bool, error) {
-	if h.front == nil || serverID <= 0 {
-		return false, nil
-	}
 	return h.front.EnsureGuestVisible(ctx, serverID, frontcache.GuestVisibilityOptions{
 		CacheTimeout: config.RedisFetchTimeout,
 		BuildTimeout: config.PGReadTimeout,

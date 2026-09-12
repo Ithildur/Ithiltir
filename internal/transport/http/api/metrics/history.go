@@ -131,9 +131,6 @@ var errHistoryGuestForbidden = errors.New("history guest access denied")
 
 func (h *handler) canReadHistory(ctx context.Context, r *http.Request, serverID int64) (bool, error) {
 	if h.isAuthorized(r) {
-		if h.node == nil {
-			return false, errors.New("node store is unavailable")
-		}
 		exists, err := infra.WithPGReadTimeout(ctx, func(c context.Context) (bool, error) {
 			return h.node.NodeExists(c, serverID)
 		})
@@ -145,10 +142,6 @@ func (h *handler) canReadHistory(ctx context.Context, r *http.Request, serverID 
 		}
 		return true, nil
 	}
-	if h.metric == nil {
-		return false, nil
-	}
-
 	mode, err := infra.WithPGReadTimeout(ctx, func(c context.Context) (metricdata.HistoryGuestAccessMode, error) {
 		return h.metric.GetHistoryGuestAccessMode(c)
 	})
@@ -162,13 +155,10 @@ func (h *handler) canReadHistory(ctx context.Context, r *http.Request, serverID 
 }
 
 func (h *handler) isAuthorized(r *http.Request) bool {
-	return r != nil && routes.Authenticated(r.Context())
+	return routes.Authenticated(r.Context())
 }
 
 func (h *handler) isGuestVisible(ctx context.Context, serverID int64) (bool, error) {
-	if h.front == nil || serverID <= 0 {
-		return false, nil
-	}
 	return h.front.EnsureGuestVisible(ctx, serverID, frontcache.GuestVisibilityOptions{
 		CacheTimeout: config.RedisFetchTimeout,
 		BuildTimeout: config.PGReadTimeout,
@@ -176,9 +166,6 @@ func (h *handler) isGuestVisible(ctx context.Context, serverID int64) (bool, err
 }
 
 func parseHistory(r *http.Request) (historyInput, error) {
-	if r == nil {
-		return historyInput{}, errors.New("nil request")
-	}
 	q := r.URL.Query()
 	metric := strings.TrimSpace(q.Get("metric"))
 	if metric == "" {

@@ -19,9 +19,6 @@ func (s *Service) EnqueueDefault(
 	key string,
 	messages notify.Messages,
 ) (notify.EnqueueStatus, error) {
-	if s == nil || s.store == nil || s.notify == nil {
-		return "", fmt.Errorf("notification service is not initialized")
-	}
 	if ctx == nil {
 		return "", fmt.Errorf("notification context is nil")
 	}

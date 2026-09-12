@@ -6,7 +6,7 @@ import (
 )
 
 func (s *Store) SetMTProtoLogin(_ context.Context, id string, raw []byte, ttl time.Duration) error {
-	if s == nil || s.mem == nil || ttl <= 0 {
+	if ttl <= 0 {
 		return nil
 	}
 	s.mem.mtprotoMu.Lock()
@@ -19,9 +19,6 @@ func (s *Store) SetMTProtoLogin(_ context.Context, id string, raw []byte, ttl ti
 }
 
 func (s *Store) GetMTProtoLogin(_ context.Context, id string) ([]byte, error) {
-	if s == nil || s.mem == nil {
-		return nil, nil
-	}
 	now := time.Now().UTC()
 	s.mem.mtprotoMu.Lock()
 	defer s.mem.mtprotoMu.Unlock()
@@ -37,9 +34,6 @@ func (s *Store) GetMTProtoLogin(_ context.Context, id string) ([]byte, error) {
 }
 
 func (s *Store) DeleteMTProtoLogin(_ context.Context, id string) error {
-	if s == nil || s.mem == nil {
-		return nil
-	}
 	s.mem.mtprotoMu.Lock()
 	delete(s.mem.mtproto, id)
 	s.mem.mtprotoMu.Unlock()

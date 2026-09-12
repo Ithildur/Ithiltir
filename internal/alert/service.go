@@ -64,9 +64,6 @@ func NewService(st *alertstore.Store, front *frontcache.Store, message MessageCo
 }
 
 func (s *Service) Run(ctx context.Context) error {
-	if s == nil || s.store == nil || s.front == nil || s.cache == nil || s.notify == nil {
-		return fmt.Errorf("alert service is not initialized")
-	}
 	if ctx == nil {
 		return fmt.Errorf("alert service context is nil")
 	}

@@ -94,9 +94,6 @@ func (s *Store) ServerRefs(ctx context.Context) ([]ServerRef, error) {
 }
 
 func (s *Store) NodeExists(ctx context.Context, id int64) (bool, error) {
-	if s == nil || s.db == nil {
-		return false, fmt.Errorf("store: db is nil")
-	}
 	if id <= 0 {
 		return false, fmt.Errorf("invalid server id")
 	}

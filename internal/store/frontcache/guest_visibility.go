@@ -12,8 +12,6 @@ type GuestVisibilityOptions struct {
 	BuildTimeout time.Duration
 }
 
-var errMissingDB = errors.New("frontcache: db is nil")
-
 func (s *Store) loadGuestVisibleIDs(ctx context.Context, ids []int64) (map[int64]struct{}, bool, error) {
 	allowed, ok, err := s.backend.loadGuestVisibleIDs(ctx, ids)
 	if errors.Is(err, errCorruptGuestVisibility) {
@@ -92,9 +90,6 @@ func (s *Store) rebuildGuestVisibility(ctx context.Context, dbTimeout, cacheTime
 }
 
 func (s *Store) fetchGuestVisibleIDs(ctx context.Context) (map[int64]struct{}, error) {
-	if s == nil || s.db == nil {
-		return nil, errMissingDB
-	}
 	var allowed []struct {
 		ID int64
 	}

@@ -156,9 +156,6 @@ func HistoryNeedsDevice(metric string) bool {
 }
 
 func (s *Store) FetchHistory(ctx context.Context, q HistoryQuery) ([]HistoryPoint, error) {
-	if s == nil || s.db == nil {
-		return nil, fmt.Errorf("store: db is nil")
-	}
 	def, ok := historyDefs[q.Metric]
 	if !ok {
 		return nil, fmt.Errorf("invalid metric")

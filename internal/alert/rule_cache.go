@@ -2,7 +2,6 @@ package alert
 
 import (
 	"context"
-	"fmt"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -25,10 +24,6 @@ func NewRuleCache(st *alertstore.Store, minRefresh time.Duration) *RuleCache {
 }
 
 func (c *RuleCache) Refresh(ctx context.Context, force bool) (*CompiledRules, error) {
-	if c == nil || c.store == nil {
-		return nil, fmt.Errorf("alert rule store is not initialized")
-	}
-
 	if !force {
 		if current := c.current.Load(); current != nil && time.Since(current.RefreshedAt) < c.minRefresh {
 			return current, nil

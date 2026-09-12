@@ -30,7 +30,7 @@ func newDirtyQueue() *dirtyQueue {
 }
 
 func (q *dirtyQueue) mark(id int64, snapshot *metrics.NodeView) {
-	if q == nil || id <= 0 {
+	if id <= 0 {
 		return
 	}
 
@@ -56,9 +56,6 @@ func (q *dirtyQueue) mark(id int64, snapshot *metrics.NodeView) {
 }
 
 func (q *dirtyQueue) next(ctx context.Context) (int64, *metrics.NodeView, bool) {
-	if q == nil {
-		return 0, nil, false
-	}
 	for {
 		q.mu.Lock()
 		for q.head < len(q.ready) {
@@ -94,7 +91,7 @@ func (q *dirtyQueue) next(ctx context.Context) (int64, *metrics.NodeView, bool) 
 }
 
 func (q *dirtyQueue) finish(id int64, retry bool) {
-	if q == nil || id <= 0 {
+	if id <= 0 {
 		return
 	}
 

@@ -43,9 +43,6 @@ func (s *Store) FetchCurrentNode(ctx context.Context, id int64, staleAfterSec in
 }
 
 func (s *Store) ListCurrentNodeIDs(ctx context.Context) ([]int64, error) {
-	if s == nil || s.db == nil {
-		return nil, errMissingDB
-	}
 	var rows []struct {
 		ID int64
 	}

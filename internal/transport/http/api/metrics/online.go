@@ -99,9 +99,6 @@ func (h *handler) onlineHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func parseOnline(r *http.Request) (onlineInput, error) {
-	if r == nil {
-		return onlineInput{}, errors.New("nil request")
-	}
 	q := r.URL.Query()
 	rawID := strings.TrimSpace(q.Get("server_id"))
 	if rawID == "" {

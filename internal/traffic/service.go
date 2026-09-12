@@ -68,9 +68,6 @@ func (r *Runtime) RebuildRunner() *RebuildRunner {
 }
 
 func (r *Runtime) Run(ctx context.Context) error {
-	if r == nil || r.service == nil {
-		return fmt.Errorf("traffic runtime is not initialized")
-	}
 	if ctx == nil {
 		return fmt.Errorf("traffic runtime context is nil")
 	}
@@ -78,9 +75,6 @@ func (r *Runtime) Run(ctx context.Context) error {
 }
 
 func (r *Runtime) Stop() {
-	if r == nil || r.rebuild == nil {
-		return
-	}
 	r.rebuild.Stop()
 }
 
@@ -100,10 +94,6 @@ func newService(st *trafficstore.Store, loc *time.Location, sourceRetention, tra
 }
 
 func (s *Service) Run(ctx context.Context) error {
-	if s == nil || s.store == nil {
-		return fmt.Errorf("traffic service is not initialized")
-	}
-
 	s.materialize(ctx)
 	s.snapshot(ctx)
 	materializeTicker := time.NewTicker(materializeInterval)

@@ -52,7 +52,7 @@ func (s *Store) AgentPlatform(ctx context.Context, id int64) (AgentPlatform, err
 }
 
 func (s *Store) RequestAgentUpdate(id int64, target AgentUpdateTarget) {
-	if s == nil || s.mem == nil || id <= 0 {
+	if id <= 0 {
 		return
 	}
 	target.Version = strings.TrimSpace(target.Version)
@@ -68,7 +68,7 @@ func (s *Store) RequestAgentUpdate(id int64, target AgentUpdateTarget) {
 }
 
 func (s *Store) ResolveAgentUpdate(id int64, current string) (AgentUpdateTarget, bool, error) {
-	if s == nil || s.mem == nil || id <= 0 {
+	if id <= 0 {
 		return AgentUpdateTarget{}, false, nil
 	}
 	s.mem.updateMu.RLock()
@@ -104,9 +104,6 @@ func (s *Store) GrantDeployAccess(assetPath string) (string, error) {
 }
 
 func (s *Store) grantDeployAccess(assetPath string, now time.Time, ttl time.Duration) (string, error) {
-	if s == nil || s.mem == nil {
-		return "", fmt.Errorf("store: memory deploy grants are nil")
-	}
 	assetPath = cleanDeployPath(assetPath)
 	if assetPath == "" {
 		return "", fmt.Errorf("store: deploy grant path is empty")
@@ -135,9 +132,6 @@ func (s *Store) ValidDeployGrant(token, assetPath string) bool {
 }
 
 func (s *Store) validDeployGrant(token, assetPath string, now time.Time) bool {
-	if s == nil || s.mem == nil {
-		return false
-	}
 	token = strings.TrimSpace(token)
 	assetPath = cleanDeployPath(assetPath)
 	if token == "" || assetPath == "" {

@@ -2,7 +2,6 @@ package alert
 
 import (
 	"context"
-	"fmt"
 	"sync"
 	"time"
 
@@ -33,10 +32,6 @@ func newNotifyCache(st *alertstore.Store, minRefresh time.Duration) *notifyCache
 }
 
 func (c *notifyCache) Targets(ctx context.Context) (notifyTargets, error) {
-	if c == nil || c.store == nil {
-		return notifyTargets{}, fmt.Errorf("notification target store is not initialized")
-	}
-
 	c.mu.Lock()
 	defer c.mu.Unlock()
 

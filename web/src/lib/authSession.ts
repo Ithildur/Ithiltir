@@ -4,40 +4,28 @@ const loginPersistenceKey = 'auth.login_persistence';
 
 type BrowserStorage = 'local' | 'session';
 
-const browserStorage = (kind: BrowserStorage): Storage | null => {
-  if (typeof window === 'undefined') return null;
-  try {
-    return kind === 'local' ? window.localStorage : window.sessionStorage;
-  } catch {
-    return null;
-  }
-};
+const browserStorage = (kind: BrowserStorage): Storage =>
+  kind === 'local' ? window.localStorage : window.sessionStorage;
 
 const readStorageItem = (kind: BrowserStorage, key: string): string | null => {
-  const storage = browserStorage(kind);
-  if (!storage) return null;
   try {
-    return storage.getItem(key);
+    return browserStorage(kind).getItem(key);
   } catch {
     return null;
   }
 };
 
 const removeStorageItem = (kind: BrowserStorage, key: string): void => {
-  const storage = browserStorage(kind);
-  if (!storage) return;
   try {
-    storage.removeItem(key);
+    browserStorage(kind).removeItem(key);
   } catch {
     // Storage can be unavailable in private or hardened browser modes.
   }
 };
 
 const writeStorageItem = (kind: BrowserStorage, key: string, value: string): void => {
-  const storage = browserStorage(kind);
-  if (!storage) return;
   try {
-    storage.setItem(key, value);
+    browserStorage(kind).setItem(key, value);
   } catch {
     // Storage can be unavailable in private or hardened browser modes.
   }
@@ -66,7 +54,6 @@ export const writeLoginPersistence = (persistence: LoginPersistence | null): voi
 };
 
 const readCookie = (name: string): string | null => {
-  if (typeof document === 'undefined') return null;
   const cookie = document.cookie;
   if (!cookie) return null;
 

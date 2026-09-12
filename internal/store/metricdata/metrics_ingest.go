@@ -30,9 +30,6 @@ type MetricsSample struct {
 // transaction. The result reports whether the current projection accepted this
 // sample; history is still retained for an older sample.
 func (s *Store) SaveMetrics(ctx context.Context, sample MetricsSample) (bool, error) {
-	if s == nil || s.db == nil {
-		return false, fmt.Errorf("store: db is nil")
-	}
 	if sample.ServerID <= 0 || sample.Metric.ServerID != sample.ServerID {
 		return false, fmt.Errorf("store: inconsistent metrics server id")
 	}
@@ -46,7 +43,7 @@ func (s *Store) SaveMetrics(ctx context.Context, sample MetricsSample) (bool, er
 
 	var currentUpdated bool
 	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		if err := insertServerMetric(tx, sample.Metric); err != nil {
+		if err := tx.Create(&sample.Metric).Error; err != nil {
 			return err
 		}
 		if err := insertDiskIO(tx, diskIORows); err != nil {
@@ -79,18 +76,8 @@ func (s *Store) SaveMetrics(ctx context.Context, sample MetricsSample) (bool, er
 	return currentUpdated, nil
 }
 
-func insertServerMetric(tx *gorm.DB, metric model.ServerMetric) error {
-	if tx == nil {
-		return fmt.Errorf("store: metrics transaction is nil")
-	}
-	return tx.Create(&metric).Error
-}
-
 func buildDiskIORows(serverID int64, collectedAt time.Time, items []metrics.DiskBaseIOMetrics) []model.DiskMetric {
 	rows := make([]model.DiskMetric, 0, len(items))
-	if serverID <= 0 {
-		return rows
-	}
 	for _, item := range items {
 		name := strings.TrimSpace(item.Name)
 		ref := strings.TrimSpace(item.Ref)
@@ -123,7 +110,7 @@ func buildDiskIORows(serverID int64, collectedAt time.Time, items []metrics.Disk
 }
 
 func buildDiskPhysicalRows(serverID int64, collectedAt time.Time, smart *metrics.DiskSmart) []model.DiskPhysicalMetric {
-	if serverID <= 0 || smart == nil {
+	if smart == nil {
 		return nil
 	}
 	rows := make([]model.DiskPhysicalMetric, 0, len(smart.Devices))
@@ -154,9 +141,6 @@ func buildDiskPhysicalRows(serverID int64, collectedAt time.Time, smart *metrics
 }
 
 func insertDiskPhysical(tx *gorm.DB, rows []model.DiskPhysicalMetric) error {
-	if tx == nil {
-		return fmt.Errorf("store: metrics transaction is nil")
-	}
 	if len(rows) == 0 {
 		return nil
 	}
@@ -164,9 +148,6 @@ func insertDiskPhysical(tx *gorm.DB, rows []model.DiskPhysicalMetric) error {
 }
 
 func insertDiskIO(tx *gorm.DB, rows []model.DiskMetric) error {
-	if tx == nil {
-		return fmt.Errorf("store: metrics transaction is nil")
-	}
 	if len(rows) == 0 {
 		return nil
 	}
@@ -175,9 +156,6 @@ func insertDiskIO(tx *gorm.DB, rows []model.DiskMetric) error {
 
 func buildDiskUsageRows(serverID int64, collectedAt time.Time, items []metrics.DiskLogicalMetrics) []model.DiskUsageMetric {
 	rows := make([]model.DiskUsageMetric, 0, len(items))
-	if serverID <= 0 {
-		return rows
-	}
 	for _, item := range items {
 		name := strings.TrimSpace(item.Name)
 		ref := strings.TrimSpace(item.Ref)
@@ -210,9 +188,6 @@ func buildDiskUsageRows(serverID int64, collectedAt time.Time, items []metrics.D
 }
 
 func insertDiskUsage(tx *gorm.DB, rows []model.DiskUsageMetric) error {
-	if tx == nil {
-		return fmt.Errorf("store: metrics transaction is nil")
-	}
 	if len(rows) == 0 {
 		return nil
 	}
@@ -221,9 +196,6 @@ func insertDiskUsage(tx *gorm.DB, rows []model.DiskUsageMetric) error {
 
 func buildNICRows(serverID int64, collectedAt time.Time, items []metrics.NetIOMetrics) []model.NICMetric {
 	rows := make([]model.NICMetric, 0, len(items))
-	if serverID <= 0 {
-		return rows
-	}
 	for _, item := range items {
 		iface := strings.TrimSpace(item.Name)
 		if iface == "" {
@@ -251,9 +223,6 @@ func buildNICRows(serverID int64, collectedAt time.Time, items []metrics.NetIOMe
 }
 
 func insertNICs(tx *gorm.DB, rows []model.NICMetric) error {
-	if tx == nil {
-		return fmt.Errorf("store: metrics transaction is nil")
-	}
 	if len(rows) == 0 {
 		return nil
 	}
@@ -261,13 +230,6 @@ func insertNICs(tx *gorm.DB, rows []model.NICMetric) error {
 }
 
 func saveCurrentMetrics(tx *gorm.DB, serverID int64, metric model.ServerMetric, runtime model.MetricRuntime, diskIO []model.DiskMetric, diskUsage []model.DiskUsageMetric, nics []model.NICMetric) (bool, error) {
-	if tx == nil {
-		return false, fmt.Errorf("store: metrics transaction is nil")
-	}
-	if serverID <= 0 {
-		return false, fmt.Errorf("store: invalid metrics server id")
-	}
-
 	current := model.ServerCurrentMetric{
 		ServerID:    serverID,
 		CollectedAt: metric.CollectedAt,

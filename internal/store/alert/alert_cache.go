@@ -7,35 +7,23 @@ import (
 )
 
 func (s *Store) MarkServerDirty(id int64) {
-	if s == nil {
-		return
-	}
 	s.dirty.mark(id, nil)
 }
 
 func (s *Store) MarkServerMetrics(id int64, snapshot metrics.NodeView) {
-	if s == nil {
-		return
-	}
 	s.dirty.mark(id, &snapshot)
 }
 
 func (s *Store) NextDirtyServer(ctx context.Context) (int64, *metrics.NodeView, bool) {
-	if s == nil {
-		return 0, nil, false
-	}
 	return s.dirty.next(ctx)
 }
 
 func (s *Store) FinishDirtyServer(id int64, retry bool) {
-	if s == nil {
-		return
-	}
 	s.dirty.finish(id, retry)
 }
 
 func (s *Store) LoadAlertRuntime(_ context.Context, id int64) (map[string]string, error) {
-	if id <= 0 || s == nil || s.runtime == nil {
+	if id <= 0 {
 		return map[string]string{}, nil
 	}
 	s.runtime.alertMu.Lock()
@@ -52,7 +40,7 @@ func (s *Store) LoadAlertRuntime(_ context.Context, id int64) (map[string]string
 }
 
 func (s *Store) SaveAlertRuntime(_ context.Context, id int64, deletes []string, updates map[string][]byte, clear bool) error {
-	if id <= 0 || s == nil || s.runtime == nil {
+	if id <= 0 {
 		return nil
 	}
 	s.runtime.alertMu.Lock()
@@ -80,9 +68,6 @@ func (s *Store) SaveAlertRuntime(_ context.Context, id int64, deletes []string, 
 }
 
 func (s *Store) ListAlertRuntimeServerIDs(context.Context) ([]int64, error) {
-	if s == nil || s.runtime == nil {
-		return nil, nil
-	}
 	s.runtime.alertMu.Lock()
 	defer s.runtime.alertMu.Unlock()
 	ids := make([]int64, 0, len(s.runtime.alertRuntime))
