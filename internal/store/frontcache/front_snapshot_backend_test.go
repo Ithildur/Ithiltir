@@ -115,43 +115,6 @@ func TestUnknownRuntimeChangesProjectionVersionOnce(t *testing.T) {
 	}
 }
 
-func TestStaleProjectionBuildDoesNotPublish(t *testing.T) {
-	st := newTestStore(nil, nil)
-	version := st.currentProjectionVersion()
-	if err := st.projection.Mutate(func() error { return nil }); err != nil {
-		t.Fatalf("projection mutation error = %v", err)
-	}
-
-	called := false
-	published, err := st.publishProjectionIfCurrent(version, func() error {
-		called = true
-		return nil
-	})
-	if err != nil {
-		t.Fatalf("publishProjectionIfCurrent() error = %v", err)
-	}
-	if published || called {
-		t.Fatalf("stale build published=%v called=%v, want both false", published, called)
-	}
-}
-
-func TestIntegrationEnsureSnapshotPublishesAfterMiss(t *testing.T) {
-	ctx := context.Background()
-	st := newTestStore(pgtest.NewDB(t), nil)
-
-	nodes, err := st.EnsureSnapshot(ctx, FrontSnapshotOptions{
-		CacheTimeout:  time.Second,
-		BuildTimeout:  time.Second,
-		StaleAfterSec: 60,
-	})
-	if err != nil || len(nodes) != 0 {
-		t.Fatalf("ensure snapshot after miss: len=%d err=%v", len(nodes), err)
-	}
-	if _, ok, err := st.fetchSnapshotCache(ctx); err != nil || !ok {
-		t.Fatalf("ensure snapshot should publish front meta, ok=%v err=%v", ok, err)
-	}
-}
-
 func TestIntegrationEnsureSnapshotRetriesStaleBuild(t *testing.T) {
 	ctx := context.Background()
 	db := pgtest.NewDB(t)
@@ -167,12 +130,13 @@ func TestIntegrationEnsureSnapshotRetriesStaleBuild(t *testing.T) {
 		t.Fatalf("register query callback: %v", err)
 	}
 
-	if _, err := st.EnsureSnapshot(ctx, FrontSnapshotOptions{
+	nodes, err := st.EnsureSnapshot(ctx, FrontSnapshotOptions{
 		CacheTimeout:  time.Second,
 		BuildTimeout:  time.Second,
 		StaleAfterSec: 60,
-	}); err != nil {
-		t.Fatalf("EnsureSnapshot() error = %v", err)
+	})
+	if err != nil || len(nodes) != 0 {
+		t.Fatalf("EnsureSnapshot() = %d nodes, err=%v; want empty snapshot", len(nodes), err)
 	}
 	if bumpErr != nil {
 		t.Fatalf("projection mutation error = %v", bumpErr)

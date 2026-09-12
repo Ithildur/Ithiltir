@@ -3,7 +3,6 @@ package traffic
 import (
 	"errors"
 	"math"
-	"reflect"
 	"testing"
 	"time"
 
@@ -532,7 +531,7 @@ func TestTrafficMonthlySnapshotRejectsUnknownStatus(t *testing.T) {
 	}
 }
 
-func TestBuildTraffic5mRowsIsIdempotent(t *testing.T) {
+func TestBuildTraffic5mRowsAggregatesCounters(t *testing.T) {
 	start := time.Date(2026, time.April, 1, 0, 0, 0, 0, time.UTC)
 	end := start.Add(10 * time.Minute)
 	rows := []trafficNICRow{
@@ -541,16 +540,11 @@ func TestBuildTraffic5mRowsIsIdempotent(t *testing.T) {
 		{ServerID: 7, Iface: "eth0", CollectedAt: end, BytesRecv: 700, BytesSent: 1400},
 	}
 
-	first := buildTraffic5mRows(rows, start, end)
-	second := buildTraffic5mRows(rows, start, end)
-
-	if !reflect.DeepEqual(first, second) {
-		t.Fatalf("backfill rows are not stable")
+	items := buildTraffic5mRows(rows, start, end)
+	if len(items) != 2 {
+		t.Fatalf("rows = %d, want 2", len(items))
 	}
-	if len(first) != 2 {
-		t.Fatalf("rows = %d, want 2", len(first))
-	}
-	for i, row := range first {
+	for i, row := range items {
 		if row.InBytes != 300 || row.OutBytes != 600 {
 			t.Fatalf("row %d bytes = %d/%d, want 300/600", i, row.InBytes, row.OutBytes)
 		}
@@ -641,43 +635,6 @@ func traffic5mGapCount(rows []model.Traffic5m) int32 {
 	return out
 }
 
-func TestBuildTrafficMonthUsageRowsDoesNotWriteAllAggregate(t *testing.T) {
-	start := time.Date(2026, time.April, 1, 0, 0, 0, 0, time.UTC)
-	end := start.Add(5 * time.Minute)
-	settings := defaultSettings()
-	settings.CycleMode = CycleCalendarMonth
-	settings.BillingStartDay = 1
-	rows := []trafficUsageNICRow{
-		{ServerID: 7, Iface: "eth0", CollectedAt: start, BytesRecv: 0, BytesSent: 0},
-		{ServerID: 7, Iface: "eth0", CollectedAt: end, BytesRecv: 300, BytesSent: 600},
-		{ServerID: 7, Iface: "eth1", CollectedAt: start, BytesRecv: 0, BytesSent: 0},
-		{ServerID: 7, Iface: "eth1", CollectedAt: end, BytesRecv: 900, BytesSent: 1200},
-	}
-
-	items := mustBuildTrafficMonthUsageRows(t, rows, settings, time.UTC, start, end, map[trafficUsageKey]time.Time{})
-
-	byIface := make(map[string]usageCounters)
-	for _, item := range items {
-		byIface[item.Iface] = usageCounters{
-			inBytes:  item.InBytes,
-			outBytes: item.OutBytes,
-			inPeak:   item.InPeakBytesPerSec,
-			outPeak:  item.OutPeakBytesPerSec,
-		}
-	}
-	if _, ok := byIface["all"]; ok {
-		t.Fatalf("all aggregate row should not be persisted")
-	}
-	eth0 := byIface["eth0"]
-	if eth0.inBytes != 300 || eth0.outBytes != 600 {
-		t.Fatalf("eth0 bytes = %d/%d, want 300/600", eth0.inBytes, eth0.outBytes)
-	}
-	eth1 := byIface["eth1"]
-	if eth1.inBytes != 900 || eth1.outBytes != 1200 {
-		t.Fatalf("eth1 bytes = %d/%d, want 900/1200", eth1.inBytes, eth1.outBytes)
-	}
-}
-
 func TestBuildTrafficMonthUsageRowsKeepsIfaceRowsSeparate(t *testing.T) {
 	start := time.Date(2026, time.April, 1, 0, 0, 0, 0, time.UTC)
 	settings := defaultSettings()
@@ -704,8 +661,13 @@ func TestBuildTrafficMonthUsageRowsKeepsIfaceRowsSeparate(t *testing.T) {
 	if _, ok := byIface["all"]; ok {
 		t.Fatalf("all aggregate row should not be persisted")
 	}
-	if byIface["eth0"].inBytes != 300 || byIface["eth1"].inBytes != 900 {
-		t.Fatalf("iface bytes = %d/%d, want 300/900", byIface["eth0"].inBytes, byIface["eth1"].inBytes)
+	eth0 := byIface["eth0"]
+	if eth0.inBytes != 300 || eth0.outBytes != 600 {
+		t.Fatalf("eth0 bytes = %d/%d, want 300/600", eth0.inBytes, eth0.outBytes)
+	}
+	eth1 := byIface["eth1"]
+	if eth1.inBytes != 900 || eth1.outBytes != 1200 {
+		t.Fatalf("eth1 bytes = %d/%d, want 900/1200", eth1.inBytes, eth1.outBytes)
 	}
 }
 

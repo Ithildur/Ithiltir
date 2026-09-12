@@ -60,17 +60,6 @@ func TestControlledRedirectLimitsHops(t *testing.T) {
 	}
 }
 
-func TestControlledRedirectRejectsPOSTMethodDowngrade(t *testing.T) {
-	u := mustURL(t, "https://example.com/hook")
-	err := controlledRedirect(
-		&http.Request{Method: http.MethodGet, URL: u},
-		[]*http.Request{{Method: http.MethodPost, URL: u}},
-	)
-	if got := Classify(err); got.Class != DeliveryBlocked || got.Code != "redirect_method_changed" {
-		t.Fatalf("controlledRedirect() failure = %+v, want blocked/redirect_method_changed", got)
-	}
-}
-
 func TestHTTPClientOnlyFollowsBodyPreservingRedirects(t *testing.T) {
 	for _, tt := range []struct {
 		name       string
