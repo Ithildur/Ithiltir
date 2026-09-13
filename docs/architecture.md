@@ -94,13 +94,16 @@ The frontend can run as a standalone dev server, but the runtime boundary stays 
 
 ## Repository Layout
 
+`cmd/dash` constructs the HTTP server through `internal/http`. Its root router mounts the API, theme, and static routes; API parents mount their direct child modules. MTProto login state serialization and expiry belong to `store/mtlogin`, and channel revision checks and session persistence belong to `store/alert`.
+
 | Path                          | Contents                                                      |
 | ----------------------------- | ------------------------------------------------------------- |
 | `cmd/dash`                    | server, migration, update, Redis-check, and theme packaging entry points |
 | `internal/config`             | config loading, defaults, validation, and runtime directories |
-| `internal/transport/http`     | HTTP server, static assets, theme assets, and API mounting    |
-| `internal/transport/http/api` | `/api` route tree                                             |
+| `internal/http`               | HTTP server, static assets, theme assets, and API mounting    |
+| `internal/http/api`           | `/api` route tree                                             |
 | `internal/store`              | persistence and cache access layer                            |
+| `internal/model`              | database models organized by domain within one package        |
 | `internal/alert`              | alert compilation, runtime, and delivery orchestration        |
 | `internal/traffic`            | traffic statistics background service                         |
 | `web`                         | SPA frontend source                                           |

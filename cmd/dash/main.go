@@ -13,6 +13,7 @@ import (
 	"dash/internal/alert"
 	"dash/internal/config"
 	"dash/internal/dashupdate"
+	httpserver "dash/internal/http"
 	"dash/internal/infra"
 	"dash/internal/infra/cachekeys"
 	"dash/internal/migrate"
@@ -20,8 +21,6 @@ import (
 	"dash/internal/store"
 	themefs "dash/internal/theme"
 	trafficservice "dash/internal/traffic"
-	transporthttp "dash/internal/transport/http"
-	httpapi "dash/internal/transport/http/api"
 	"dash/internal/version"
 	authjwt "github.com/Ithildur/EiluneKit/auth/jwt"
 	authstore "github.com/Ithildur/EiluneKit/auth/store"
@@ -227,7 +226,7 @@ func main() {
 		infra.Fatal("init alert service failed", err)
 	}
 	dashUpdateService := dashupdate.NewService(st.System, alertService, dashUpdateRunner, cfg.App.EffectiveLanguage())
-	deps := httpapi.Dependencies{
+	deps := httpserver.Dependencies{
 		Stores:         st,
 		Auth:           jwtAuth,
 		Theme:          themeStore,
@@ -235,7 +234,7 @@ func main() {
 		DashUpdate:     dashUpdateRunner,
 	}
 
-	srv, err := transporthttp.NewHTTPServer(cfg, deps)
+	srv, err := httpserver.NewHTTPServer(cfg, deps)
 	if err != nil {
 		infra.Fatal("init http server failed", err)
 	}

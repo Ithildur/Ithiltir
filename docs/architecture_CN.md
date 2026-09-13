@@ -94,13 +94,16 @@ Ithiltir Dash 是单实例应用。根入口只启动一个 HTTP 进程，该进
 
 ## 目录
 
+`cmd/dash` 通过 `internal/http` 构造 HTTP 服务。HTTP 根路由统一挂载 API、主题和静态资源；API 父模块只挂载直属子模块。MTProto 登录状态的序列化和过期由 `store/mtlogin` 负责，渠道版本检查和会话持久化由 `store/alert` 负责。
+
 | 路径                          | 内容                                     |
 | ----------------------------- | ---------------------------------------- |
 | `cmd/dash`                    | 服务、迁移、更新、Redis 检查和主题打包入口 |
 | `internal/config`             | 配置加载、默认值、校验和运行目录         |
-| `internal/transport/http`     | HTTP 服务、静态资源、主题资源和 API 挂载 |
-| `internal/transport/http/api` | `/api` 路由树                            |
+| `internal/http`               | HTTP 服务、静态资源、主题资源和 API 挂载 |
+| `internal/http/api`           | `/api` 路由树                            |
 | `internal/store`              | 持久化和缓存访问层                       |
+| `internal/model`              | 同包内按领域分文件的数据库模型           |
 | `internal/alert`              | 告警编译、运行时和发送编排               |
 | `internal/traffic`            | 流量统计后台服务                         |
 | `web`                         | SPA 前端源码                             |

@@ -1,0 +1,159 @@
+package api
+
+import (
+	"fmt"
+	"math"
+	"net/http"
+	"net/netip"
+	"time"
+
+	"dash/internal/config"
+	updater "dash/internal/dashupdate"
+	adminapi "dash/internal/http/api/admin"
+	authapi "dash/internal/http/api/auth"
+	frontapi "dash/internal/http/api/front"
+	metricsapi "dash/internal/http/api/metrics"
+	nodeapi "dash/internal/http/api/node"
+	statisticsapi "dash/internal/http/api/statistics"
+	versionapi "dash/internal/http/api/version"
+	"dash/internal/http/request"
+	"dash/internal/serverid"
+	"dash/internal/store"
+	themefs "dash/internal/theme"
+	trafficjob "dash/internal/traffic"
+	authhttp "github.com/Ithildur/EiluneKit/auth/http"
+	authjwt "github.com/Ithildur/EiluneKit/auth/jwt"
+	kitmw "github.com/Ithildur/EiluneKit/http/middleware"
+	"github.com/Ithildur/EiluneKit/http/routes"
+
+	"github.com/go-chi/chi/v5"
+)
+
+// Dependencies holds shared dependencies for HTTP handlers.
+type Dependencies struct {
+	Stores         *store.Stores
+	Auth           *authjwt.Manager
+	Theme          *themefs.Store
+	TrafficRebuild *trafficjob.RebuildRunner
+	DashUpdate     *updater.Runner
+}
+
+const passwordOnlyAuthUserID = "dash-admin"
+
+type routeSetup struct {
+	authHandler      *authhttp.Handler
+	bearer           routes.Middleware
+	optionalBearer   routes.Middleware
+	serverID         *serverid.Store
+	offlineThreshold time.Duration
+	staleAfterSec    int
+	trustedProxies   []netip.Prefix
+}
+
+func prepareRoutes(cfg *config.Config, deps Dependencies) (routeSetup, error) {
+	if cfg == nil {
+		return routeSetup{}, fmt.Errorf("api: config is nil")
+	}
+
+	if deps.Stores == nil {
+		return routeSetup{}, fmt.Errorf("api: store is nil")
+	}
+
+	if deps.Auth == nil {
+		return routeSetup{}, fmt.Errorf("api: auth manager is nil")
+	}
+	if deps.Theme == nil {
+		return routeSetup{}, fmt.Errorf("api: theme store is nil")
+	}
+	if deps.TrafficRebuild == nil {
+		return routeSetup{}, fmt.Errorf("api: traffic rebuild runner is nil")
+	}
+	if deps.DashUpdate == nil {
+		return routeSetup{}, fmt.Errorf("api: dash update runner is nil")
+	}
+
+	offlineThreshold, staleAfterSec := nodeThresholds(cfg)
+	trustedProxies := append([]netip.Prefix(nil), cfg.HTTP.TrustedProxyPrefixes...)
+	authHandler, err := newAuthHandler(cfg.Auth.Password, deps.Auth, trustedProxies)
+	if err != nil {
+		return routeSetup{}, err
+	}
+	bearer, err := authhttp.RequireBearer(deps.Auth)
+	if err != nil {
+		return routeSetup{}, fmt.Errorf("api: build bearer middleware: %w", err)
+	}
+	optionalBearer, err := request.OptionalBearer(deps.Auth)
+	if err != nil {
+		return routeSetup{}, fmt.Errorf("api: build optional bearer middleware: %w", err)
+	}
+	installIDPath, err := config.InstallIDPath()
+	if err != nil {
+		return routeSetup{}, fmt.Errorf("api: resolve install id path: %w", err)
+	}
+
+	return routeSetup{
+		authHandler:      authHandler,
+		bearer:           bearer,
+		optionalBearer:   optionalBearer,
+		serverID:         serverid.New(installIDPath),
+		offlineThreshold: offlineThreshold,
+		staleAfterSec:    staleAfterSec,
+		trustedProxies:   trustedProxies,
+	}, nil
+}
+
+func buildRoutes(cfg *config.Config, deps Dependencies, setup routeSetup) *routes.Blueprint {
+	r := routes.NewBlueprint()
+	r.Add(setup.authHandler.Routes()...)
+	r.Include("/version", versionapi.Router())
+	r.Include("/admin", adminapi.Router(deps.Stores, cfg, deps.Theme, deps.TrafficRebuild, deps.DashUpdate), routes.IncludeAuth(routes.AuthRequired), routes.IncludeMiddleware(setup.bearer))
+	// Node handlers authenticate X-Node-Secret independently of bearer sessions.
+	r.Include("/node", nodeapi.Router(deps.Stores, setup.serverID, setup.staleAfterSec, setup.trustedProxies))
+	r.Include("/front", frontapi.Router(deps.Stores, setup.offlineThreshold, setup.optionalBearer))
+	r.Include("/metrics", metricsapi.Router(deps.Stores, setup.optionalBearer))
+	r.Include("/statistics", statisticsapi.Router(deps.Stores, cfg.App.EffectiveLocation(), setup.bearer, setup.optionalBearer))
+	return r
+}
+
+// Register mounts /api routes onto router.
+func Register(router chi.Router, cfg *config.Config, deps Dependencies) error {
+	setup, err := prepareRoutes(cfg, deps)
+	if err != nil {
+		return err
+	}
+
+	blueprint := buildRoutes(cfg, deps, setup)
+
+	var mountErr error
+	router.Route("/api", func(r chi.Router) {
+		r.Use(apiBoundary)
+		r.MethodNotAllowed(kitmw.MethodNotAllowedResponder(r))
+		if err := blueprint.Mount(r); err != nil && mountErr == nil {
+			mountErr = err
+		}
+	})
+	return mountErr
+}
+
+func newAuthHandler(password string, auth authhttp.TokenManager, trustedProxies []netip.Prefix) (*authhttp.Handler, error) {
+	if err := config.ValidateAdminPassword(password); err != nil {
+		return nil, fmt.Errorf("api: invalid admin password: %w", err)
+	}
+	authenticator, err := authhttp.NewStaticPassword(passwordOnlyAuthUserID, password)
+	if err != nil {
+		return nil, fmt.Errorf("api: invalid admin password: %w", err)
+	}
+
+	return authapi.NewHandler(auth, authhttp.Options{
+		LoginAuthenticator: authenticator,
+		BasePath:           "/auth",
+		RefreshCookiePath:  "/api/auth",
+		CookieSameSite:     http.SameSiteStrictMode,
+		TrustedProxies:     trustedProxies,
+	})
+}
+
+func nodeThresholds(cfg *config.Config) (time.Duration, int) {
+	offlineThreshold := cfg.App.EffectiveNodeOfflineThreshold()
+	return offlineThreshold, int(math.Ceil(offlineThreshold.Seconds()))
+}

@@ -1,0 +1,82 @@
+package mtproto
+
+import (
+	"errors"
+	"net/http"
+
+	"dash/internal/http/httperr"
+	"dash/internal/http/request"
+	"dash/internal/notify"
+	alertstore "dash/internal/store/alert"
+	"dash/internal/store/mtlogin"
+	"github.com/Ithildur/EiluneKit/http/response"
+	"github.com/Ithildur/EiluneKit/http/routes"
+
+	"github.com/google/uuid"
+	"gorm.io/gorm"
+)
+
+type codeInput struct {
+	ChannelID int64 `json:"channel_id"`
+}
+
+type codeView struct {
+	LoginID string `json:"login_id"`
+	Timeout int    `json:"timeout,omitzero"`
+}
+
+func codeRoute(r *routes.Blueprint, h *handler) {
+	r.Post(
+		"/code",
+		"Send MTProto login code",
+		h.codeHandler,
+	)
+}
+
+func (h *handler) codeHandler(w http.ResponseWriter, r *http.Request) {
+	var in codeInput
+	if ok := request.DecodeJSONOrWriteError(w, r, &in); !ok {
+		return
+	}
+
+	if in.ChannelID <= 0 {
+		httperr.Write(w, http.StatusBadRequest, "invalid_fields", "channel_id is required")
+		return
+	}
+
+	cfg, err := h.alert.MTProtoConfig(r.Context(), in.ChannelID)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			httperr.Write(w, http.StatusNotFound, "not_found", "channel not found")
+			return
+		}
+		if errors.Is(err, alertstore.ErrInvalidMTProtoChannel) {
+			httperr.Write(w, http.StatusBadRequest, "invalid_fields", "invalid mtproto channel")
+			return
+		}
+		httperr.Write(w, http.StatusServiceUnavailable, "db_error", "failed to fetch channel")
+		return
+	}
+
+	auth, timeout, err := notify.StartLogin(r.Context(), cfg.APIID, cfg.APIHash, cfg.Phone)
+	if err != nil {
+		httperr.Write(w, http.StatusServiceUnavailable, "notify_error", "failed to send code")
+		return
+	}
+	state := mtlogin.State{
+		ChannelID:       in.ChannelID,
+		ChannelRevision: cfg.Revision,
+		Auth:            auth,
+	}
+
+	loginID := uuid.NewString()
+	if err := h.login.Save(r.Context(), loginID, state); err != nil {
+		httperr.Write(w, http.StatusServiceUnavailable, "login_state_error", "login state unavailable")
+		return
+	}
+
+	response.WriteJSON(w, http.StatusOK, codeView{
+		LoginID: loginID,
+		Timeout: timeout,
+	})
+}
