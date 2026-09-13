@@ -24,7 +24,7 @@ func rebuildRoute(r *routes.Blueprint, h *handler) {
 	r.Get(
 		"/rebuild",
 		"Get traffic rebuild status",
-		routes.Func(h.rebuildStatusHandler),
+		h.rebuildStatusHandler,
 	)
 }
 

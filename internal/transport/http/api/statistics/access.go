@@ -22,7 +22,7 @@ func (h *handler) accessRoute(r *routes.Blueprint) {
 	r.Get(
 		"/access",
 		"Get statistics access settings",
-		routes.Func(h.accessHandler),
+		h.accessHandler,
 		routes.Tags("statistics"),
 		routes.Auth(routes.AuthOptional),
 		routes.Use(h.optionalBearer),

@@ -12,7 +12,7 @@ func detailRoute(r *routes.Blueprint, h *handler) {
 	r.Get(
 		"/",
 		"Get system settings",
-		routes.Func(h.detailHandler),
+		h.detailHandler,
 	)
 }
 

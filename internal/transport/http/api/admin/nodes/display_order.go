@@ -23,7 +23,7 @@ func displayOrderRoute(r *routes.Blueprint, h *handler) {
 	r.Put(
 		"/display-order",
 		"Update node display order",
-		routes.Func(h.displayOrderHandler),
+		h.displayOrderHandler,
 		routes.Use(middleware.RequireJSONBody),
 	)
 }

@@ -33,7 +33,7 @@ func statusRoute(r *routes.Blueprint, h *handler) {
 	r.Get(
 		"/status",
 		"Get Dash update status",
-		routes.Func(h.statusHandler),
+		h.statusHandler,
 	)
 }
 
@@ -41,7 +41,7 @@ func checkRoute(r *routes.Blueprint, h *handler) {
 	r.Get(
 		"/check",
 		"Check Dash update version",
-		routes.Func(h.checkHandler),
+		h.checkHandler,
 	)
 }
 
@@ -49,7 +49,7 @@ func runRoute(r *routes.Blueprint, h *handler) {
 	r.Post(
 		"/run",
 		"Run Dash update",
-		routes.Func(h.runHandler),
+		h.runHandler,
 		routes.Use(middleware.RequireJSONBody),
 	)
 }

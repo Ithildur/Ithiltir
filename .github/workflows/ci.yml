@@ -63,7 +63,7 @@ jobs:
           fi
 
       - name: Go Staticcheck
-        run: go run honnef.co/go/tools/cmd/staticcheck@v0.7.0 ./...
+        run: go run honnef.co/go/tools/cmd/staticcheck@v0.8.1 ./...
 
       - name: Frontend Lint
         run: cd web && bun run lint

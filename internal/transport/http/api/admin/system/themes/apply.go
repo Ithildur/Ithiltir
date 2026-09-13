@@ -12,7 +12,7 @@ func applyRoute(r *routes.Blueprint, h *handler) {
 	r.Post(
 		"/{id}/apply",
 		"Apply active theme package",
-		routes.Func(h.applyHandler),
+		h.applyHandler,
 	)
 }
 

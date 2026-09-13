@@ -37,7 +37,7 @@ AArch64 机器使用 `ARCH=arm64`。在受支持的 Debian/Ubuntu 系统上，�
 
 ## 源码运行
 
-源码开发需要 Go 1.26.6+、Bun 1.3.11、PostgreSQL 16+ 及对应主版本的 TimescaleDB。除非用 `--no-redis` 启动，否则还需要 Redis。
+源码开发需要 Go 1.27.1+、Bun 1.3.11、PostgreSQL 16+ 及对应主版本的 TimescaleDB。除非用 `--no-redis` 启动，否则还需要 Redis。
 
 ```bash
 cp configs/config.example.yaml config.local.yaml

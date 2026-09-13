@@ -106,7 +106,7 @@ type State struct {
 	RecoveryPath      string  `json:"recovery_path,omitempty"`
 	StartedAt         string  `json:"started_at,omitempty"`
 	FinishedAt        string  `json:"finished_at,omitempty"`
-	ExitCode          *int    `json:"exit_code,omitempty"`
+	ExitCode          *int    `json:"exit_code,omitzero"`
 	LogTail           string  `json:"log_tail,omitempty"`
 	Available         bool    `json:"available"`
 	UnavailableReason string  `json:"unavailable_reason,omitempty"`

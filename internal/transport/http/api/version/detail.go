@@ -17,7 +17,7 @@ func detailRoute(r *routes.Blueprint) {
 	r.Get(
 		"/",
 		"Get bundled versions",
-		routes.Func(detailHandler),
+		detailHandler,
 		routes.Tags("version"),
 	)
 }

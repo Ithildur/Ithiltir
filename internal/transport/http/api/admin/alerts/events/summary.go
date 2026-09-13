@@ -29,7 +29,7 @@ func summaryRoute(r *routes.Blueprint, h *handler) {
 	r.Get(
 		"/summary",
 		"List open alert event summaries",
-		routes.Func(h.summaryHandler),
+		h.summaryHandler,
 	)
 }
 

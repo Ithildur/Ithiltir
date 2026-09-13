@@ -31,7 +31,7 @@ func updateRoute(r *routes.Blueprint, h *handler) {
 	r.Patch(
 		"/{id}",
 		"Update alert rule",
-		routes.Func(h.updateHandler),
+		h.updateHandler,
 		routes.Use(middleware.RequireJSONBody),
 	)
 }

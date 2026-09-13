@@ -16,14 +16,14 @@ func (h *handler) settingsRoute(r *routes.Blueprint) {
 	r.Get(
 		"/settings",
 		"Get traffic settings",
-		routes.Func(h.settingsHandler),
+		h.settingsHandler,
 		routes.Auth(routes.AuthOptional),
 		routes.Use(h.optionalBearer),
 	)
 	r.Patch(
 		"/settings",
 		"Patch traffic settings",
-		routes.Func(h.patchSettingsHandler),
+		h.patchSettingsHandler,
 		routes.Auth(routes.AuthRequired),
 		routes.Use(h.bearer),
 		routes.Use(middleware.RequireJSONBody),

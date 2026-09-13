@@ -15,7 +15,7 @@ func (h *handler) brandRoute(r *routes.Blueprint) {
 	r.Get(
 		"/brand",
 		"Get front brand settings",
-		routes.Func(h.brandHandler),
+		h.brandHandler,
 		routes.Tags("front"),
 	)
 }

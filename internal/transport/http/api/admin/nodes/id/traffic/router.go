@@ -34,7 +34,7 @@ func rebuildRoute(r *routes.Blueprint, h *handler) {
 	r.Post(
 		"/rebuild",
 		"Rebuild node traffic",
-		routes.Func(h.rebuildHandler),
+		h.rebuildHandler,
 	)
 }
 

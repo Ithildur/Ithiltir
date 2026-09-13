@@ -23,14 +23,14 @@ type NodeView struct {
 	Network     Network     `json:"network"`
 	Processes   Processes   `json:"processes"`
 	Connections Connections `json:"connections"`
-	Raid        *RAID       `json:"raid,omitempty"`
-	Thermal     *Thermal    `json:"thermal,omitempty"`
-	Pressure    *Pressure   `json:"pressure,omitempty"`
+	Raid        *RAID       `json:"raid,omitzero"`
+	Thermal     *Thermal    `json:"thermal,omitzero"`
+	Pressure    *Pressure   `json:"pressure,omitzero"`
 }
 
 type NodeMeta struct {
 	ID         string   `json:"id"`
-	Order      int      `json:"order,omitempty"`
+	Order      int      `json:"order,omitzero"`
 	Title      string   `json:"title"`
 	SearchText []string `json:"search_text,omitempty"`
 	Tags       []string `json:"tags,omitempty"`
@@ -56,9 +56,9 @@ type CPU struct {
 	UsageRatio    float64 `json:"usage_ratio"`
 	Load          CPULoad `json:"load"`
 	ModelName     string  `json:"model_name,omitempty"`
-	CoresPhysical int     `json:"cores_physical,omitempty"`
-	CoresLogical  int     `json:"cores_logical,omitempty"`
-	Sockets       int     `json:"sockets,omitempty"`
+	CoresPhysical int     `json:"cores_physical,omitzero"`
+	CoresLogical  int     `json:"cores_logical,omitzero"`
+	Sockets       int     `json:"sockets,omitzero"`
 }
 
 type CPULoad struct {
@@ -82,7 +82,7 @@ type Disk struct {
 	Mounts             []DiskMount `json:"mounts"`
 	IO                 DiskIO      `json:"io"`
 	TemperatureDevices []string    `json:"temperature_devices,omitempty"`
-	Smart              *DiskSmart  `json:"smart,omitempty"`
+	Smart              *DiskSmart  `json:"smart,omitzero"`
 }
 
 type DiskMount struct {

@@ -16,7 +16,7 @@ func (h *handler) summaryRoute(r *routes.Blueprint) {
 	r.Get(
 		"/summary",
 		"Get traffic summary",
-		routes.Func(h.summaryHandler),
+		h.summaryHandler,
 		routes.Auth(routes.AuthOptional),
 		routes.Use(h.optionalBearer),
 	)

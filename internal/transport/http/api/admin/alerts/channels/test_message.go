@@ -32,7 +32,7 @@ func testMessageRoute(r *routes.Blueprint, h *handler) {
 	r.Post(
 		"/{id}/test",
 		"Test alert channel",
-		routes.Func(h.testMessageHandler),
+		h.testMessageHandler,
 		routes.Use(middleware.RequireJSONBody),
 	)
 }

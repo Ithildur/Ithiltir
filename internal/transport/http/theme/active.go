@@ -16,7 +16,7 @@ func activeCSSRoute(r *routes.Blueprint, h *handler, method string) {
 		method,
 		"/active.css",
 		"Read active theme CSS",
-		routes.Func(h.activeCSSHandler),
+		h.activeCSSHandler,
 	)
 }
 
@@ -25,7 +25,7 @@ func activeManifestRoute(r *routes.Blueprint, h *handler, method string) {
 		method,
 		"/active.json",
 		"Read active theme manifest",
-		routes.Func(h.activeManifestHandler),
+		h.activeManifestHandler,
 	)
 }
 

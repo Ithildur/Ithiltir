@@ -23,7 +23,7 @@ func trafficP95Route(r *routes.Blueprint, h *handler) {
 	r.Patch(
 		"/traffic-p95",
 		"Update node traffic P95",
-		routes.Func(h.trafficP95Handler),
+		h.trafficP95Handler,
 		routes.Use(middleware.RequireJSONBody),
 	)
 }

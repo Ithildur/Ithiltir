@@ -24,7 +24,7 @@ func detailRoute(r *routes.Blueprint, h *handler) {
 	r.Get(
 		"/",
 		"Get alert settings",
-		routes.Func(h.detailHandler),
+		h.detailHandler,
 	)
 }
 

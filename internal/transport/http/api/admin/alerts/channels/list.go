@@ -15,7 +15,7 @@ func listRoute(r *routes.Blueprint, h *handler) {
 	r.Get(
 		"/",
 		"List alert channels",
-		routes.Func(h.listHandler),
+		h.listHandler,
 	)
 }
 

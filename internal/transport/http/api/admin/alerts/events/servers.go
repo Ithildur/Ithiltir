@@ -24,7 +24,7 @@ func serversRoute(r *routes.Blueprint, h *handler) {
 	r.Get(
 		"/servers",
 		"List alert event filter servers",
-		routes.Func(h.serversHandler),
+		h.serversHandler,
 	)
 }
 

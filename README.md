@@ -37,7 +37,7 @@ After installation, open the configured `app.public_url`; append `/login` for th
 
 ## Run From Source
 
-Source development requires Go 1.26.6+, Bun 1.3.11, PostgreSQL 16+ with a matching TimescaleDB build, and Redis unless Dash is started with `--no-redis`.
+Source development requires Go 1.27.1+, Bun 1.3.11, PostgreSQL 16+ with a matching TimescaleDB build, and Redis unless Dash is started with `--no-redis`.
 
 ```bash
 cp configs/config.example.yaml config.local.yaml

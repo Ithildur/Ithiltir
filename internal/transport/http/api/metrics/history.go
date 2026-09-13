@@ -64,7 +64,7 @@ func (h *handler) historyRoute(r *routes.Blueprint) {
 	r.Get(
 		"/history",
 		"Fetch metrics history",
-		routes.Func(h.historyHandler),
+		h.historyHandler,
 		routes.Tags("metrics"),
 		routes.Auth(routes.AuthOptional),
 		routes.Use(h.optionalBearer),

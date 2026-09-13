@@ -14,7 +14,7 @@ func previewRoute(r *routes.Blueprint, h *handler, method string) {
 		method,
 		"/preview/{id}.png",
 		"Read theme preview image",
-		routes.Func(h.previewHandler),
+		h.previewHandler,
 	)
 }
 

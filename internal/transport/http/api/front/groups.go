@@ -15,7 +15,7 @@ func (h *handler) groupsRoute(r *routes.Blueprint) {
 	r.Get(
 		"/groups",
 		"List front group nodes",
-		routes.Func(h.groupsHandler),
+		h.groupsHandler,
 		routes.Tags("front"),
 		routes.Auth(routes.AuthOptional),
 		routes.Use(h.optionalBearer),

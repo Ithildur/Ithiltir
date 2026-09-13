@@ -23,7 +23,7 @@ type nodeView struct {
 	ID                       int64       `json:"id"`
 	Name                     string      `json:"name"`
 	Hostname                 string      `json:"hostname"`
-	IP                       *string     `json:"ip,omitempty"`
+	IP                       *string     `json:"ip,omitzero"`
 	IsGuestVisible           bool        `json:"is_guest_visible"`
 	TrafficP95Enabled        bool        `json:"traffic_p95_enabled"`
 	TrafficCycleMode         string      `json:"traffic_cycle_mode"`
@@ -42,7 +42,7 @@ func listRoute(r *routes.Blueprint, h *handler) {
 	r.Get(
 		"/",
 		"List nodes",
-		routes.Func(h.listHandler),
+		h.listHandler,
 	)
 }
 

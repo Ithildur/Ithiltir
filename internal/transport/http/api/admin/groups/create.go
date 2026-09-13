@@ -20,7 +20,7 @@ func createRoute(r *routes.Blueprint, h *handler) {
 	r.Post(
 		"/",
 		"Create group",
-		routes.Func(h.createHandler),
+		h.createHandler,
 		routes.Use(middleware.RequireJSONBody),
 	)
 }

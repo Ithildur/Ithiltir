@@ -22,7 +22,7 @@ func uploadRoute(r *routes.Blueprint, h *handler) {
 	r.Post(
 		"/upload",
 		"Upload theme package",
-		routes.Func(h.uploadHandler),
+		h.uploadHandler,
 	)
 }
 

@@ -22,7 +22,7 @@ func enabledRoute(r *routes.Blueprint, h *handler) {
 	r.Put(
 		"/{id}/enabled",
 		"Update alert channel enabled status",
-		routes.Func(h.enabledHandler),
+		h.enabledHandler,
 		routes.Use(middleware.RequireJSONBody),
 	)
 }

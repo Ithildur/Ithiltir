@@ -22,7 +22,7 @@ func passwordRoute(r *routes.Blueprint, h *handler) {
 	r.Post(
 		"/password",
 		"Submit MTProto password",
-		routes.Func(h.passwordHandler),
+		h.passwordHandler,
 	)
 }
 

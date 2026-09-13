@@ -25,7 +25,7 @@ func verifyRoute(r *routes.Blueprint, h *handler) {
 	r.Post(
 		"/verify",
 		"Verify MTProto code",
-		routes.Func(h.verifyHandler),
+		h.verifyHandler,
 	)
 }
 

@@ -15,7 +15,7 @@ func lookupRoute(r *routes.Blueprint, h *handler) {
 	r.Get(
 		"/map",
 		"Get group lookup",
-		routes.Func(h.lookupHandler),
+		h.lookupHandler,
 	)
 }
 

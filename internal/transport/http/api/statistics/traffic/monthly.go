@@ -21,7 +21,7 @@ func (h *handler) monthlyRoute(r *routes.Blueprint) {
 	r.Get(
 		"/monthly",
 		"List monthly traffic summaries",
-		routes.Func(h.monthlyHandler),
+		h.monthlyHandler,
 		routes.Auth(routes.AuthOptional),
 		routes.Use(h.optionalBearer),
 	)

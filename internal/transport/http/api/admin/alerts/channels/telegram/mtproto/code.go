@@ -20,14 +20,14 @@ type codeInput struct {
 
 type codeView struct {
 	LoginID string `json:"login_id"`
-	Timeout int    `json:"timeout,omitempty"`
+	Timeout int    `json:"timeout,omitzero"`
 }
 
 func codeRoute(r *routes.Blueprint, h *handler) {
 	r.Post(
 		"/code",
 		"Send MTProto login code",
-		routes.Func(h.codeHandler),
+		h.codeHandler,
 	)
 }
 

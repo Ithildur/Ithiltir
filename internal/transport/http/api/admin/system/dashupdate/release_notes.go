@@ -20,7 +20,7 @@ func releaseNotesRoute(r *routes.Blueprint, h *handler) {
 	r.Get(
 		"/release-notes",
 		"Get Dash release notes document",
-		routes.Func(h.releaseNotesHandler),
+		h.releaseNotesHandler,
 	)
 }
 

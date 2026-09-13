@@ -15,7 +15,7 @@ func replaceRoute(r *routes.Blueprint, h *handler) {
 	r.Put(
 		"/",
 		"Replace system settings",
-		routes.Func(h.replaceHandler),
+		h.replaceHandler,
 		routes.Use(middleware.RequireJSONBody),
 	)
 }

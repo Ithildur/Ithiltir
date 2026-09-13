@@ -19,7 +19,7 @@ func (h *handler) ifacesRoute(r *routes.Blueprint) {
 	r.Get(
 		"/ifaces",
 		"List traffic interfaces",
-		routes.Func(h.ifacesHandler),
+		h.ifacesHandler,
 		routes.Auth(routes.AuthOptional),
 		routes.Use(h.optionalBearer),
 	)

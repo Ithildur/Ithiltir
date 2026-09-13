@@ -55,7 +55,7 @@ func (h *handler) metricsRoute(r *routes.Blueprint) {
 	r.Post(
 		"/metrics",
 		"Push node metrics",
-		routes.Func(h.metricsHandler),
+		h.metricsHandler,
 		routes.Tags("node"),
 	)
 }

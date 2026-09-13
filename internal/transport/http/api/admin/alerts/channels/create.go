@@ -27,7 +27,7 @@ func createRoute(r *routes.Blueprint, h *handler) {
 	r.Post(
 		"/",
 		"Create alert channel",
-		routes.Func(h.createHandler),
+		h.createHandler,
 		routes.Use(middleware.RequireJSONBody),
 	)
 }

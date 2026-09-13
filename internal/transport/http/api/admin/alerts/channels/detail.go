@@ -20,7 +20,7 @@ func detailRoute(r *routes.Blueprint, h *handler) {
 	r.Get(
 		"/{id}",
 		"Get alert channel",
-		routes.Func(h.detailHandler),
+		h.detailHandler,
 	)
 }
 

@@ -5,6 +5,7 @@ This document defines the current HTTP contract.
 ## Basics
 
 - API base path: `/api`
+- JSON request field names are case-sensitive. Unknown fields are ignored unless an endpoint specifies otherwise. Duplicate object keys and invalid UTF-8 are rejected as invalid JSON. Ordinary nil response collections serialize as empty arrays or objects; optional empty collections may be omitted. Clients must parse JSON responses without relying on whitespace, object key order, or HTML character escaping.
 - Dash is served from root paths only. Path prefixes in `app.public_url` are not supported.
 - `app.public_url` accepts HTTP and HTTPS and requires an IP literal or ASCII DNS hostname with an optional port from 1 through 65535. Internationalized domains must use IDNA/punycode form. Bare IP addresses default to HTTP; bare domain names default to HTTPS.
 - JSON error format:

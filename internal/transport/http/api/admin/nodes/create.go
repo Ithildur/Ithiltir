@@ -15,7 +15,7 @@ func createRoute(r *routes.Blueprint, h *handler) {
 	r.Post(
 		"/",
 		"Create node",
-		routes.Func(h.createHandler),
+		h.createHandler,
 	)
 }
 

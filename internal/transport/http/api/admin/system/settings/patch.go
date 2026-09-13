@@ -15,7 +15,7 @@ func patchRoute(r *routes.Blueprint, h *handler) {
 	r.Patch(
 		"/",
 		"Patch system settings",
-		routes.Func(h.patchHandler),
+		h.patchHandler,
 		routes.Use(middleware.RequireJSONBody),
 	)
 }

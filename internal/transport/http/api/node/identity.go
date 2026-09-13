@@ -18,7 +18,7 @@ func (h *handler) identityRoute(r *routes.Blueprint) {
 	r.Post(
 		"/identity",
 		"Get node server identity",
-		routes.Func(h.identityHandler),
+		h.identityHandler,
 		routes.Tags("node"),
 	)
 }

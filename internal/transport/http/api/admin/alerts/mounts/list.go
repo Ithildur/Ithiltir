@@ -32,7 +32,7 @@ type nodeView struct {
 	ID       int64       `json:"id"`
 	Name     string      `json:"name"`
 	Hostname string      `json:"hostname"`
-	IP       *string     `json:"ip,omitempty"`
+	IP       *string     `json:"ip,omitzero"`
 	GroupIDs []int64     `json:"group_ids"`
 	Mounts   []mountView `json:"mounts"`
 }
@@ -46,7 +46,7 @@ func listRoute(r *routes.Blueprint, h *handler) {
 	r.Get(
 		"/",
 		"List alert rule mounts",
-		routes.Func(h.listHandler),
+		h.listHandler,
 	)
 }
 

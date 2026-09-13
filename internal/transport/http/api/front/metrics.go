@@ -59,7 +59,7 @@ func (h *handler) metricsRoute(r *routes.Blueprint) {
 	r.Get(
 		"/metrics",
 		"List front metrics",
-		routes.Func(h.metricsHandler),
+		h.metricsHandler,
 		routes.Tags("front"),
 		routes.Auth(routes.AuthOptional),
 		routes.Use(h.optionalBearer),

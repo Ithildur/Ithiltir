@@ -34,25 +34,25 @@ type eventView struct {
 	ServerID           int64    `json:"server_id"`
 	ServerName         string   `json:"server_name"`
 	ServerHostname     string   `json:"server_hostname"`
-	ServerIP           *string  `json:"server_ip,omitempty"`
+	ServerIP           *string  `json:"server_ip,omitzero"`
 	Status             string   `json:"status"`
 	Metric             string   `json:"metric"`
 	RuleName           string   `json:"rule_name"`
 	FirstTriggerAt     string   `json:"first_trigger_at"`
 	LastTriggerAt      string   `json:"last_trigger_at"`
-	ClosedAt           *string  `json:"closed_at,omitempty"`
-	CurrentValue       *float64 `json:"current_value,omitempty"`
-	EffectiveThreshold *float64 `json:"effective_threshold,omitempty"`
-	CloseReason        *string  `json:"close_reason,omitempty"`
-	Title              *string  `json:"title,omitempty"`
-	Message            *string  `json:"message,omitempty"`
+	ClosedAt           *string  `json:"closed_at,omitzero"`
+	CurrentValue       *float64 `json:"current_value,omitzero"`
+	EffectiveThreshold *float64 `json:"effective_threshold,omitzero"`
+	CloseReason        *string  `json:"close_reason,omitzero"`
+	Title              *string  `json:"title,omitzero"`
+	Message            *string  `json:"message,omitzero"`
 }
 
 func listRoute(r *routes.Blueprint, h *handler) {
 	r.Get(
 		"/",
 		"List alert events",
-		routes.Func(h.listHandler),
+		h.listHandler,
 	)
 }
 

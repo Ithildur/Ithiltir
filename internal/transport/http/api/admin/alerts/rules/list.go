@@ -31,7 +31,7 @@ func listRoute(r *routes.Blueprint, h *handler) {
 	r.Get(
 		"/",
 		"List alert rules",
-		routes.Func(h.listHandler),
+		h.listHandler,
 	)
 }
 

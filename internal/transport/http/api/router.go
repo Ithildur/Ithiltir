@@ -38,12 +38,7 @@ type Dependencies struct {
 	DashUpdate     *updater.Runner
 }
 
-const (
-	passwordOnlyAuthUserID = "dash-admin"
-
-	// AuthRequirement is export metadata only. /api/node validates X-Node-Secret in handlers.
-	nodeSecretAuth routes.AuthRequirement = "node-secret"
-)
+const passwordOnlyAuthUserID = "dash-admin"
 
 type routeSetup struct {
 	authHandler      *authhttp.Handler
@@ -112,7 +107,8 @@ func buildRoutes(cfg *config.Config, deps Dependencies, setup routeSetup) *route
 	r.Add(setup.authHandler.Routes()...)
 	r.Include("/version", versionapi.Router())
 	r.Include("/admin", adminapi.Router(deps.Stores, cfg, deps.Theme, deps.TrafficRebuild, deps.DashUpdate), routes.IncludeAuth(routes.AuthRequired), routes.IncludeMiddleware(setup.bearer))
-	r.Include("/node", nodeapi.Router(deps.Stores, setup.serverID, setup.staleAfterSec, setup.trustedProxies), routes.IncludeAuth(nodeSecretAuth))
+	// Node handlers authenticate X-Node-Secret independently of bearer sessions.
+	r.Include("/node", nodeapi.Router(deps.Stores, setup.serverID, setup.staleAfterSec, setup.trustedProxies))
 	r.Include("/front", frontapi.Router(deps.Stores, setup.offlineThreshold, setup.optionalBearer))
 	r.Include("/metrics", metricsapi.Router(deps.Stores, setup.optionalBearer))
 	r.Include("/statistics", statisticsapi.Router(deps.Stores, cfg.App.EffectiveLocation(), setup.bearer, setup.optionalBearer))

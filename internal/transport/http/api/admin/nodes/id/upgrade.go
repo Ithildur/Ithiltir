@@ -25,7 +25,7 @@ func upgradeRoute(r *routes.Blueprint, h *handler) {
 	r.Post(
 		"/upgrade",
 		"Upgrade node agent",
-		routes.Func(h.upgradeHandler),
+		h.upgradeHandler,
 	)
 }
 

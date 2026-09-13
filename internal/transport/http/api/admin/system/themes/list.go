@@ -14,7 +14,7 @@ func listRoute(r *routes.Blueprint, h *handler) {
 	r.Get(
 		"/",
 		"List installed theme packages",
-		routes.Func(h.listHandler),
+		h.listHandler,
 	)
 }
 

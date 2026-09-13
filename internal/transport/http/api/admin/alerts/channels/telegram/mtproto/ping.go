@@ -26,7 +26,7 @@ func pingRoute(r *routes.Blueprint, h *handler) {
 	r.Post(
 		"/ping",
 		"Ping MTProto session",
-		routes.Func(h.pingHandler),
+		h.pingHandler,
 	)
 }
 

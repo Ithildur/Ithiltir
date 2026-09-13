@@ -72,7 +72,7 @@ type DiskMetrics struct {
 type DiskSmart struct {
 	Status     string            `json:"status"`
 	UpdatedAt  *time.Time        `json:"updated_at,omitempty"`
-	TTLSeconds int               `json:"ttl_seconds,omitempty"`
+	TTLSeconds int               `json:"ttl_seconds,omitzero"`
 	Devices    []DiskSmartDevice `json:"devices"`
 }
 
@@ -87,18 +87,18 @@ type DiskSmartDevice struct {
 	WWN                 string          `json:"wwn,omitempty"`
 	Source              string          `json:"source"`
 	Status              string          `json:"status"`
-	ExitStatus          *int            `json:"exit_status,omitempty"`
-	Health              *string         `json:"health,omitempty"`
-	TempC               *float64        `json:"temp_c,omitempty"`
-	PowerOnHours        *uint64         `json:"power_on_hours,omitempty"`
-	LifetimeUsedPercent *float64        `json:"lifetime_used_percent,omitempty"`
-	CriticalWarning     *uint64         `json:"critical_warning,omitempty"`
-	MediaErrors         *uint64         `json:"media_errors,omitempty"`
+	ExitStatus          *int            `json:"exit_status,omitzero"`
+	Health              *string         `json:"health,omitzero"`
+	TempC               *float64        `json:"temp_c,omitzero"`
+	PowerOnHours        *uint64         `json:"power_on_hours,omitzero"`
+	LifetimeUsedPercent *float64        `json:"lifetime_used_percent,omitzero"`
+	CriticalWarning     *uint64         `json:"critical_warning,omitzero"`
+	MediaErrors         *uint64         `json:"media_errors,omitzero"`
 	FailingAttrs        []DiskSmartAttr `json:"failing_attrs,omitempty"`
 }
 
 type DiskSmartAttr struct {
-	ID         int    `json:"id,omitempty"`
+	ID         int    `json:"id,omitzero"`
 	Name       string `json:"name"`
 	WhenFailed string `json:"when_failed"`
 }
@@ -254,20 +254,20 @@ type ThermalSensor struct {
 	SensorKey string   `json:"sensor_key"`
 	Source    string   `json:"source"`
 	Status    string   `json:"status"`
-	TempC     *float64 `json:"temp_c,omitempty"`
-	HighC     *float64 `json:"high_c,omitempty"`
-	CriticalC *float64 `json:"critical_c,omitempty"`
+	TempC     *float64 `json:"temp_c,omitzero"`
+	HighC     *float64 `json:"high_c,omitzero"`
+	CriticalC *float64 `json:"critical_c,omitzero"`
 }
 
 type Pressure struct {
-	CPU    *PressureResource `json:"cpu,omitempty"`
-	Memory *PressureResource `json:"memory,omitempty"`
-	IO     *PressureResource `json:"io,omitempty"`
+	CPU    *PressureResource `json:"cpu,omitzero"`
+	Memory *PressureResource `json:"memory,omitzero"`
+	IO     *PressureResource `json:"io,omitzero"`
 }
 
 type PressureResource struct {
-	Some *PressureStats `json:"some,omitempty"`
-	Full *PressureStats `json:"full,omitempty"`
+	Some *PressureStats `json:"some,omitzero"`
+	Full *PressureStats `json:"full,omitzero"`
 }
 
 type PressureStats struct {

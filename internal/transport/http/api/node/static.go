@@ -20,7 +20,7 @@ func (h *handler) staticRoute(r *routes.Blueprint) {
 	r.Post(
 		"/static",
 		"Push node static metrics",
-		routes.Func(h.staticHandler),
+		h.staticHandler,
 		routes.Tags("node"),
 	)
 }

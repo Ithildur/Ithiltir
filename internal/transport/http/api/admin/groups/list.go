@@ -15,7 +15,7 @@ func listRoute(r *routes.Blueprint, h *handler) {
 	r.Get(
 		"/",
 		"List groups",
-		routes.Func(h.listHandler),
+		h.listHandler,
 	)
 }
 

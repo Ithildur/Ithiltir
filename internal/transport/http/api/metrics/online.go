@@ -38,7 +38,7 @@ func (h *handler) onlineRoute(r *routes.Blueprint) {
 	r.Get(
 		"/online",
 		"Fetch metrics online status",
-		routes.Func(h.onlineHandler),
+		h.onlineHandler,
 		routes.Tags("metrics"),
 		routes.Auth(routes.AuthOptional),
 		routes.Use(h.optionalBearer),

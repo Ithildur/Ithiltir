@@ -17,7 +17,7 @@ func deleteRoute(r *routes.Blueprint, h *handler) {
 	r.Delete(
 		"/{id}",
 		"Delete alert rule",
-		routes.Func(h.deleteHandler),
+		h.deleteHandler,
 	)
 }
 

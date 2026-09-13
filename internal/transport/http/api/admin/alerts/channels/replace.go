@@ -30,7 +30,7 @@ func replaceRoute(r *routes.Blueprint, h *handler) {
 	r.Put(
 		"/{id}",
 		"Replace alert channel",
-		routes.Func(h.replaceHandler),
+		h.replaceHandler,
 		routes.Use(middleware.RequireJSONBody),
 	)
 }

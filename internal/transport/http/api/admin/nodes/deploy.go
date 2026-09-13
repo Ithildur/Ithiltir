@@ -26,7 +26,7 @@ func deployRoute(r *routes.Blueprint, h *handler) {
 	r.Get(
 		"/deploy",
 		"Get deploy script info",
-		routes.Func(h.deployHandler),
+		h.deployHandler,
 	)
 }
 

@@ -30,7 +30,7 @@ func (h *handler) dailyRoute(r *routes.Blueprint) {
 	r.Get(
 		"/daily",
 		"List daily traffic summaries",
-		routes.Func(h.dailyHandler),
+		h.dailyHandler,
 		routes.Auth(routes.AuthOptional),
 		routes.Use(h.optionalBearer),
 	)
