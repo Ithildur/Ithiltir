@@ -19,6 +19,7 @@ import SettingRow, {
 import DashUpdateSettings from '@components/admin/systemManager/DashUpdateSettings';
 import ThemeManager from '@components/admin/systemManager/ThemeManager';
 import TrafficSettings from '@components/admin/systemManager/TrafficSettings';
+import UptimeSettings from '@components/admin/systemManager/UptimeSettings';
 import type {
   DashUpdateChannel,
   DashUpdateMode,
@@ -420,6 +421,13 @@ const SystemSettings: React.FC = () => {
           </SettingPanel>
 
           <TrafficSettings />
+          <UptimeSettings
+            settings={settings}
+            loading={loadingSettings}
+            onSaved={(fields) =>
+              setSettings((current) => (current ? { ...current, ...fields } : current))
+            }
+          />
         </div>
       )}
 

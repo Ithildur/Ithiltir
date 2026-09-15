@@ -35,12 +35,24 @@ export const ratioToPercent = (value: number | null | undefined): number => {
 export const normalizeNodeViews = (nodes: NodeView[]): NodeView[] =>
   Array.isArray(nodes) ? [...nodes] : [];
 
+export interface UptimeHistory {
+  days: Array<{
+    date: string;
+    percent: number | null;
+    // Hour-indexed observations; null or missing means unknown, including future hours.
+    hours?: Array<number | null>;
+  }>;
+  warningSLA: number;
+  errorSLA: number;
+}
+
 export interface ServerViewModel {
   id: string;
   hostname: string;
   searchText: string;
   tags: string[];
   uptime: string;
+  uptimeHistory?: UptimeHistory;
   isAlive: boolean;
 
   system: {

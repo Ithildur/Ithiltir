@@ -12,7 +12,7 @@ interface NetworkRowFullProps {
 }
 
 const NetworkRowFull: React.FC<NetworkRowFullProps> = ({ label, up, down, isTotal }) => (
-  <div className="flex items-center justify-between bg-(--theme-bg-default) dark:bg-(--theme-bg-default) px-3 py-1.5 rounded-lg border border-(--theme-border-muted) dark:border-(--theme-border-default) w-full">
+  <div className="flex items-center justify-between bg-(--theme-bg-default) dark:bg-(--theme-bg-default) px-3 py-1 rounded-lg border border-(--theme-border-muted) dark:border-(--theme-border-default) w-full">
     <div className="flex items-center gap-2">
       <span
         className={`p-1 rounded bg-(--theme-bg-interactive-muted) dark:bg-(--theme-canvas-muted)/70 ${isTotal ? 'text-(--theme-fg-info)' : 'text-(--theme-fg-interactive)'}`}

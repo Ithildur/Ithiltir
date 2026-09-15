@@ -59,6 +59,9 @@ export type DashUpdateChannel = 'release' | 'prerelease';
 export type DashUpdateMode = 'manual' | 'notify' | 'auto';
 
 export interface SystemSettings extends SiteBrand {
+  uptime_guest_visible: boolean;
+  uptime_warning_sla: number;
+  uptime_error_sla: number;
   history_guest_access_mode: HistoryGuestAccessMode;
   dash_update_channel: DashUpdateChannel;
   dash_update_mode: DashUpdateMode;
