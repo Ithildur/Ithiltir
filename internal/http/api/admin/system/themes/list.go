@@ -16,6 +16,11 @@ func listRoute(r *routes.Blueprint, h *handler) {
 		"List installed theme packages",
 		h.listHandler,
 	)
+	r.Get(
+		"",
+		"List installed theme packages",
+		h.listHandler,
+	)
 }
 
 func (h *handler) listHandler(w http.ResponseWriter, r *http.Request) {

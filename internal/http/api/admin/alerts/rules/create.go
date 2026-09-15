@@ -31,6 +31,12 @@ func createRoute(r *routes.Blueprint, h *handler) {
 		h.createHandler,
 		routes.Use(middleware.RequireJSONBody),
 	)
+	r.Post(
+		"",
+		"Create alert rule",
+		h.createHandler,
+		routes.Use(middleware.RequireJSONBody),
+	)
 }
 
 func (h *handler) createHandler(w http.ResponseWriter, r *http.Request) {

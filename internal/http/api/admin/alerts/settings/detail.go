@@ -26,6 +26,11 @@ func detailRoute(r *routes.Blueprint, h *handler) {
 		"Get alert settings",
 		h.detailHandler,
 	)
+	r.Get(
+		"",
+		"Get alert settings",
+		h.detailHandler,
+	)
 }
 
 func (h *handler) detailHandler(w http.ResponseWriter, r *http.Request) {

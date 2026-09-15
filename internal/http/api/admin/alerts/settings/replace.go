@@ -25,6 +25,12 @@ func replaceRoute(r *routes.Blueprint, h *handler) {
 		h.replaceHandler,
 		routes.Use(middleware.RequireJSONBody),
 	)
+	r.Put(
+		"",
+		"Replace alert settings",
+		h.replaceHandler,
+		routes.Use(middleware.RequireJSONBody),
+	)
 }
 
 func (h *handler) replaceHandler(w http.ResponseWriter, r *http.Request) {

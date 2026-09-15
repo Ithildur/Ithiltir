@@ -20,6 +20,12 @@ func detailRoute(r *routes.Blueprint) {
 		detailHandler,
 		routes.Tags("version"),
 	)
+	r.Get(
+		"",
+		"Get bundled versions",
+		detailHandler,
+		routes.Tags("version"),
+	)
 }
 
 func detailHandler(w http.ResponseWriter, _ *http.Request) {

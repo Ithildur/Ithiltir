@@ -19,6 +19,12 @@ Ithiltir Dash 是单实例应用。根入口只启动一个 HTTP 进程，该进
 
 ## HTTP 面
 
+各路由模块返回 EiluneKit Blueprint，只汇总直属子模块。HTTP 根入口组合 API、主题和各平台安装脚本路由，再通过 `routes.NewHandler` 构造唯一 handler。应用不直接向 chi 注册路由；构造结果由 `http.Server` 在服务生命周期内持有。
+
+请求 ID、安全响应头、访问日志、panic 恢复，以及 API 和方法边界通过 `HandlerOptions.Middleware` 执行，覆盖路由匹配失败的请求。应用决定 `/api` 范围及其缓存和请求体限制策略。已实现的方法由最终路由表和静态回退的 GET/HEAD 组成；方法检查区分大小写，服务未实现的方法在路由前返回 501。对于已实现但端点不允许的方法，Kit 在调用应用的 405 handler 前设置 `Allow`。API 错误使用 JSON，非 API 的 405 使用空响应体。响应头发送前的 panic 保持空响应体的 500，响应开始后的 panic 中止请求。
+
+安装脚本声明为明确的 GET/HEAD 路由。未匹配的 `/deploy/...` 路径交给带鉴权的文件 handler。其余非 API 路径通过 not-found 回调交给 SPA 文件 handler。方法错误不会重新进入这些回退。这些回退不注册为通配路由。SPA 历史路由仅在文件不存在时回退；文件系统权限及 I/O 错误保留文件服务错误响应。
+
 | 前缀              | 作用                                 |
 | ----------------- | ------------------------------------ |
 | `/api/auth`       | 登录、续期、登出、会话撤销           |
@@ -94,7 +100,7 @@ Ithiltir Dash 是单实例应用。根入口只启动一个 HTTP 进程，该进
 
 ## 目录
 
-`cmd/dash` 通过 `internal/http` 构造 HTTP 服务。HTTP 根路由统一挂载 API、主题和静态资源；API 父模块只挂载直属子模块。MTProto 登录状态的序列化和过期由 `store/mtlogin` 负责，渠道版本检查和会话持久化由 `store/alert` 负责。
+`cmd/dash` 通过 `internal/http` 构造 HTTP 服务。HTTP 根入口组合 API、主题和安装脚本 Blueprint，并提供静态文件回退 handler；路由父模块只汇总直属子模块。MTProto 登录状态的序列化和过期由 `store/mtlogin` 负责，渠道版本检查和会话持久化由 `store/alert` 负责。
 
 | 路径                          | 内容                                     |
 | ----------------------------- | ---------------------------------------- |
@@ -102,6 +108,7 @@ Ithiltir Dash 是单实例应用。根入口只启动一个 HTTP 进程，该进
 | `internal/config`             | 配置加载、默认值、校验和运行目录         |
 | `internal/http`               | HTTP 服务、静态资源、主题资源和 API 挂载 |
 | `internal/http/api`           | `/api` 路由树                            |
+| `internal/http/deploy`        | 各平台安装脚本路由树                    |
 | `internal/store`              | 持久化和缓存访问层                       |
 | `internal/model`              | 同包内按领域分文件的数据库模型           |
 | `internal/alert`              | 告警编译、运行时和发送编排               |

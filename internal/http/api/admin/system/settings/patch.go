@@ -18,6 +18,12 @@ func patchRoute(r *routes.Blueprint, h *handler) {
 		h.patchHandler,
 		routes.Use(middleware.RequireJSONBody),
 	)
+	r.Patch(
+		"",
+		"Patch system settings",
+		h.patchHandler,
+		routes.Use(middleware.RequireJSONBody),
+	)
 }
 
 func (h *handler) patchHandler(w http.ResponseWriter, r *http.Request) {

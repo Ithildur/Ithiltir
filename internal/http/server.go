@@ -4,25 +4,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log/slog"
 	"net/http"
-	"net/netip"
 	"strings"
 	"time"
 
 	"dash/internal/config"
-	"dash/internal/infra"
-	"github.com/Ithildur/EiluneKit/clientip"
-	httpmiddleware "github.com/Ithildur/EiluneKit/http/middleware"
-
-	"github.com/go-chi/chi/v5"
-	"github.com/go-chi/chi/v5/middleware"
 )
 
 type HTTPServer struct {
-	cfg    *config.Config
-	deps   Dependencies
-	router chi.Router
 	server *http.Server
 }
 
@@ -30,29 +19,15 @@ func NewHTTPServer(cfg *config.Config, deps Dependencies) (*HTTPServer, error) {
 	if cfg == nil {
 		return nil, fmt.Errorf("http server config is nil")
 	}
-	router := chi.NewRouter()
-	router.Use(middleware.RequestID)
-	router.Use(securityHeaders)
-	router.Use(httpmiddleware.AccessLog(httpmiddleware.AccessLogOptions{
-		Disabled: !infra.DebugEnabled(),
-		Logger:   infra.SlogWithModule("http"),
-		MinLevel: slog.LevelDebug,
-		ClientIP: clientip.Options{
-			TrustedProxies: append([]netip.Prefix(nil), cfg.HTTP.TrustedProxyPrefixes...),
-		},
-		Skip: func(r *http.Request, status int) bool {
-			return isProductionEnv(cfg.App.Env) && status == http.StatusNotFound
-		},
-	}))
-	router.Use(middleware.Recoverer)
+	handler, err := newHandler(cfg, deps)
+	if err != nil {
+		return nil, err
+	}
 
 	s := &HTTPServer{
-		cfg:    cfg,
-		deps:   deps,
-		router: router,
 		server: &http.Server{
 			Addr:              cfg.App.Listen,
-			Handler:           router,
+			Handler:           handler,
 			ReadHeaderTimeout: config.HTTPReadHeaderTimeout,
 			ReadTimeout:       config.HTTPReadTimeout,
 			WriteTimeout:      config.HTTPWriteTimeout,
@@ -61,9 +36,6 @@ func NewHTTPServer(cfg *config.Config, deps Dependencies) (*HTTPServer, error) {
 		},
 	}
 
-	if err := s.registerRoutes(); err != nil {
-		return nil, err
-	}
 	return s, nil
 }
 

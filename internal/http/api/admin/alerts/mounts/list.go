@@ -48,6 +48,11 @@ func listRoute(r *routes.Blueprint, h *handler) {
 		"List alert rule mounts",
 		h.listHandler,
 	)
+	r.Get(
+		"",
+		"List alert rule mounts",
+		h.listHandler,
+	)
 }
 
 func (h *handler) listHandler(w http.ResponseWriter, r *http.Request) {

@@ -21,6 +21,11 @@ func deleteRoute(r *routes.Blueprint, h *handler) {
 		"Delete node",
 		h.deleteHandler,
 	)
+	r.Delete(
+		"",
+		"Delete node",
+		h.deleteHandler,
+	)
 }
 
 func (h *handler) deleteHandler(w http.ResponseWriter, r *http.Request, rawID string) {

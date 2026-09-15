@@ -23,10 +23,7 @@ import (
 	trafficjob "dash/internal/traffic"
 	authhttp "github.com/Ithildur/EiluneKit/auth/http"
 	authjwt "github.com/Ithildur/EiluneKit/auth/jwt"
-	kitmw "github.com/Ithildur/EiluneKit/http/middleware"
 	"github.com/Ithildur/EiluneKit/http/routes"
-
-	"github.com/go-chi/chi/v5"
 )
 
 // Dependencies holds shared dependencies for HTTP handlers.
@@ -115,24 +112,13 @@ func buildRoutes(cfg *config.Config, deps Dependencies, setup routeSetup) *route
 	return r
 }
 
-// Register mounts /api routes onto router.
-func Register(router chi.Router, cfg *config.Config, deps Dependencies) error {
+// Router returns API routes for the parent to mount.
+func Router(cfg *config.Config, deps Dependencies) (*routes.Blueprint, error) {
 	setup, err := prepareRoutes(cfg, deps)
 	if err != nil {
-		return err
+		return nil, err
 	}
-
-	blueprint := buildRoutes(cfg, deps, setup)
-
-	var mountErr error
-	router.Route("/api", func(r chi.Router) {
-		r.Use(apiBoundary)
-		r.MethodNotAllowed(kitmw.MethodNotAllowedResponder(r))
-		if err := blueprint.Mount(r); err != nil && mountErr == nil {
-			mountErr = err
-		}
-	})
-	return mountErr
+	return buildRoutes(cfg, deps, setup), nil
 }
 
 func newAuthHandler(password string, auth authhttp.TokenManager, trustedProxies []netip.Prefix) (*authhttp.Handler, error) {
@@ -146,7 +132,7 @@ func newAuthHandler(password string, auth authhttp.TokenManager, trustedProxies 
 
 	return authapi.NewHandler(auth, authhttp.Options{
 		LoginAuthenticator: authenticator,
-		BasePath:           "/auth",
+		BasePath:           new("/auth"),
 		RefreshCookiePath:  "/api/auth",
 		CookieSameSite:     http.SameSiteStrictMode,
 		TrustedProxies:     trustedProxies,

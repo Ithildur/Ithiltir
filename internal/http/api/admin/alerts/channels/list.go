@@ -17,6 +17,11 @@ func listRoute(r *routes.Blueprint, h *handler) {
 		"List alert channels",
 		h.listHandler,
 	)
+	r.Get(
+		"",
+		"List alert channels",
+		h.listHandler,
+	)
 }
 
 func (h *handler) listHandler(w http.ResponseWriter, r *http.Request) {

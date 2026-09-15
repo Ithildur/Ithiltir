@@ -19,6 +19,12 @@ Ithiltir Dash is a single-instance application. The root entry point starts one 
 
 ## HTTP Surface
 
+Each route module returns an EiluneKit Blueprint and includes only its immediate children. The HTTP root combines the API, theme, and platform install-script routes, then constructs one handler with `routes.NewHandler`. The application does not register routes directly on chi; the resulting handler belongs to `http.Server` for the server lifetime.
+
+Request ID, security headers, access logging, panic recovery, and the API and method boundaries run through `HandlerOptions.Middleware`, including on routing failures. The application selects the `/api` scope and its cache and body-limit policies. Implemented methods come from the final route table plus GET/HEAD for static fallbacks. A case-sensitive method check returns 501 before routing when the service does not implement the method. For implemented methods disallowed by an endpoint, Kit sets `Allow` before invoking the application's 405 handler. API failures use JSON; non-API 405 responses have an empty body. Recovery before response headers preserves an empty 500 response; a panic after the response starts aborts the request.
+
+Install scripts are explicit GET/HEAD routes. Unmatched `/deploy/...` paths use the authenticated file handler. Other non-API paths use the SPA file handler through the not-found callback. Method failures never re-enter these fallbacks. These fallbacks are not wildcard routes. SPA history fallback applies to missing files only; filesystem permission and I/O failures retain file-server errors.
+
 | Prefix            | Role                                                    |
 | ----------------- | ------------------------------------------------------- |
 | `/api/auth`       | login, refresh, logout, session revoke                  |
@@ -94,7 +100,7 @@ The frontend can run as a standalone dev server, but the runtime boundary stays 
 
 ## Repository Layout
 
-`cmd/dash` constructs the HTTP server through `internal/http`. Its root router mounts the API, theme, and static routes; API parents mount their direct child modules. MTProto login state serialization and expiry belong to `store/mtlogin`, and channel revision checks and session persistence belong to `store/alert`.
+`cmd/dash` constructs the HTTP server through `internal/http`. The HTTP root combines API, theme, and install-script Blueprints and supplies static-file fallback handlers. Route parents include their direct child modules. MTProto login state serialization and expiry belong to `store/mtlogin`, and channel revision checks and session persistence belong to `store/alert`.
 
 | Path                          | Contents                                                      |
 | ----------------------------- | ------------------------------------------------------------- |
@@ -102,6 +108,7 @@ The frontend can run as a standalone dev server, but the runtime boundary stays 
 | `internal/config`             | config loading, defaults, validation, and runtime directories |
 | `internal/http`               | HTTP server, static assets, theme assets, and API mounting    |
 | `internal/http/api`           | `/api` route tree                                             |
+| `internal/http/deploy`        | platform install-script route tree                            |
 | `internal/store`              | persistence and cache access layer                            |
 | `internal/model`              | database models organized by domain within one package        |
 | `internal/alert`              | alert compilation, runtime, and delivery orchestration        |

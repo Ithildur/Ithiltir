@@ -45,6 +45,12 @@ func updateRoute(r *routes.Blueprint, h *handler) {
 		h.updateHandler,
 		routes.Use(middleware.RequireJSONBody),
 	)
+	r.Patch(
+		"",
+		"Update node",
+		h.updateHandler,
+		routes.Use(middleware.RequireJSONBody),
+	)
 }
 
 func (h *handler) updateHandler(w http.ResponseWriter, r *http.Request, rawID string) {

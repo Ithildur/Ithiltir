@@ -11,27 +11,24 @@ import (
 	nodestore "dash/internal/store/node"
 	kitstatic "github.com/Ithildur/EiluneKit/http/static"
 
-	"github.com/go-chi/chi/v5"
 	"gorm.io/gorm"
 )
 
-func registerStaticRoutes(router chi.Router, cfg *config.Config, node *nodestore.Store) (http.Handler, error) {
+func staticFallback(cfg *config.Config, node *nodestore.Store) (fallback, error) {
 	opts := kitstatic.Options{
 		AppDir:      config.DefaultAppDirOptions(),
 		Development: !isProductionEnv(cfg.App.Env),
 	}
 
-	registerInstallScriptRoutes(router, cfg)
-	if err := mountDeployRoute(router, node, opts); err != nil {
-		return nil, err
+	download, err := deployHandler(node, opts)
+	if err != nil {
+		return fallback{}, err
 	}
 	spa, err := kitstatic.SPAHandler("dist", opts)
 	if err != nil {
-		return nil, err
+		return fallback{}, err
 	}
-	spa = noStoreThemeBootstrap(spa)
-	router.Handle("/*", spa)
-	return spa, nil
+	return fallback{page: noStoreThemeBootstrap(spa), deploy: download}, nil
 }
 
 func noStoreThemeBootstrap(next http.Handler) http.Handler {
@@ -43,14 +40,8 @@ func noStoreThemeBootstrap(next http.Handler) http.Handler {
 	})
 }
 
-func registerInstallScriptRoutes(router chi.Router, cfg *config.Config) {
-	mountInstallScriptRoute(router, cfg, "/deploy/linux/install.sh", "linux", "text/x-shellscript; charset=utf-8")
-	mountInstallScriptRoute(router, cfg, "/deploy/macos/install.sh", "macos", "text/x-shellscript; charset=utf-8")
-	mountInstallScriptRoute(router, cfg, "/deploy/windows/install.ps1", "windows", "text/plain; charset=utf-8")
-}
-
-func mountInstallScriptRoute(router chi.Router, cfg *config.Config, routePath, platform, contentType string) {
-	handler := func(w http.ResponseWriter, r *http.Request) {
+func installScriptHandler(cfg *config.Config, platform, contentType string) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		script, err := renderInstallScript(cfg, platform)
 		if err != nil {
 			http.Error(w, "render install script failed", http.StatusInternalServerError)
@@ -58,21 +49,16 @@ func mountInstallScriptRoute(router chi.Router, cfg *config.Config, routePath, p
 		}
 		w.Header().Set("Content-Type", contentType)
 		_, _ = w.Write(script)
-	}
-
-	router.Get(routePath, handler)
-	router.Head(routePath, handler)
+	})
 }
 
-func mountDeployRoute(router chi.Router, node *nodestore.Store, opts kitstatic.Options) error {
+func deployHandler(node *nodestore.Store, opts kitstatic.Options) (http.Handler, error) {
 	dir, err := kitstatic.ResolveDir("deploy", opts)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
-	handler := requireDeployAccess(node, http.StripPrefix("/deploy", http.FileServer(http.Dir(dir))))
-	router.Handle("/deploy/*", handler)
-	return nil
+	return requireDeployAccess(node, http.StripPrefix("/deploy", http.FileServer(http.Dir(dir)))), nil
 }
 
 func requireDeployAccess(node *nodestore.Store, next http.Handler) http.Handler {

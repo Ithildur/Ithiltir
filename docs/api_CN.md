@@ -4,6 +4,12 @@
 
 ## 基础
 
+- `/api/version` 和 `/api/admin` 下在命名空间表中写作 `GET /`、`POST /`、`PUT /` 或 `PATCH /` 的模块根操作，同时接受命名空间路径及其带尾斜线形式，不发生重定向。`PATCH` 和 `DELETE /api/admin/nodes/{id}` 也接受尾斜线。两种形式使用相同的鉴权和 handler；其他端点不会自动增加尾斜线别名。
+- `/api` 及 `/api/...` 的所有响应均使用 `Cache-Control: no-store`，包括鉴权和路由错误。API 请求体上限为 24 MiB，个别接口可以设置更小的上限。限制在读取请求体时生效；未读取的超大请求体不会将路由 404 或 405 改为 413。
+- 方法名区分大小写。服务实现 GET、HEAD、POST、PUT、PATCH 和 DELETE。其他方法，包括 OPTIONS、TRACE、CONNECT、`BREW` 和小写 `get`，在路由及文件回退前返回 501；API 响应使用 `not_implemented`，非 API 响应使用纯文本。这些响应不包含 `Allow`。
+- 对于已实现的方法，未知 API 路径返回 `404 not_found`；已有 API 端点不允许的方法返回 `405 method_not_allowed`，并通过 `Allow` 列出已注册方法。API 端点的 GET 不隐含 HEAD。安装脚本仅允许 GET 和 HEAD，其他已实现的方法返回 405 和 `Allow: GET, HEAD`，不进入下载鉴权或文件回退。
+- JSON 请求体端点要求合法的 `application/json` 媒体类型，允许 `charset=utf-8` 等合法参数；媒体类型参数格式错误时返回 `415 unsupported_media_type`。
+
 - API 基础路径：`/api`
 - JSON 请求字段名区分大小写；各接口未另行约束时，未知字段会被忽略。重复的对象键和无效 UTF-8 按无效 JSON 拒绝。未设置的普通响应集合序列化为空数组或空对象；可选的空集合可能省略。客户端解析 JSON 响应时，不得依赖空白字符、对象键顺序或 HTML 字符转义形式。
 - Dash 只支持根路径部署，不支持在 `app.public_url` 中配置路径前缀

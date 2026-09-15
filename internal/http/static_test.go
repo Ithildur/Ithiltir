@@ -2,6 +2,7 @@ package httpserver
 
 import (
 	"bytes"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -11,14 +12,15 @@ import (
 	"time"
 
 	"dash/internal/config"
+	"dash/internal/http/deploy"
 	"dash/internal/http/request"
 	"dash/internal/model"
 	"dash/internal/store/frontcache"
 	"dash/internal/store/frontprojection"
 	nodestore "dash/internal/store/node"
 	"github.com/Ithildur/EiluneKit/appdir"
+	"github.com/Ithildur/EiluneKit/http/routes"
 	kitstatic "github.com/Ithildur/EiluneKit/http/static"
-	"github.com/go-chi/chi/v5"
 )
 
 func TestDeployAssetRequiresNodeSecret(t *testing.T) {
@@ -45,8 +47,12 @@ func TestDeployAssetRequiresNodeSecret(t *testing.T) {
 		t.Fatalf("SyncServerCache() error = %v", err)
 	}
 
-	router := chi.NewRouter()
-	registerInstallScriptRoutes(router, cfg)
+	rootRoutes := routes.NewBlueprint()
+	rootRoutes.Include("/deploy", deploy.Router(
+		installScriptHandler(cfg, "linux", "text/x-shellscript; charset=utf-8"),
+		installScriptHandler(cfg, "macos", "text/x-shellscript; charset=utf-8"),
+		installScriptHandler(cfg, "windows", "text/plain; charset=utf-8"),
+	))
 	opts := kitstatic.Options{
 		AppDir: appdir.Options{
 			EnvVar:            "DASH_HOME",
@@ -55,8 +61,16 @@ func TestDeployAssetRequiresNodeSecret(t *testing.T) {
 			Sources:           appdir.SourceEnvVar,
 		},
 	}
-	if err := mountDeployRoute(router, st, opts); err != nil {
-		t.Fatalf("mountDeployRoute() error = %v", err)
+	download, err := deployHandler(st, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	routeList := rootRoutes.Routes()
+	router, err := routes.NewHandler(routeList, handlerOptions(cfg, fallback{
+		page: http.NotFoundHandler(), deploy: download,
+	}, routeList))
+	if err != nil {
+		t.Fatal(err)
 	}
 
 	req := httptest.NewRequest(http.MethodGet, "/deploy/linux/install.sh", nil)
@@ -109,6 +123,43 @@ func TestDeployAssetRequiresNodeSecret(t *testing.T) {
 	router.ServeHTTP(rr, req)
 	if rr.Code != http.StatusUnauthorized {
 		t.Fatalf("grant token wrong path status = %d, want %d", rr.Code, http.StatusUnauthorized)
+	}
+
+	server := httptest.NewServer(router)
+	defer server.Close()
+	for _, transfer := range []struct {
+		method      string
+		rangeHeader string
+		status      int
+		body        string
+	}{
+		{http.MethodGet, "", 200, "node asset"},
+		{http.MethodHead, "", 200, ""},
+		{http.MethodGet, "bytes=0-3", 206, "node"},
+	} {
+		req, err := http.NewRequestWithContext(t.Context(), transfer.method, server.URL+"/deploy/linux/node_linux_amd64", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Header.Set(request.NodeSecretHeader, "node-secret")
+		if transfer.rangeHeader != "" {
+			req.Header.Set("Range", transfer.rangeHeader)
+		}
+		resp, err := server.Client().Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, readErr := io.ReadAll(resp.Body)
+		closeErr := resp.Body.Close()
+		if readErr != nil || closeErr != nil || resp.StatusCode != transfer.status || string(body) != transfer.body {
+			t.Fatalf("%s %s: status %d, body %q, read %v, close %v", transfer.method, transfer.rangeHeader, resp.StatusCode, body, readErr, closeErr)
+		}
+		if resp.Header.Get("Cache-Control") != "private, no-store" || resp.Header.Get("Vary") != request.NodeSecretHeader {
+			t.Fatalf("download cache policy = %v", resp.Header)
+		}
+		if transfer.rangeHeader != "" && resp.Header.Get("Content-Range") != "bytes 0-3/10" {
+			t.Fatalf("Content-Range = %q", resp.Header.Get("Content-Range"))
+		}
 	}
 }
 

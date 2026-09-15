@@ -54,6 +54,11 @@ func listRoute(r *routes.Blueprint, h *handler) {
 		"List alert events",
 		h.listHandler,
 	)
+	r.Get(
+		"",
+		"List alert events",
+		h.listHandler,
+	)
 }
 
 func (h *handler) listHandler(w http.ResponseWriter, r *http.Request) {

@@ -28,6 +28,12 @@ func replaceRoute(r *routes.Blueprint, h *handler) {
 		h.replaceHandler,
 		routes.Use(middleware.RequireJSONBody),
 	)
+	r.Put(
+		"",
+		"Set alert rule mounts",
+		h.replaceHandler,
+		routes.Use(middleware.RequireJSONBody),
+	)
 }
 
 var (

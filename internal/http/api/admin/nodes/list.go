@@ -44,6 +44,11 @@ func listRoute(r *routes.Blueprint, h *handler) {
 		"List nodes",
 		h.listHandler,
 	)
+	r.Get(
+		"",
+		"List nodes",
+		h.listHandler,
+	)
 }
 
 func (h *handler) listHandler(w http.ResponseWriter, r *http.Request) {

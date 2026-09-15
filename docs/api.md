@@ -4,6 +4,12 @@ This document defines the current HTTP contract.
 
 ## Basics
 
+- Module-root operations shown as `GET /`, `POST /`, `PUT /`, or `PATCH /` under `/api/version` and `/api/admin` accept both the namespace path and its trailing-slash form, without redirects. `PATCH` and `DELETE /api/admin/nodes/{id}` also accept a trailing slash. Both forms use the same authentication and handler; other endpoints do not gain a trailing-slash alias.
+- All `/api` and `/api/...` responses use `Cache-Control: no-store`, including authentication and routing errors. The API request body limit is 24 MiB; individual endpoints may impose a smaller limit. Limits apply when the body is read, so an unread oversized body does not replace a routing 404 or 405 with 413.
+- Method names are case-sensitive. The service implements GET, HEAD, POST, PUT, PATCH, and DELETE. Other methods, including OPTIONS, TRACE, CONNECT, `BREW`, and lowercase `get`, return 501 before routing or file fallback; API responses use `not_implemented`, and non-API responses use plain text. These responses do not include `Allow`.
+- For implemented methods, unknown API paths return `404 not_found`; methods disallowed by an existing API endpoint return `405 method_not_allowed` with an `Allow` header listing registered methods. GET does not imply HEAD for an API endpoint. Install scripts allow only GET and HEAD; other implemented methods return 405 with `Allow: GET, HEAD` without entering download authentication or file fallback.
+- JSON-body endpoints require a valid `application/json` media type. Valid parameters such as `charset=utf-8` are accepted; malformed media-type parameters return `415 unsupported_media_type`.
+
 - API base path: `/api`
 - JSON request field names are case-sensitive. Unknown fields are ignored unless an endpoint specifies otherwise. Duplicate object keys and invalid UTF-8 are rejected as invalid JSON. Ordinary nil response collections serialize as empty arrays or objects; optional empty collections may be omitted. Clients must parse JSON responses without relying on whitespace, object key order, or HTML character escaping.
 - Dash is served from root paths only. Path prefixes in `app.public_url` are not supported.
