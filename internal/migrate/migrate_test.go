@@ -5,11 +5,13 @@ import (
 	"encoding/json"
 	"errors"
 	"testing"
+	"time"
 
 	"dash/internal/migrate"
 	pgtest "dash/internal/testutil/postgres"
 
 	kitmigration "github.com/Ithildur/EiluneKit/postgres/migration"
+	"github.com/jackc/pgx/v5/pgconn"
 	"gorm.io/gorm"
 )
 
@@ -358,6 +360,80 @@ func TestIntegrationReleaseMigrationWidensNaturalObservationFields(t *testing.T)
 	}
 	if preserved != 3 {
 		t.Fatalf("preserved disk rows = %d, want 3", preserved)
+	}
+}
+
+func TestIntegrationNodeOnlineMigration(t *testing.T) {
+	ctx := t.Context()
+	db, keyPath := pgtest.NewDBAt(t, 13)
+	var serverID int64
+	if err := db.Raw(`
+		INSERT INTO servers (name, hostname, secret)
+		VALUES ('online-history', 'online-history', 'online-history-secret')
+		RETURNING id
+	`).Scan(&serverID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if _, err := kitmigration.Run(ctx, migrationConfig(t, db, keyPath)); err != nil {
+		t.Fatalf("upgrade online schema: %v", err)
+	}
+
+	minute := time.Now().UTC().Truncate(time.Minute)
+	if err := db.Exec(`
+		INSERT INTO node_online (server_id, minute, online)
+		VALUES (?, ?, TRUE), (?, ?, FALSE), (?, ?, TRUE), (?, ?, FALSE)
+	`, serverID, minute, serverID, minute.Add(-time.Minute), serverID, minute.Add(-45*24*time.Hour), serverID, minute.Add(-48*24*time.Hour)).Error; err != nil {
+		t.Fatalf("write online history for existing node: %v", err)
+	}
+	for _, tc := range []struct {
+		name string
+		at   time.Time
+		code string
+	}{
+		{"duplicate minute", minute, "23505"},
+		{"unaligned minute", minute.Add(time.Second), "23514"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := db.Exec("INSERT INTO node_online (server_id, minute, online) VALUES (?, ?, TRUE)", serverID, tc.at).Error
+			if pgErr, ok := errors.AsType[*pgconn.PgError](err); !ok || pgErr.Code != tc.code {
+				t.Fatalf("write error = %v, want SQLSTATE %s", err, tc.code)
+			}
+		})
+	}
+
+	var jobID int
+	if err := db.Raw(`
+		SELECT job.job_id
+		FROM timescaledb_information.jobs job
+		JOIN timescaledb_information.dimensions dimension
+		  ON dimension.hypertable_schema = job.hypertable_schema
+		 AND dimension.hypertable_name = job.hypertable_name
+		WHERE job.hypertable_schema = current_schema()
+		  AND job.hypertable_name = 'node_online'
+		  AND job.proc_name = 'policy_retention'
+		  AND (job.config->>'drop_after')::interval = INTERVAL '46 days'
+		  AND dimension.time_interval = INTERVAL '1 day'
+	`).Scan(&jobID).Error; err != nil || jobID == 0 {
+		t.Fatalf("daily chunks and 46-day retention: job %d, error %v", jobID, err)
+	}
+	if err := db.Exec("CALL run_job(?)", jobID).Error; err != nil {
+		t.Fatalf("run online retention: %v", err)
+	}
+	var retained struct {
+		Total  int64
+		Online int64
+		Old    int64
+	}
+	if err := db.Raw(`
+		SELECT count(*) AS total,
+		       count(*) FILTER (WHERE online) AS online,
+		       count(*) FILTER (WHERE minute < ?) AS old
+		FROM node_online
+	`, minute.Add(-46*24*time.Hour)).Scan(&retained).Error; err != nil {
+		t.Fatal(err)
+	}
+	if retained.Total != 3 || retained.Online != 2 || retained.Old != 0 {
+		t.Fatalf("retained history = %+v, want recent samples and the 45-day-old sample within retention", retained)
 	}
 }
 

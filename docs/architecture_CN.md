@@ -50,6 +50,10 @@ Ithiltir Dash 是单实例应用。根入口只启动一个 HTTP 进程，该进
 
 ## 状态和保留策略
 
+- Uptime 的游客展示开关和每日 SLA 阈值持久化在 `system_settings`，默认关闭游客展示，warning 为 99%、error 为 95%。数据库约束保证 `0 <= error < warning <= 100`，设置更新沿用同一事务，非法阈值不会留下部分更新。管理台只配置这些值；在线采样和 uptime 展示尚未消费该设置。
+
+- `node_online` 按 `(server_id, minute, online)` 保存节点分钟级状态，每个节点每分钟至多一条非空布尔值记录，时间必须对齐到整分钟；缺少记录表示未知。该 TimescaleDB 时序表按一天分块，使用 46 天保留策略，由策略任务按整个分块执行过期清理。该表没有采样任务或应用写入入口，现有在线率 API 继续读取 `server_online_30m`。预留的 `services` 和 `service_checks` 表与该存储独立。
+
 - 默认启动依赖 PostgreSQL 和 Redis `6.2.0+`，推荐 Redis `8.2.3+`。Dash 会通过 `PING` 和 `INFO server` 校验实际连接的服务端，因此配置的 Redis 账号必须允许这两个命令；服务不可用、版本无法识别或低于 6.2.0 时终止启动，低于 8.2.3 时仍可运行但会记录启动警告。Redis 保存管理员会话和可丢弃的前台缓存，单次 Redis 故障不会回退到内存。传 `--no-redis` 时会跳过 Redis 连接和版本校验，并从启动时把会话与前台缓存装配到进程内内存。
 - `app.timezone` 在启动时编译。空值使用本地时区；非空值必须是有效 IANA 时区名，否则配置加载失败，错误中会包含配置值。
 - 前台缓存 v2 使用项目 namespace `ithiltir:dash:`，具体 key 为 `ithiltir:dash:front:v2:node:runtime:{id}`、`ithiltir:dash:front:v2:node:meta:{id}`、`ithiltir:dash:front:v2:node:smart:{id}`、`ithiltir:dash:front:v2:node:thermal:{id}`、`ithiltir:dash:front:v2:node:ids`、`ithiltir:dash:front:v2:node:catalog`、`ithiltir:dash:front:v2:guest:ids` 和 `ithiltir:dash:front:v2:guest:catalog`。旧 v1 和未加 namespace 的 v2 缓存 key 会被忽略，不做双写，也不会在启动时自动删除；冷缓存按需重建。管理员会话继续使用兼容前缀 `auth:jwt:*`，保证存量 session 在升级后仍然有效，该前缀不会在启动时迁移或删除。

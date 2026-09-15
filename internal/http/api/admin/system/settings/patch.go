@@ -1,6 +1,7 @@
 package settings
 
 import (
+	"errors"
 	"net/http"
 
 	"dash/internal/http/httperr"
@@ -32,7 +33,7 @@ func (h *handler) patchHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if in.HistoryGuestAccessMode == nil && in.DashUpdateChannel == nil && in.DashUpdateMode == nil && !in.hasSiteBrandFields() {
+	if in == (settingsInput{}) {
 		httperr.Write(w, http.StatusBadRequest, "no_fields", "no fields to update")
 		return
 	}
@@ -67,17 +68,29 @@ func (h *handler) patchHandler(w http.ResponseWriter, r *http.Request) {
 		updateMode = &normalized
 	}
 
-	var brand *systemstore.SiteBrandPatch
+	var brand systemstore.SiteBrandPatch
 	if in.hasSiteBrandFields() {
 		next, err := in.siteBrandPatch()
 		if err != nil {
 			httperr.Write(w, http.StatusBadRequest, "invalid_fields", "invalid site brand fields")
 			return
 		}
-		brand = &next
+		brand = next
 	}
 
-	if err := saveSettingsPatch(r.Context(), h.tx, mode, channel, updateMode, brand); err != nil {
+	patch := systemstore.SettingsPatch{
+		SiteBrandPatch:     brand,
+		DashUpdateChannel:  channel,
+		DashUpdateMode:     updateMode,
+		UptimeGuestVisible: in.UptimeGuestVisible,
+		UptimeWarningSLA:   in.UptimeWarningSLA,
+		UptimeErrorSLA:     in.UptimeErrorSLA,
+	}
+	if err := saveSettingsPatch(r.Context(), h.tx, mode, patch); err != nil {
+		if errors.Is(err, systemstore.ErrInvalidUptimeSLA) {
+			httperr.Write(w, http.StatusBadRequest, "invalid_fields", err.Error())
+			return
+		}
 		httperr.Write(w, http.StatusServiceUnavailable, "db_error", "failed to update settings")
 		return
 	}

@@ -14,6 +14,9 @@ import (
 )
 
 type settingsView struct {
+	UptimeGuestVisible     bool                              `json:"uptime_guest_visible"`
+	UptimeWarningSLA       float64                           `json:"uptime_warning_sla"`
+	UptimeErrorSLA         float64                           `json:"uptime_error_sla"`
 	HistoryGuestAccessMode metricdata.HistoryGuestAccessMode `json:"history_guest_access_mode"`
 	DashUpdateChannel      systemstore.DashUpdateChannel     `json:"dash_update_channel"`
 	DashUpdateMode         systemstore.DashUpdateMode        `json:"dash_update_mode"`
@@ -23,6 +26,9 @@ type settingsView struct {
 }
 
 type settingsInput struct {
+	UptimeGuestVisible     *bool                              `json:"uptime_guest_visible"`
+	UptimeWarningSLA       *float64                           `json:"uptime_warning_sla"`
+	UptimeErrorSLA         *float64                           `json:"uptime_error_sla"`
 	HistoryGuestAccessMode *metricdata.HistoryGuestAccessMode `json:"history_guest_access_mode"`
 	DashUpdateChannel      *systemstore.DashUpdateChannel     `json:"dash_update_channel"`
 	DashUpdateMode         *systemstore.DashUpdateMode        `json:"dash_update_mode"`
@@ -41,15 +47,11 @@ func loadSettings(ctx context.Context, metric *metricdata.Store, system *systems
 		if err != nil {
 			return settingsView{}, err
 		}
-		brand, err := system.GetSiteBrand(c)
+		settings, err := system.GetSettings(c)
 		if err != nil {
 			return settingsView{}, err
 		}
-		policy, err := system.GetDashUpdatePolicy(c)
-		if err != nil {
-			return settingsView{}, err
-		}
-		return settingsViewFrom(mode, policy.Channel, policy.Mode, brand), nil
+		return settingsViewFrom(mode, settings), nil
 	})
 }
 
@@ -57,9 +59,7 @@ func saveSettingsPatch(
 	ctx context.Context,
 	tx settingsTx,
 	mode *metricdata.HistoryGuestAccessMode,
-	channel *systemstore.DashUpdateChannel,
-	updateMode *systemstore.DashUpdateMode,
-	brand *systemstore.SiteBrandPatch,
+	patch systemstore.SettingsPatch,
 ) error {
 	_, err := infra.WithPGWriteTimeout(ctx, func(c context.Context) (struct{}, error) {
 		return struct{}{}, tx.WithSettingsTx(c, func(metric *metricdata.Store, system *systemstore.Store) error {
@@ -68,61 +68,26 @@ func saveSettingsPatch(
 					return err
 				}
 			}
-			if channel != nil {
-				if err := system.SetDashUpdateChannel(c, *channel); err != nil {
-					return err
-				}
-			}
-			if updateMode != nil {
-				if err := system.SetDashUpdateMode(c, *updateMode); err != nil {
-					return err
-				}
-			}
-			if brand != nil {
-				if err := system.PatchSiteBrand(c, *brand); err != nil {
-					return err
-				}
-			}
-			return nil
+			return system.PatchSettings(c, patch)
 		})
 	})
 	return err
 }
 
-func saveSettingsDoc(ctx context.Context, tx settingsTx, doc settingsView) error {
-	brand := fullSiteBrandPatch(doc.siteBrand())
-	return saveSettingsPatch(
-		ctx,
-		tx,
-		&doc.HistoryGuestAccessMode,
-		&doc.DashUpdateChannel,
-		&doc.DashUpdateMode,
-		&brand,
-	)
-}
-
 func settingsViewFrom(
 	mode metricdata.HistoryGuestAccessMode,
-	channel systemstore.DashUpdateChannel,
-	updateMode systemstore.DashUpdateMode,
-	brand systemstore.SiteBrand,
+	settings systemstore.Settings,
 ) settingsView {
-	normalized := systemstore.NormalizeSiteBrand(brand)
 	return settingsView{
+		UptimeGuestVisible:     settings.UptimeGuestVisible,
+		UptimeWarningSLA:       settings.UptimeWarningSLA,
+		UptimeErrorSLA:         settings.UptimeErrorSLA,
 		HistoryGuestAccessMode: mode,
-		DashUpdateChannel:      channel,
-		DashUpdateMode:         updateMode,
-		LogoURL:                normalized.LogoURL,
-		PageTitle:              normalized.PageTitle,
-		TopbarText:             normalized.TopbarText,
-	}
-}
-
-func (v settingsView) siteBrand() systemstore.SiteBrand {
-	return systemstore.SiteBrand{
-		LogoURL:    v.LogoURL,
-		PageTitle:  v.PageTitle,
-		TopbarText: v.TopbarText,
+		DashUpdateChannel:      settings.DashUpdateChannel,
+		DashUpdateMode:         settings.DashUpdateMode,
+		LogoURL:                settings.LogoURL,
+		PageTitle:              settings.PageTitle,
+		TopbarText:             settings.TopbarText,
 	}
 }
 

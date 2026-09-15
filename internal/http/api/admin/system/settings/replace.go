@@ -1,6 +1,7 @@
 package settings
 
 import (
+	"errors"
 	"net/http"
 
 	"dash/internal/http/httperr"
@@ -67,9 +68,20 @@ func (h *handler) replaceHandler(w http.ResponseWriter, r *http.Request) {
 		httperr.Write(w, http.StatusBadRequest, "invalid_fields", "invalid site brand fields")
 		return
 	}
-	doc := settingsViewFrom(mode, channel, updateMode, brand)
+	patch := systemstore.SettingsPatch{
+		SiteBrandPatch:     fullSiteBrandPatch(brand),
+		DashUpdateChannel:  &channel,
+		DashUpdateMode:     &updateMode,
+		UptimeGuestVisible: in.UptimeGuestVisible,
+		UptimeWarningSLA:   in.UptimeWarningSLA,
+		UptimeErrorSLA:     in.UptimeErrorSLA,
+	}
 
-	if err := saveSettingsDoc(r.Context(), h.tx, doc); err != nil {
+	if err := saveSettingsPatch(r.Context(), h.tx, &mode, patch); err != nil {
+		if errors.Is(err, systemstore.ErrInvalidUptimeSLA) {
+			httperr.Write(w, http.StatusBadRequest, "invalid_fields", err.Error())
+			return
+		}
 		httperr.Write(w, http.StatusServiceUnavailable, "db_error", "failed to update settings")
 		return
 	}

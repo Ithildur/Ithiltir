@@ -1,7 +1,6 @@
 package system
 
 import (
-	"context"
 	"testing"
 
 	pgtest "dash/internal/testutil/postgres"
@@ -9,7 +8,7 @@ import (
 
 func TestIntegrationSystemSettings(t *testing.T) {
 	st := New(pgtest.NewDB(t))
-	ctx := context.Background()
+	ctx := t.Context()
 
 	t.Run("updates preserve other fields", func(t *testing.T) {
 		brand, err := st.GetSiteBrand(ctx)
@@ -28,14 +27,12 @@ func TestIntegrationSystemSettings(t *testing.T) {
 			PageTitle:  "Status",
 			TopbarText: "Ops",
 		}
-		if err := st.PatchSiteBrand(ctx, fullSiteBrandPatch(wantBrand)); err != nil {
-			t.Fatalf("PatchSiteBrand() error = %v", err)
-		}
-		if err := st.SetDashUpdateChannel(ctx, DashUpdateChannelPrerelease); err != nil {
-			t.Fatalf("SetDashUpdateChannel() error = %v", err)
-		}
-		if err := st.SetDashUpdateMode(ctx, DashUpdateModeNotify); err != nil {
-			t.Fatalf("SetDashUpdateMode() error = %v", err)
+		if err := st.PatchSettings(ctx, SettingsPatch{
+			SiteBrandPatch:    fullSiteBrandPatch(wantBrand),
+			DashUpdateChannel: new(DashUpdateChannelPrerelease),
+			DashUpdateMode:    new(DashUpdateModeNotify),
+		}); err != nil {
+			t.Fatalf("PatchSettings() error = %v", err)
 		}
 		themeID, err := st.GetActiveThemeID(ctx)
 		if err != nil {
@@ -70,13 +67,13 @@ func TestIntegrationSystemSettings(t *testing.T) {
 			PageTitle:  "Old title",
 			TopbarText: "Old topbar",
 		}
-		if err := st.PatchSiteBrand(ctx, fullSiteBrandPatch(want)); err != nil {
-			t.Fatalf("PatchSiteBrand() error = %v", err)
+		if err := st.PatchSettings(ctx, SettingsPatch{SiteBrandPatch: fullSiteBrandPatch(want)}); err != nil {
+			t.Fatalf("PatchSettings() error = %v", err)
 		}
 
 		title := "New title"
-		if err := st.PatchSiteBrand(ctx, SiteBrandPatch{PageTitle: &title}); err != nil {
-			t.Fatalf("PatchSiteBrand() error = %v", err)
+		if err := st.PatchSettings(ctx, SettingsPatch{PageTitle: &title}); err != nil {
+			t.Fatalf("PatchSettings() error = %v", err)
 		}
 		want.PageTitle = title
 		got, err := st.GetSiteBrand(ctx)
