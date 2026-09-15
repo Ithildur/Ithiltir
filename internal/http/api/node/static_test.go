@@ -9,32 +9,17 @@ import (
 	"dash/internal/metrics"
 )
 
-func TestNormalizeStaticRejectsNegativeCapacity(t *testing.T) {
-	snapshot := metrics.StaticMetrics{
-		Version:               "1.0.0",
-		Timestamp:             time.Now(),
-		ReportIntervalSeconds: 10,
-		Memory:                metrics.StaticMemory{Total: -1},
-		System: metrics.StaticSystem{
-			Hostname:        "node",
-			OS:              "linux",
-			Platform:        "linux",
-			PlatformVersion: "1",
-			KernelVersion:   "1",
-			Arch:            "amd64",
-		},
-	}
-
-	if err := normalizeStatic(&snapshot); err == nil {
-		t.Fatal("normalizeStatic() error = nil")
-	}
-}
-
-func TestNormalizeStaticRejectsOversizedStoredText(t *testing.T) {
+func TestNormalizeStaticRejectsInvalidFields(t *testing.T) {
 	tests := []struct {
 		name   string
 		mutate func(*metrics.StaticMetrics)
 	}{
+		{
+			name: "negative capacity",
+			mutate: func(snapshot *metrics.StaticMetrics) {
+				snapshot.Memory.Total = -1
+			},
+		},
 		{
 			name: "kernel version",
 			mutate: func(snapshot *metrics.StaticMetrics) {
@@ -77,7 +62,7 @@ func TestNormalizeStaticRejectsOversizedStoredText(t *testing.T) {
 	}
 }
 
-func TestStaticPatchPreservesUnavailableHardware(t *testing.T) {
+func TestStaticPatchDistinguishesUnavailableHardwareFromZero(t *testing.T) {
 	snapshot := metrics.StaticMetrics{
 		Version:               "1.0.0",
 		ReportIntervalSeconds: 10,
@@ -100,6 +85,12 @@ func TestStaticPatchPreservesUnavailableHardware(t *testing.T) {
 	if patch.Hostname == nil || *patch.Hostname != snapshot.System.Hostname {
 		t.Fatalf("staticPatch() hostname = %v, want %q", patch.Hostname, snapshot.System.Hostname)
 	}
+
+	snapshot.Memory.SwapTotal = new(int64(0))
+	patch = staticPatch(snapshot, metrics.StaticDiskLogical{}, false, req)
+	if patch.SwapTotal == nil || *patch.SwapTotal != 0 {
+		t.Fatalf("staticPatch() swap total = %v, want explicit zero", patch.SwapTotal)
+	}
 }
 
 func TestStaticPatchKeepsDiskFieldsInOneObservation(t *testing.T) {
@@ -121,22 +112,5 @@ func TestStaticPatchKeepsDiskFieldsInOneObservation(t *testing.T) {
 	if observed.Disk == nil || observed.Disk.Path != "/data" ||
 		observed.Disk.FSType != "xfs" || observed.Disk.Total != 2048 {
 		t.Fatalf("staticPatch() disk = %+v, want one complete observation", observed.Disk)
-	}
-}
-
-func TestStaticPatchKeepsExplicitZeroSwap(t *testing.T) {
-	zero := int64(0)
-	snapshot := metrics.StaticMetrics{
-		Version:               "1.0.0",
-		ReportIntervalSeconds: 10,
-		Memory: metrics.StaticMemory{
-			SwapTotal: &zero,
-		},
-	}
-	req := httptest.NewRequest("POST", "/api/node/static", nil)
-
-	patch := staticPatch(snapshot, metrics.StaticDiskLogical{}, false, req)
-	if patch.SwapTotal == nil || *patch.SwapTotal != 0 {
-		t.Fatalf("staticPatch() swap total = %v, want explicit zero", patch.SwapTotal)
 	}
 }

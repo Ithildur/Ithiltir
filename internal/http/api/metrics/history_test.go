@@ -1,7 +1,6 @@
 package metrics
 
 import (
-	"context"
 	"net/http/httptest"
 	"testing"
 	"time"
@@ -14,40 +13,27 @@ import (
 	"gorm.io/gorm"
 )
 
-func newHistoryTestStore(t *testing.T) (*store.Stores, *gorm.DB) {
-	t.Helper()
-
+func TestIntegrationHistoryGuestAccess(t *testing.T) {
 	db := pgtest.NewDB(t)
-	return store.New(db, nil, time.Local, pgtest.ConfigCipher(t)), db
-}
-
-func TestIntegrationHistoryGuestAccessDisabledByDefault(t *testing.T) {
-	st, _ := newHistoryTestStore(t)
+	st := store.New(db, nil, time.Local, pgtest.ConfigCipher(t))
+	ctx := t.Context()
 	h := newHandler(st.Metric, st.Front, st.Node, nil)
 	r := httptest.NewRequest("GET", "/api/metrics/history?server_id=1", nil)
+	hidden := createHistoryServer(t, db, "hidden", false)
+	visible := createHistoryServer(t, db, "visible", true)
 
-	allowed, err := h.canReadHistory(context.Background(), r, 1)
+	allowed, err := h.canReadHistory(ctx, r, visible.ID)
 	if err != nil {
 		t.Fatalf("canReadHistory() error = %v", err)
 	}
 	if allowed {
-		t.Fatal("canReadHistory() = true, want false")
+		t.Fatal("default policy allowed guest history access")
 	}
-}
-
-func TestIntegrationHistoryGuestAccessByNodeUsesGuestVisible(t *testing.T) {
-	st, db := newHistoryTestStore(t)
-	ctx := context.Background()
-	h := newHandler(st.Metric, st.Front, st.Node, nil)
-	r := httptest.NewRequest("GET", "/api/metrics/history?server_id=1", nil)
 
 	if err := st.Metric.SetHistoryGuestAccessMode(ctx, metricdata.HistoryGuestAccessByNode); err != nil {
 		t.Fatalf("SetHistoryGuestAccessMode() error = %v", err)
 	}
-	hidden := createHistoryServer(t, db, "hidden", false)
-	visible := createHistoryServer(t, db, "visible", true)
-
-	allowed, err := h.canReadHistory(ctx, r, hidden.ID)
+	allowed, err = h.canReadHistory(ctx, r, hidden.ID)
 	if err != nil {
 		t.Fatalf("canReadHistory(hidden) error = %v", err)
 	}
@@ -73,7 +59,7 @@ func createHistoryServer(t *testing.T, db *gorm.DB, name string, guestVisible bo
 		Secret:         name + "-secret",
 		IsGuestVisible: guestVisible,
 	}
-	if err := db.WithContext(context.Background()).Create(&srv).Error; err != nil {
+	if err := db.WithContext(t.Context()).Create(&srv).Error; err != nil {
 		t.Fatalf("Create(%s) error = %v", name, err)
 	}
 	return srv

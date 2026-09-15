@@ -82,16 +82,6 @@ func TestLatestCompatible(t *testing.T) {
 		"1.2.3+build.2",
 	}
 
-	got, ok := LatestCompatible(versions, ChannelRelease)
-	if !ok || got != "1.2.3" {
-		t.Fatalf("LatestCompatible(release) = %q, %v; want %q, true", got, ok, "1.2.3")
-	}
-
-	got, ok = LatestCompatible(versions, ChannelPrerelease)
-	if !ok || got != "1.2.4-alpha.1" {
-		t.Fatalf("LatestCompatible(prerelease) = %q, %v; want %q, true", got, ok, "1.2.4-alpha.1")
-	}
-
 	tests := []struct {
 		name    string
 		channel Channel
@@ -99,6 +89,20 @@ func TestLatestCompatible(t *testing.T) {
 		want    string
 		wantOK  bool
 	}{
+		{
+			name:    "release",
+			channel: ChannelRelease,
+			values:  versions,
+			want:    "1.2.3",
+			wantOK:  true,
+		},
+		{
+			name:    "prerelease",
+			channel: ChannelPrerelease,
+			values:  versions,
+			want:    "1.2.4-alpha.1",
+			wantOK:  true,
+		},
 		{
 			name:    "prerelease falls back to release when prerelease is older",
 			channel: ChannelPrerelease,
