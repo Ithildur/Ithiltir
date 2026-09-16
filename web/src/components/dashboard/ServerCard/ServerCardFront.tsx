@@ -134,7 +134,7 @@ ${t('mem_total')}: ${toMB(view.memory.total)} MB`;
     <div
       className={`absolute inset-0 backface-hidden rounded-xl border transition-all motion-reduce:transition-none cursor-pointer overflow-hidden flex flex-col ${cardStyle}`}
     >
-      <div className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-4 p-4 pb-1">
+      <div className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-4 p-4 pb-0">
         <div className="flex min-w-0 items-center gap-3">
           <div
             className="p-2 flex shrink-0 items-center justify-center"
@@ -181,9 +181,9 @@ ${t('mem_total')}: ${toMB(view.memory.total)} MB`;
         )}
       </div>
 
-      <div className="px-4 pt-1 pb-2 flex-1 flex flex-col transition-opacity duration-300">
+      <div className="px-4 pb-2 flex-1 flex flex-col transition-opacity duration-300">
         <div className="flex flex-col flex-1 space-y-2">
-          <div className="h-5 min-w-0 overflow-hidden" aria-hidden={tagCount === 0}>
+          <div className="h-6 min-w-0 overflow-hidden py-0.5" aria-hidden={tagCount === 0}>
             {tagCount > 0 ? (
               <Tooltip content={tagTooltip} className="min-w-0">
                 <div
@@ -268,7 +268,7 @@ ${t('mem_total')}: ${toMB(view.memory.total)} MB`;
             </Tooltip>
           </div>
 
-          <div className="flex flex-col space-y-1">
+          <div className="flex flex-col space-y-1.25">
             <NetworkRowFull
               label={t('curr_speed')}
               up={`${formatBytes(view.network.rateOut)}/s`}
@@ -280,7 +280,7 @@ ${t('mem_total')}: ${toMB(view.memory.total)} MB`;
               down={formatBytes(view.network.totalIn)}
               isTotal
             />
-            <div className="flex justify-between items-center bg-(--theme-bg-default) dark:bg-(--theme-bg-default) px-3 py-1 rounded-lg border border-(--theme-border-muted) dark:border-(--theme-border-default)">
+            <div className="flex justify-between items-center bg-(--theme-bg-default) dark:bg-(--theme-bg-default) px-3 py-1.5 rounded-lg border border-(--theme-border-muted) dark:border-(--theme-border-default)">
               <div className="flex items-center gap-2">
                 <span className="p-1 rounded bg-(--theme-bg-interactive-muted) dark:bg-(--theme-canvas-muted)/70 text-(--theme-fg-interactive)">
                   <TrendingUp size={10} />
@@ -304,7 +304,7 @@ ${t('mem_total')}: ${toMB(view.memory.total)} MB`;
                 onClick={openHistory}
                 onMouseDown={stopPropagation}
                 onKeyDown={stopPropagation}
-                className={`min-w-0 justify-between gap-1 rounded-lg border border-(--theme-border-muted) dark:border-(--theme-border-default) px-2.5 py-1 text-xs font-medium tracking-normal ring-inset active:scale-100 ${actionClass(canOpenHistory)}`}
+                className={`min-w-0 justify-between gap-1 rounded-lg border border-(--theme-border-muted) dark:border-(--theme-border-default) px-2.5 py-1.5 text-xs font-medium tracking-normal ring-inset active:scale-100 ${actionClass(canOpenHistory)}`}
                 aria-label={historyTitle}
                 title={historyTitle}
               >
@@ -331,7 +331,7 @@ ${t('mem_total')}: ${toMB(view.memory.total)} MB`;
                 onClick={openTraffic}
                 onMouseDown={stopPropagation}
                 onKeyDown={stopPropagation}
-                className={`min-w-0 justify-between gap-1 rounded-lg border border-(--theme-border-muted) dark:border-(--theme-border-default) px-2.5 py-1 text-xs font-medium tracking-normal ring-inset active:scale-100 ${actionClass(canOpenTraffic)}`}
+                className={`min-w-0 justify-between gap-1 rounded-lg border border-(--theme-border-muted) dark:border-(--theme-border-default) px-2.5 py-1.5 text-xs font-medium tracking-normal ring-inset active:scale-100 ${actionClass(canOpenTraffic)}`}
                 aria-label={trafficTitle}
                 title={trafficTitle}
               >

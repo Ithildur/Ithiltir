@@ -114,7 +114,7 @@ const UptimeRow: React.FC<Props> = ({ history }) => {
         );
       }}
     >
-      <div className="flex items-center gap-2 rounded-lg border border-(--theme-border-muted) bg-(--theme-bg-default) px-3 py-1 dark:border-(--theme-border-default)">
+      <div className="flex items-center gap-2 rounded-lg border border-(--theme-border-muted) bg-(--theme-bg-default) px-3 py-1.5 dark:border-(--theme-border-default)">
         <span
           className="shrink-0 rounded bg-(--theme-bg-interactive-muted) p-1 text-(--theme-fg-interactive) dark:bg-(--theme-canvas-muted)/70"
           aria-hidden="true"

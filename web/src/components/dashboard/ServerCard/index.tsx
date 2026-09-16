@@ -12,7 +12,7 @@ interface Props {
 
 const ServerCard: React.FC<Props> = ({ view, canOpenHistory, canOpenTraffic }) => {
   return (
-    <div className="[content-visibility:auto] [contain-intrinsic-block-size:408px]">
+    <div className="[content-visibility:auto] [contain-intrinsic-block-size:428px]">
       <FlipCard
         disabled={!view.isAlive}
         front={

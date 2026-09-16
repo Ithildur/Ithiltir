@@ -19,7 +19,7 @@ const FlipCard: React.FC<Props> = ({ disabled, front, back }) => {
   const showBack = isFlipped && !disabled;
 
   return (
-    <div className="relative h-102 w-full perspective-1000 group" onClick={toggle}>
+    <div className="relative h-107 w-full perspective-1000 group" onClick={toggle}>
       <button
         type="button"
         disabled={disabled}
