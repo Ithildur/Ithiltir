@@ -36,11 +36,10 @@ export const normalizeNodeViews = (nodes: NodeView[]): NodeView[] =>
   Array.isArray(nodes) ? [...nodes] : [];
 
 export interface UptimeHistory {
+  asOf: string;
   days: Array<{
     date: string;
     percent: number | null;
-    // Hour-indexed observations; null or missing means unknown, including future hours.
-    hours?: Array<number | null>;
   }>;
   warningSLA: number;
   errorSLA: number;

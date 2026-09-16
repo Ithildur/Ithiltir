@@ -294,7 +294,7 @@ ${t('mem_total')}: ${toMB(view.memory.total)} MB`;
                 {view.cpu.load15.toFixed(2)}
               </span>
             </div>
-            <UptimeRow history={view.uptimeHistory} />
+            {view.uptimeHistory && <UptimeRow serverID={view.id} history={view.uptimeHistory} />}
             <div className="grid grid-cols-2 gap-2">
               <Button
                 type="button"

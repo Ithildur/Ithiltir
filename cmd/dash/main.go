@@ -133,6 +133,10 @@ func main() {
 		infra.Fatal("sync retention policies failed", err)
 	}
 
+	if err := migrate.SyncOnlineJob(ctx, db, cfg.App.EffectiveNodeOfflineThreshold(), cfg.App.EffectiveLocation()); err != nil {
+		infra.Fatal("sync online job failed", err)
+	}
+
 	var redisClient = (*redis.Client)(nil)
 	if !noRedis {
 		redisClient, err = infra.NewRedisClient(cfg.Redis)

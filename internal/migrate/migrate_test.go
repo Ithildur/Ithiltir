@@ -4,9 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io/fs"
 	"testing"
 	"time"
 
+	"dash/db/migrations"
 	"dash/internal/migrate"
 	pgtest "dash/internal/testutil/postgres"
 
@@ -435,6 +437,129 @@ func TestIntegrationNodeOnlineMigration(t *testing.T) {
 	if retained.Total != 3 || retained.Online != 2 || retained.Old != 0 {
 		t.Fatalf("retained history = %+v, want recent samples and the 45-day-old sample within retention", retained)
 	}
+
+	t.Run("sampling and reapplication", func(t *testing.T) {
+		body, err := fs.ReadFile(migrations.Files(), "0014_uptime.sql")
+		if err != nil {
+			t.Fatal(err)
+		}
+		// Reapply against the alpha schema with existing data and edited settings.
+		if err := db.Exec(`
+			SELECT delete_job(job_id) FROM timescaledb_information.jobs WHERE proc_name = 'sample_node_online';
+			DROP PROCEDURE sample_node_online(INTEGER, JSONB);
+			UPDATE system_settings SET uptime_warning_sla = 99.9;
+		`).Error; err != nil {
+			t.Fatal(err)
+		}
+		if err := migrate.SyncOnlineJob(ctx, db, 90*time.Second, time.UTC); err == nil {
+			t.Fatal("missing sampling job was accepted")
+		}
+		for range 2 {
+			if err := db.Transaction(func(tx *gorm.DB) error { return tx.Exec(string(body)).Error }); err != nil {
+				t.Fatalf("reapply uptime migration: %v", err)
+			}
+		}
+		var sampling struct {
+			ID    int
+			Count int
+		}
+		if err := db.Raw(`
+			SELECT min(job_id) AS id, count(*) AS count FROM timescaledb_information.jobs
+			WHERE proc_schema = current_schema() AND proc_name = 'sample_node_online'
+			  AND schedule_interval = INTERVAL '1 minute' AND fixed_schedule
+			  AND initial_start = date_trunc('minute', initial_start)
+		`).Scan(&sampling).Error; err != nil || sampling.Count != 1 {
+			t.Fatalf("minute sampling schedule = %+v, error %v", sampling, err)
+		}
+		// Prevent the background worker from racing the controlled observations.
+		if err := db.Exec("SELECT alter_job(?, scheduled => false)", sampling.ID).Error; err != nil {
+			t.Fatal(err)
+		}
+		if err := migrate.SyncOnlineJob(ctx, db, 90*time.Second, time.UTC); err != nil {
+			t.Fatal(err)
+		}
+		var hourlyJobs int
+		if err := db.Raw(`
+			SELECT count(*) FROM timescaledb_information.jobs j
+			WHERE j.hypertable_name = 'node_online_1h' AND j.hypertable_schema = current_schema()
+			 AND j.proc_name = 'policy_refresh_continuous_aggregate'
+			 AND j.schedule_interval = INTERVAL '1 hour' AND j.fixed_schedule
+			 AND j.initial_start = date_trunc('hour', j.initial_start) + INTERVAL '5 seconds'
+			 AND (j.config->>'end_offset')::interval = INTERVAL '0 seconds'
+		`).Scan(&hourlyJobs).Error; err != nil || hourlyJobs != 1 {
+			t.Fatalf("hourly refresh schedule: jobs %d, error %v", hourlyJobs, err)
+		}
+		if err := db.Transaction(func(tx *gorm.DB) error {
+			if err := tx.Exec(`
+				INSERT INTO servers (name, hostname, secret, is_deleted)
+				VALUES ('sample-live', 'sample-live', 'sample-live', false),
+				       ('sample-slow', 'sample-slow', 'sample-slow', false),
+				       ('sample-offline', 'sample-offline', 'sample-offline', false),
+				       ('sample-deleted', 'sample-deleted', 'sample-deleted', true),
+				       ('sample-new', 'sample-new', 'sample-new', false);
+				INSERT INTO server_current_metrics (server_id, collected_at, reported_at)
+				SELECT id, CASE name
+				    WHEN 'sample-slow' THEN now() - INTERVAL '1 minute'
+				    WHEN 'sample-offline' THEN now() - INTERVAL '50 days'
+				    ELSE now() END, now() - INTERVAL '50 days'
+				FROM servers WHERE name LIKE 'sample-%' AND name <> 'sample-new';
+			`).Error; err != nil {
+				return err
+			}
+			check := func(total, online int64) error {
+				var got struct{ Total, Online int64 }
+				if err := tx.Raw(`
+					SELECT count(*) AS total, count(*) FILTER (WHERE online) AS online
+					FROM node_online o JOIN servers s ON s.id = o.server_id
+					WHERE s.name LIKE 'sample-%'
+				`).Scan(&got).Error; err != nil {
+					return err
+				}
+				if got.Total != total || got.Online != online {
+					t.Errorf("sampled history = %+v, want total %d, online %d", got, total, online)
+				}
+				return nil
+			}
+			if err := tx.Exec("CALL run_job(?)", sampling.ID).Error; err != nil {
+				return err
+			}
+			if err := check(3, 2); err != nil {
+				return err
+			}
+			if err := tx.Exec(`UPDATE server_current_metrics SET collected_at = now() - INTERVAL '1 day'`).Error; err != nil {
+				return err
+			}
+			if err := tx.Exec("CALL run_job(?)", sampling.ID).Error; err != nil {
+				return err
+			}
+			if err := check(3, 2); err != nil {
+				return err
+			}
+			if err := tx.Exec(`
+				UPDATE node_online SET minute = minute - INTERVAL '2 minutes'
+				WHERE server_id IN (SELECT id FROM servers WHERE name LIKE 'sample-%');
+				UPDATE servers SET is_deleted = true WHERE name = 'sample-live';
+			`).Error; err != nil {
+				return err
+			}
+			if err := tx.Exec("CALL run_job(?)", sampling.ID).Error; err != nil {
+				return err
+			}
+			// Deleted nodes keep their old observation but receive no new row;
+			// the missed minute is not filled, and stale nodes now sample false.
+			return check(5, 2)
+		}); err != nil {
+			t.Fatalf("sample node state: %v", err)
+		}
+		var warning float64
+		if err := db.Raw("SELECT uptime_warning_sla FROM system_settings").Scan(&warning).Error; err != nil || warning != 99.9 {
+			t.Fatalf("reapplication changed settings: warning %v, error %v", warning, err)
+		}
+		var original int64
+		if err := db.Raw("SELECT count(*) FROM node_online WHERE server_id = ?", serverID).Scan(&original).Error; err != nil || original != 3 {
+			t.Fatalf("reapplication changed existing history: count %d, error %v", original, err)
+		}
+	})
 }
 
 func TestIntegrationSchemaVersionGuard(t *testing.T) {

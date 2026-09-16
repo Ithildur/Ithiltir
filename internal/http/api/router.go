@@ -107,7 +107,7 @@ func buildRoutes(cfg *config.Config, deps Dependencies, setup routeSetup) *route
 	// Node handlers authenticate X-Node-Secret independently of bearer sessions.
 	r.Include("/node", nodeapi.Router(deps.Stores, setup.serverID, setup.staleAfterSec, setup.trustedProxies))
 	r.Include("/front", frontapi.Router(deps.Stores, setup.offlineThreshold, setup.optionalBearer))
-	r.Include("/metrics", metricsapi.Router(deps.Stores, setup.optionalBearer))
+	r.Include("/metrics", metricsapi.Router(deps.Stores, cfg.App.EffectiveLocation(), setup.optionalBearer))
 	r.Include("/statistics", statisticsapi.Router(deps.Stores, cfg.App.EffectiveLocation(), setup.bearer, setup.optionalBearer))
 	return r
 }

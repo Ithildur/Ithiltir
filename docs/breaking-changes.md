@@ -2,7 +2,17 @@
 
 ## Unreleased
 
-No known breaking changes.
+### 0.3.3 alpha databases already at migration 0014
+
+In `0.3.3-alpha1` and `0.3.3-alpha2`, migration `0014` created uptime storage and settings without sampling or hourly-aggregation setup. The current version retains migration number `0014`, so Goose does not automatically rerun it on those databases. Startup and `dash migrate` fail if the sampler or the hourly configuration procedure is missing. This also applies to instances where the sampling job alone was installed manually.
+
+For these installations, apply the SQL from the updated source once using the original migration database user and schema, then run `dash migrate` to synchronize the offline threshold and statistics timezone. Set `DATABASE_URL` to the installation's PostgreSQL database:
+
+```bash
+psql "$DATABASE_URL" -X --set=ON_ERROR_STOP=1 --single-transaction --file=db/migrations/0014_uptime.sql
+```
+
+The SQL is safe to reapply: it preserves existing observations and settings without duplicating sampling or retention jobs. Do not delete `goose_db_version` records. Databases that have not applied `0014` use the normal migration flow.
 
 ## 0.3.0 (2026-08-01)
 

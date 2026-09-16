@@ -2,7 +2,17 @@
 
 ## 未发布
 
-当前没有已知破坏性变更。
+### 已执行 0014 的 0.3.3 alpha 数据库
+
+`0.3.3-alpha1` 和 `0.3.3-alpha2` 中的 `0014` 只创建 uptime 表和设置，缺少采样和小时聚合装配。当前版本仍使用迁移编号 `0014`，因此 Goose 不会自动重跑已经执行的版本。正常启动和 `dash migrate` 缺少采样任务或小时聚合配置过程时会报错；曾手工补齐采样任务、但尚未补齐聚合的实例也需要执行下面的 SQL。
+
+这类实例需使用新版源码中的 SQL，以原迁移数据库用户和 schema 执行一次，再运行 `dash migrate` 同步离线阈值和统计时区。`DATABASE_URL` 指向该实例的 PostgreSQL 数据库：
+
+```bash
+psql "$DATABASE_URL" -X --set=ON_ERROR_STOP=1 --single-transaction --file=db/migrations/0014_uptime.sql
+```
+
+该 SQL 可重复执行，保留已有在线记录和系统设置，不重复创建采样或清理任务。不需要删除 `goose_db_version` 记录。尚未执行 `0014` 的实例按正常迁移流程升级即可。
 
 ## 0.3.0（2026-08-01）
 

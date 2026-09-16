@@ -75,5 +75,10 @@ func runMigrate(args []string) {
 		os.Exit(1)
 	}
 
+	if err := migrate.SyncOnlineJob(ctx, db, cfg.App.EffectiveNodeOfflineThreshold(), cfg.App.EffectiveLocation()); err != nil {
+		infra.Log().Error("sync online job failed", err)
+		os.Exit(1)
+	}
+
 	fmt.Printf("migrate: total=%d applied=%d skipped=%d\n", res.Total, res.Applied, res.Skipped)
 }

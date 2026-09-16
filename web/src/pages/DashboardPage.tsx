@@ -10,6 +10,7 @@ import Server from 'lucide-react/dist/esm/icons/server';
 import Shield from 'lucide-react/dist/esm/icons/shield';
 import { useI18n } from '@i18n';
 import { useFrontMetricsPolling } from '@pages/dashboard/useFrontMetricsPolling';
+import { useUptimePolling } from '@pages/dashboard/useUptimePolling';
 import { buildServerViewModel, formatBytes } from '@pages/dashboard/viewModel';
 import type { GroupView } from '@app-types/frontMetrics';
 
@@ -30,6 +31,7 @@ const SUMMARY_CARD_BASE_CLASS =
 
 const DashboardPage: React.FC = () => {
   const { nodes, isLoading } = useFrontMetricsPolling();
+  const uptime = useUptimePolling();
   const [searchTerm, setSearchTerm] = React.useState('');
   const [groups, setGroups] = React.useState<GroupView[]>([]);
   const [selectedGroupIds, setSelectedGroupIds] = React.useState<number[]>([]);
@@ -95,7 +97,14 @@ const DashboardPage: React.FC = () => {
     () => new Map(groups.map((group) => [group.id, group])),
     [groups],
   );
-  const serverViews = React.useMemo(() => nodes.map(buildServerViewModel), [nodes]);
+  const serverViews = React.useMemo(
+    () =>
+      nodes.map((node) => ({
+        ...buildServerViewModel(node),
+        uptimeHistory: uptime?.[node.node.id],
+      })),
+    [nodes, uptime],
+  );
 
   const summary = React.useMemo(() => {
     const filteredServers: typeof serverViews = [];

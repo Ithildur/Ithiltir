@@ -8,6 +8,7 @@ export const zh = {
   uptime: '运行时间',
   dashboard_uptime_range: '在线率 · 最近 {{days}} 天',
   dashboard_uptime_hours: '小时在线率 · 24 小时',
+  dashboard_uptime_fetch_failed: '在线率加载失败，稍后自动重试。',
   load: '负载',
   processes: '进程',
   swap: '虚拟内存',

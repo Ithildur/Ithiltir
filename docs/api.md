@@ -61,6 +61,7 @@ The admin password is supplied through `monitor_dash_pwd` and must contain at le
 - `/api/front/brand` is public.
 - `/api/front/metrics` and `/api/front/groups` allow anonymous reads, but anonymous results include only guest-visible nodes. Anonymous `/api/front/groups` omits groups that have no guest-visible nodes.
 - `/api/metrics/online` allows anonymous reads for guest-visible nodes.
+- `/api/metrics/uptime` and `/api/metrics/uptime/day` use `uptime_guest_visible` and node guest visibility. They do not use the separate history-access setting.
 - `/api/metrics/history` requires bearer by default. If `history_guest_access_mode` is `by_node`, anonymous reads are limited to guest-visible nodes.
 - `/api/statistics/access` is public.
 - Anonymous reads under `/api/statistics/traffic/*` are controlled by traffic settings and still respect node guest visibility.
@@ -128,12 +129,20 @@ The admin password is supplied through `monitor_dash_pwd` and must contain at le
 - MTProto login state failures from `/telegram/mtproto/code`, `/verify`, and `/password` return `503 login_state_error`. Finishing login patches only the session of the channel revision that started the flow; if the channel was replaced concurrently, `/verify` or `/password` returns `409 channel_changed` and the login must be restarted.
 - Deleting a channel removes it from alert settings and discards its unsent notifications.
 
+## Node Uptime
+
+- `GET /api/metrics/uptime` (also with a trailing slash) returns `{enabled, timezone, generated_at, warning_sla, error_sla, nodes}`. Each node has a string `server_id` and 45 `days`, oldest first including today. Each day has `date` (`YYYY-MM-DD`), `percent` (0–100 or `null`), and `samples` (observed minutes). Dates follow `app.timezone`, or the server's local timezone when unset. All dates are present even when no samples exist.
+- Authenticated callers receive all non-deleted nodes. Guests receive only guest-visible nodes when `uptime_guest_visible` is enabled; otherwise the daily endpoint returns `200` with `enabled: false` and an empty node list. SLA thresholds come from system settings and do not affect sampling.
+- `GET /api/metrics/uptime/day?server_id=<id>&date=YYYY-MM-DD` (also `/day/`) returns `{date, hours, samples}`. Both arrays have 24 entries indexed by local clock hour. Missing or future hours have a `null` percentage and zero samples. On a daylight-saving transition, a skipped hour is unknown and repeated clock hours combine their observations. Disabled guest access returns `403 forbidden`; hidden, deleted, and absent nodes return `404 not_found` to guests. Invalid IDs or dates outside the same 45-day window return `400 invalid_request`; database failures return `503 service_unavailable`.
+- Percentages are `100 × online observations / recorded observations`, weighted by sample count. Missing minutes are unknown and excluded from the denominator. A percentage is not proof of complete coverage; `samples` reports how much was observed. The existing `/api/metrics/online` retains its previous contract and data source.
+- The dashboard refreshes daily uptime independently every 60 seconds, and loads hour details only for an expanded day. Disabling guest access hides uptime; logging out discards authenticated uptime state.
+
 ## Admin System Settings
 
 - `GET /api/admin/system/settings` returns `history_guest_access_mode`, `dash_update_channel`, `dash_update_mode`, `logo_url`, `page_title`, `topbar_text`, `uptime_guest_visible`, `uptime_warning_sla`, and `uptime_error_sla`. `dash_update_channel` is `release` or `prerelease`; `dash_update_mode` is `manual`, `notify`, or `auto`.
 - `PATCH /api/admin/system/settings` validates and updates only the submitted fields, so concurrent updates to different fields do not overwrite one another and an unchanged legacy HTTP logo does not block unrelated edits. An empty update returns `400 no_fields`; invalid submitted values return `400 invalid_fields`.
 - `PUT /api/admin/system/settings` replaces the full settings document and requires `history_guest_access_mode`, `dash_update_channel`, `dash_update_mode`, `logo_url`, `page_title`, and `topbar_text`.
-- `uptime_guest_visible` defaults to `false`; `uptime_warning_sla` and `uptime_error_sla` are percentages defaulting to `99` and `95`. Thresholds refer to daily uptime: below warning is yellow, below error is red, with errors taking priority. They must satisfy `0 <= error < warning <= 100`; decimals are accepted. Omitted or `null` uptime fields retain their current values in both PATCH and PUT for compatibility with older clients. Invalid thresholds return `400 invalid_fields` and roll back the entire settings update. These settings are persisted only; uptime sampling, status rendering, and guest authorization on the existing `/api/metrics/online` endpoint do not consume them.
+- `uptime_guest_visible` defaults to `false`; `uptime_warning_sla` and `uptime_error_sla` are percentages defaulting to `99` and `95`. Thresholds refer to daily uptime: below warning is yellow, below error is red, with errors taking priority. They must satisfy `0 <= error < warning <= 100`; decimals are accepted. Omitted or `null` uptime fields retain their current values in both PATCH and PUT for compatibility with older clients. Invalid thresholds return `400 invalid_fields` and roll back the entire settings update. These settings control the new uptime endpoints and dashboard; sampling and the existing `/api/metrics/online` authorization are independent.
 - `logo_url` may be the built-in path, a same-origin absolute path, a base64 SVG, PNG, JPEG, GIF, WebP, or ICO data URL, or an external HTTPS URL. External HTTP URLs are rejected.
 - Stored external HTTP logos from an older release remain readable for compatibility. Browsers may still block them as mixed content on an HTTPS page; logo and favicon rendering then fall back to the built-in logo.
 

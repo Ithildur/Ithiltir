@@ -8,6 +8,7 @@ export const en = {
   uptime: 'Uptime',
   dashboard_uptime_range: 'Uptime · Last {{days}} days',
   dashboard_uptime_hours: 'Hourly uptime · 24 hours',
+  dashboard_uptime_fetch_failed: 'Unable to load uptime. Retrying shortly.',
   load: 'Load',
   processes: 'Procs',
   swap: 'Swap',
