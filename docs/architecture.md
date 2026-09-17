@@ -41,6 +41,7 @@ Install scripts are explicit GET/HEAD routes. Unmatched `/deploy/...` paths use 
 ## Data Flow
 
 1. Nodes submit metrics and static host data through `/api/node/*`.
+   Metrics retain their server receive timestamp before authentication and decoding. The persistence deadline is that timestamp plus five seconds; authentication, body reads, node-lock waits and the database transaction share this budget. Expired reports cannot enter metrics storage in a later uptime window.
 2. Successful metrics responses can include an update manifest.
 3. PostgreSQL + TimescaleDB store durable history, traffic facts, ordinary configuration, encrypted notification-channel configuration, and notification outbox rows.
 4. Redis stores admin sessions and the disposable frontend cache in the default mode; `--no-redis` replaces both with process memory. Alert runtime and MTProto login handshakes always stay inside the single Dash process.

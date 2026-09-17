@@ -61,9 +61,12 @@ func (h *handler) metricsRoute(r *routes.Blueprint) {
 }
 
 func (h *handler) metricsHandler(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
 	defer r.Body.Close()
 	receivedAt := time.Now().UTC()
+	// Receipt, authentication and node-lock waits share the persistence budget;
+	// no report may first enter storage after uptime finalizes its minute.
+	ctx, cancel := context.WithDeadline(r.Context(), receivedAt.Add(config.PGWriteTimeout))
+	defer cancel()
 	logger := infra.WithModule("node")
 
 	secret, server, err := h.authenticate(ctx, r, logger)
@@ -205,7 +208,7 @@ func (h *handler) persistMetrics(ctx context.Context, validated *validatedMetric
 
 	// Disk IO history is sourced from base_io; disk.physical participates only
 	// in report validation.
-	currentUpdated, err := h.saveMetrics(ctx, metricdata.MetricsSample{
+	currentUpdated, err := h.metric.SaveMetrics(ctx, metricdata.MetricsSample{
 		ServerID:  validated.server.ID,
 		Metric:    validated.metric,
 		Runtime:   validated.runtime,
@@ -280,12 +283,6 @@ func (h *handler) updateManifest(validated *validatedMetrics) (*updateManifest, 
 		SHA256:  target.SHA256,
 		Size:    target.Size,
 	}, nil
-}
-
-func (h *handler) saveMetrics(ctx context.Context, sample metricdata.MetricsSample) (bool, error) {
-	return infra.WithPGWriteTimeout(ctx, func(ctx context.Context) (bool, error) {
-		return h.metric.SaveMetrics(ctx, sample)
-	})
 }
 
 func (h *handler) refreshFrontSnapshot(ctx context.Context, node metrics.NodeView, report metrics.NodeReport) error {

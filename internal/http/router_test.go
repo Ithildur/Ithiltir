@@ -16,6 +16,7 @@ import (
 	"dash/internal/dashupdate"
 	"dash/internal/model"
 	"dash/internal/store"
+	pgtest "dash/internal/testutil/postgres"
 	"dash/internal/theme"
 	"dash/internal/traffic"
 	authjwt "github.com/Ithildur/EiluneKit/auth/jwt"
@@ -23,7 +24,7 @@ import (
 	"github.com/Ithildur/EiluneKit/http/routes"
 )
 
-func newTestHandler(t *testing.T) http.Handler {
+func newTestHandler(t *testing.T, st *store.Stores) http.Handler {
 	t.Helper()
 	home := t.TempDir()
 	for _, dir := range []string{"dist", "dist/assets", "deploy"} {
@@ -49,7 +50,9 @@ func newTestHandler(t *testing.T) http.Handler {
 	if err != nil {
 		t.Fatal(err)
 	}
-	st := store.New(nil, nil, time.UTC, nil)
+	if st == nil {
+		st = store.New(nil, nil, time.UTC, nil)
+	}
 	if err := st.Node.SyncServerCache(t.Context(), model.Server{ID: 1, Secret: "node-secret"}); err != nil {
 		t.Fatal(err)
 	}
@@ -69,7 +72,7 @@ func newTestHandler(t *testing.T) http.Handler {
 }
 
 func TestHTTPRoutes(t *testing.T) {
-	handler := newTestHandler(t)
+	handler := newTestHandler(t, nil)
 	for _, endpoint := range []struct {
 		method string
 		path   string
@@ -172,7 +175,7 @@ func TestHTTPRoutes(t *testing.T) {
 }
 
 func TestHTTPAPIRequests(t *testing.T) {
-	handler := newTestHandler(t)
+	handler := newTestHandler(t, nil)
 	login := httptest.NewRequest(http.MethodPost, "/api/auth/login", strings.NewReader(`{"password":"test-password","persistence":"session"}`))
 	login.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
@@ -251,6 +254,56 @@ func TestHTTPAPIRequests(t *testing.T) {
 			t.Fatalf("oversized POST %s = %d %v %s, want %d", endpoint.path, w.Code, w.Header(), w.Body, endpoint.status)
 		}
 	}
+	t.Run("metrics persistence deadline", func(t *testing.T) {
+		db := pgtest.NewDB(t)
+		if err := db.Exec("INSERT INTO servers(id,name,hostname,secret) VALUES (1,'node','node','node-secret')").Error; err != nil {
+			t.Fatal(err)
+		}
+		st := store.New(db, nil, time.UTC, pgtest.ConfigCipher(t))
+		handler := newTestHandler(t, st)
+		payload := `{"version":"0.2.4","hostname":"node","timestamp":"` + time.Now().UTC().Format(time.RFC3339Nano) + `","metrics":{"disk":{"physical":[],"logical":[],"filesystems":[],"base_io":[]},"network":[],"raid":{"arrays":[]},"system":{"uptime":"1s","uptime_seconds":1}}}`
+		for _, delayed := range []bool{true, false} {
+			var body io.Reader = strings.NewReader(payload)
+			if delayed {
+				reader, writer := io.Pipe()
+				t.Cleanup(func() { _ = reader.Close(); _ = writer.Close() })
+				body = reader
+				go func() {
+					// The first byte is consumed only after the handler has begun.
+					_, err := io.WriteString(writer, payload[:1])
+					if err == nil {
+						timer := time.NewTimer(config.PGWriteTimeout + 100*time.Millisecond)
+						defer timer.Stop()
+						select {
+						case <-timer.C:
+							_, err = io.WriteString(writer, payload[1:])
+						case <-t.Context().Done():
+							err = t.Context().Err()
+						}
+					}
+					_ = writer.CloseWithError(err)
+				}()
+			}
+			r := httptest.NewRequest(http.MethodPost, "/api/node/metrics", body).WithContext(t.Context())
+			r.Header.Set("Content-Type", "application/json")
+			r.Header.Set("X-Node-Secret", "node-secret")
+			w := httptest.NewRecorder()
+			handler.ServeHTTP(w, r)
+			status, rows := http.StatusOK, int64(1)
+			if delayed {
+				status, rows = http.StatusServiceUnavailable, 0
+			}
+			if w.Code != status {
+				t.Fatalf("metrics delayed=%v: %d %s, want %d", delayed, w.Code, w.Body, status)
+			}
+			for _, table := range []string{"server_metrics", "server_current_metrics"} {
+				var count int64
+				if err := db.Table(table).Count(&count).Error; err != nil || count != rows {
+					t.Fatalf("%s delayed=%v: count %d, error %v, want %d", table, delayed, count, err, rows)
+				}
+			}
+		}
+	})
 }
 
 func TestHTTPRecovery(t *testing.T) {
