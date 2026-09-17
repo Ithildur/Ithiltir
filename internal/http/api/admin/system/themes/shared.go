@@ -50,7 +50,7 @@ func writeInvalidPackage(w http.ResponseWriter, err error) {
 	httperr.Write(w, http.StatusBadRequest, "invalid_theme_package", err.Error())
 }
 
-func (h *handler) builtinViews(activeID string) ([]packageView, error) {
+func (h *handler) builtinViews(ctx context.Context, activeID string) ([]packageView, error) {
 	manifests, err := themefs.ListBuiltinManifests()
 	if err != nil {
 		return nil, fmt.Errorf("load builtin themes: %w", err)
@@ -70,20 +70,20 @@ func (h *handler) builtinViews(activeID string) ([]packageView, error) {
 				false,
 				nil,
 				nil,
-				h.hasBuiltinPreview(manifest.ID),
+				h.hasBuiltinPreview(ctx, manifest.ID),
 			),
 		)
 	}
 	return views, nil
 }
 
-func (h *handler) hasBuiltinPreview(id string) bool {
+func (h *handler) hasBuiltinPreview(ctx context.Context, id string) bool {
 	_, err := themefs.BuiltinPreview(id)
 	if err == nil {
 		return true
 	}
 	if !errors.Is(err, os.ErrNotExist) {
-		h.logger.Warn("failed to inspect builtin theme preview", err, slog.String("theme_id", id))
+		h.logger.Warn(ctx, "failed to inspect builtin theme preview", err, slog.String("theme_id", id))
 	}
 	return false
 }

@@ -35,7 +35,7 @@ func (h *handler) identityHandler(w http.ResponseWriter, r *http.Request) {
 
 	identity, err := h.loadIdentity()
 	if err != nil {
-		logger.Error("load server identity failed", err)
+		logger.Error(ctx, "load server identity failed", err)
 		h.writeError(w, r, logger, httperr.ServiceUnavailable(err))
 		return
 	}

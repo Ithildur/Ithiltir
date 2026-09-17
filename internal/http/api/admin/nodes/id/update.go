@@ -96,7 +96,7 @@ func (h *handler) updateHandler(w http.ResponseWriter, r *http.Request, rawID st
 			return
 		}
 		if hadDup {
-			infra.WithModule("admin.nodes").Warn("duplicate group ids removed", nil,
+			infra.WithModule("admin.nodes").Warn(r.Context(), "duplicate group ids removed", nil,
 				slog.Int64("node_id", id),
 				slog.Int("before", len(*in.GroupIDs)),
 				slog.Int("after", len(normalized)),
@@ -115,7 +115,7 @@ func (h *handler) updateHandler(w http.ResponseWriter, r *http.Request, rawID st
 		return struct{}{}, h.store.UpdateNode(c, id, upd)
 	}); err != nil {
 		if errors.Is(err, nodestore.ErrFrontCacheUpdate) {
-			infra.WithModule("admin.nodes").Warn("front cache sync failed after node update", err,
+			infra.WithModule("admin.nodes").Warn(r.Context(), "front cache sync failed after node update", err,
 				slog.Int64("node_id", id),
 			)
 			httperr.Write(w, http.StatusServiceUnavailable, "redis_cache_error", "sync failed")

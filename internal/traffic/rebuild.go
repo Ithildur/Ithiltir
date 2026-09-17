@@ -154,7 +154,7 @@ func (r *RebuildRunner) run(serverID int64) {
 
 	err := r.rebuild(r.ctx, serverID)
 	if err != nil && !errors.Is(err, context.Canceled) {
-		infra.WithModule("traffic").Warn("traffic rebuild failed", err, slog.Int64("server_id", serverID))
+		infra.WithModule("traffic").Warn(r.ctx, "traffic rebuild failed", err, slog.Int64("server_id", serverID))
 	}
 	r.finish(serverID, err)
 }

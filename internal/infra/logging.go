@@ -124,6 +124,6 @@ func setDefaultSlog(logger *slog.Logger) {
 // Fatal logs an error message and exits with code 1.
 // Use for startup failures that should terminate the program.
 func Fatal(msg string, err error, attrs ...slog.Attr) {
-	Log().Error(msg, err, attrs...)
+	Log().Error(context.Background(), msg, err, attrs...)
 	os.Exit(1)
 }

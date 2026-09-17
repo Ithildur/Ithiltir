@@ -30,12 +30,12 @@ func (h *handler) uploadHandler(w http.ResponseWriter, r *http.Request) {
 	deadline := time.Now().Add(config.ThemeUploadTimeout)
 	controller := http.NewResponseController(w)
 	if err := controller.SetReadDeadline(deadline); err != nil && !errors.Is(err, http.ErrNotSupported) {
-		h.logger.Warn("set theme upload read deadline failed", err)
+		h.logger.Warn(r.Context(), "set theme upload read deadline failed", err)
 		httperr.Write(w, http.StatusInternalServerError, "theme_storage_unavailable", "failed to initialize theme upload")
 		return
 	}
 	if err := controller.SetWriteDeadline(deadline); err != nil && !errors.Is(err, http.ErrNotSupported) {
-		h.logger.Warn("set theme upload write deadline failed", err)
+		h.logger.Warn(r.Context(), "set theme upload write deadline failed", err)
 		httperr.Write(w, http.StatusInternalServerError, "theme_storage_unavailable", "failed to initialize theme upload")
 		return
 	}
@@ -71,12 +71,12 @@ func (h *handler) uploadHandler(w http.ResponseWriter, r *http.Request) {
 			writeInvalidPackage(w, err)
 			return
 		}
-		h.logger.Warn("failed to install theme package", err)
+		h.logger.Warn(r.Context(), "failed to install theme package", err)
 		httperr.Write(w, http.StatusInternalServerError, "theme_storage_unavailable", "failed to install theme")
 		return
 	}
 	if pkg.CleanupWarning != nil {
-		h.logger.Warn(
+		h.logger.Warn(r.Context(),
 			"theme installed but previous backup cleanup failed",
 			pkg.CleanupWarning,
 			slog.String("theme_id", pkg.Manifest.ID),
@@ -90,7 +90,7 @@ func (h *handler) uploadHandler(w http.ResponseWriter, r *http.Request) {
 		active = selected && state.State == themefs.ActiveReady
 		deletable = !selected
 	} else {
-		h.logger.Warn(
+		h.logger.Warn(r.Context(),
 			"failed to resolve active theme after upload",
 			err,
 			slog.String("theme_id", pkg.Manifest.ID),

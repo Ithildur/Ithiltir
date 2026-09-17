@@ -27,7 +27,7 @@ func writeSessionUpdateError(w http.ResponseWriter, err error) {
 
 func (h *handler) clearLoginState(ctx context.Context, loginID string) {
 	if err := h.login.Delete(ctx, loginID); err != nil {
-		h.logger.Warn(
+		h.logger.Warn(ctx,
 			"failed to clear completed MTProto login state",
 			err,
 			slog.String("login_id", loginID),

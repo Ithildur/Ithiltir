@@ -1,6 +1,7 @@
 package httperr
 
 import (
+	"context"
 	"errors"
 	"log/slog"
 	"net/http"
@@ -37,7 +38,7 @@ func (e *Error) Unwrap() error {
 }
 
 type ErrorLogger interface {
-	Error(msg string, err error, attrs ...slog.Attr)
+	Error(ctx context.Context, msg string, err error, attrs ...slog.Attr)
 }
 
 func Wrap(status int, code, message string, cause error) *Error {
@@ -96,12 +97,12 @@ func TryWrite(w http.ResponseWriter, err error) bool {
 	return true
 }
 
-func WriteOrInternal(w http.ResponseWriter, logger ErrorLogger, err error) {
+func WriteOrInternal(ctx context.Context, w http.ResponseWriter, logger ErrorLogger, err error) {
 	if TryWrite(w, err) {
 		return
 	}
 	if logger != nil {
-		logger.Error("unexpected error", err)
+		logger.Error(ctx, "unexpected error", err)
 	}
 	Write(w, http.StatusInternalServerError, "internal_error", "internal error")
 }

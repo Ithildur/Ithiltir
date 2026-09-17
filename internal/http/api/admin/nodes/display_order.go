@@ -44,7 +44,7 @@ func (h *handler) displayOrderHandler(w http.ResponseWriter, r *http.Request) {
 		return struct{}{}, h.store.UpdateDisplayOrder(c, ids)
 	}); err != nil {
 		if errors.Is(err, nodestore.ErrFrontCacheUpdate) {
-			infra.WithModule("admin.nodes").Warn("front cache sync failed after display order update", err,
+			infra.WithModule("admin.nodes").Warn(r.Context(), "front cache sync failed after display order update", err,
 				slog.Int("count", len(ids)),
 			)
 			httperr.Write(w, http.StatusServiceUnavailable, "redis_cache_error", "sync failed")

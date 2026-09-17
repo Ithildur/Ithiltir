@@ -21,7 +21,7 @@ func (s *Service) runControlLoop(ctx context.Context) error {
 	for {
 		processed, err := s.processControlTasks(ctx)
 		if err != nil {
-			s.logger.Warn("process control task failed", err)
+			s.logger.Warn(ctx, "process control task failed", err)
 			ticker.Reset(controlPollInterval)
 		} else if processed {
 			continue
@@ -52,7 +52,7 @@ func (s *Service) processControlTasks(ctx context.Context) (bool, error) {
 				if failErr := s.store.FailControlTask(ctx, task.ID, err.Error()); failErr != nil {
 					return processed, fmt.Errorf("fail invalid control task %d: %w", task.ID, failErr)
 				}
-				s.logger.Warn("control task permanently failed", err, kitlog.Int64("task_id", task.ID), kitlog.String("task_type", task.TaskType))
+				s.logger.Warn(ctx, "control task permanently failed", err, kitlog.Int64("task_id", task.ID), kitlog.String("task_type", task.TaskType))
 				continue
 			}
 			next := now.Add(controlTaskRetryDelay(task.AttemptCount))
@@ -60,7 +60,7 @@ func (s *Service) processControlTasks(ctx context.Context) (bool, error) {
 			if retryErr != nil {
 				return processed, fmt.Errorf("retry control task %d: %w", task.ID, retryErr)
 			}
-			s.logger.Warn("control task failed", err, kitlog.Int64("task_id", task.ID), kitlog.String("task_type", task.TaskType))
+			s.logger.Warn(ctx, "control task failed", err, kitlog.Int64("task_id", task.ID), kitlog.String("task_type", task.TaskType))
 			continue
 		}
 		if err := s.store.CompleteControlTask(ctx, task.ID); err != nil {
@@ -132,7 +132,7 @@ func (s *Service) runFullReconcileTicker(ctx context.Context) error {
 			return nil
 		case <-ticker.C:
 			if err := s.enqueueReconcile(ctx); err != nil {
-				s.logger.Warn("enqueue periodic full reconcile failed", err)
+				s.logger.Warn(ctx, "enqueue periodic full reconcile failed", err)
 			}
 		}
 	}

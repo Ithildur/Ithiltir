@@ -42,7 +42,7 @@ func (h *handler) staticHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.saveStatic(ctx, validated.secret, validated.server.ID, validated.patch); err != nil {
-		logger.Error("save static metrics failed", err)
+		logger.Error(ctx, "save static metrics failed", err)
 		h.writeError(w, r, logger, httperr.ServiceUnavailable(err))
 		return
 	}

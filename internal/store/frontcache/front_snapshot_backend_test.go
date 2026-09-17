@@ -253,7 +253,7 @@ func TestIntegrationFetchCurrentNodeDoesNotDependOnRedis(t *testing.T) {
 	ctx := context.Background()
 	db := pgtest.NewDB(t)
 	redisServer := miniredis.RunT(t)
-	client := redis.NewClient(&redis.Options{Addr: redisServer.Addr()})
+	client := redis.NewClient(&redis.Options{ContextTimeoutEnabled: true, Addr: redisServer.Addr()})
 	t.Cleanup(func() { _ = client.Close() })
 	st := newTestStore(db, client)
 
@@ -286,7 +286,7 @@ func TestIntegrationFrontNodesComposeRuntimeFields(t *testing.T) {
 	ctx := context.Background()
 	db := pgtest.NewDB(t)
 	srv := miniredis.RunT(t)
-	client := redis.NewClient(&redis.Options{Addr: srv.Addr()})
+	client := redis.NewClient(&redis.Options{ContextTimeoutEnabled: true, Addr: srv.Addr()})
 	t.Cleanup(func() { _ = client.Close() })
 	st := newTestStore(db, client)
 
@@ -501,7 +501,7 @@ func TestRedisFrontSnapshotCorruptionClearsPublishedState(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			ctx := context.Background()
 			srv := miniredis.RunT(t)
-			client := redis.NewClient(&redis.Options{Addr: srv.Addr()})
+			client := redis.NewClient(&redis.Options{ContextTimeoutEnabled: true, Addr: srv.Addr()})
 			t.Cleanup(func() { _ = client.Close() })
 			st := newTestStore(nil, client)
 			if tt.seed {
@@ -527,7 +527,7 @@ func TestRedisFrontSnapshotCorruptionClearsPublishedState(t *testing.T) {
 func TestRedisUnknownRuntimeInvalidatesWithoutJoiningCatalog(t *testing.T) {
 	ctx := context.Background()
 	srv := miniredis.RunT(t)
-	client := redis.NewClient(&redis.Options{Addr: srv.Addr()})
+	client := redis.NewClient(&redis.Options{ContextTimeoutEnabled: true, Addr: srv.Addr()})
 	t.Cleanup(func() { _ = client.Close() })
 
 	st := newTestStore(nil, client)
@@ -552,7 +552,7 @@ func TestRedisUnknownRuntimeInvalidatesWithoutJoiningCatalog(t *testing.T) {
 func TestRedisMetadataRebuildKeepsNewerRuntime(t *testing.T) {
 	ctx := context.Background()
 	srv := miniredis.RunT(t)
-	client := redis.NewClient(&redis.Options{Addr: srv.Addr()})
+	client := redis.NewClient(&redis.Options{ContextTimeoutEnabled: true, Addr: srv.Addr()})
 	t.Cleanup(func() { _ = client.Close() })
 
 	st := newTestStore(nil, client)

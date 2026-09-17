@@ -270,7 +270,7 @@ func newRedisIntegrationStore(t *testing.T) (*Store, *miniredis.Miniredis) {
 
 	db := pgtest.NewDB(t)
 	redisServer := miniredis.RunT(t)
-	client := redis.NewClient(&redis.Options{Addr: redisServer.Addr()})
+	client := redis.NewClient(&redis.Options{ContextTimeoutEnabled: true, Addr: redisServer.Addr()})
 	t.Cleanup(func() { _ = client.Close() })
 	return newTestStore(db, client), redisServer
 }

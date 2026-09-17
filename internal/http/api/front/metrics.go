@@ -114,7 +114,7 @@ func (h *handler) fetchSnapshot(ctx context.Context, authorized bool) ([]metrics
 	})
 
 	if err != nil {
-		logCacheWarn("cache ensure", err)
+		logCacheWarn(ctx, "cache ensure", err)
 		return nil, err
 	}
 
@@ -131,7 +131,7 @@ func (h *handler) fetchSnapshot(ctx context.Context, authorized bool) ([]metrics
 		BuildTimeout: config.PGReadTimeout,
 	})
 	if err != nil {
-		logCacheWarn("guest visibility cache ensure", err)
+		logCacheWarn(ctx, "guest visibility cache ensure", err)
 		return nil, err
 	}
 	return filterGuestNodes(nodes, ids, allowed), nil
@@ -255,9 +255,9 @@ func (h *handler) isAuthorized(r *http.Request) bool {
 	return r != nil && routes.Authenticated(r.Context())
 }
 
-func logCacheWarn(action string, err error) {
+func logCacheWarn(ctx context.Context, action string, err error) {
 	if err == nil {
 		return
 	}
-	infra.WithModule("front").Warn("cache issue", err, slog.String("action", action))
+	infra.WithModule("front").Warn(ctx, "cache issue", err, slog.String("action", action))
 }

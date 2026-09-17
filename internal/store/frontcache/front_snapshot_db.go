@@ -128,7 +128,7 @@ func (s *Store) fetchFrontProjections(ctx context.Context, staleAfterSec int, li
 		}
 		report, err := metrics.BuildNodeReport(srv, m)
 		if err != nil {
-			logger.Warn("build front snapshot failed", err,
+			logger.Warn(ctx, "build front snapshot failed", err,
 				slog.Int64("server_id", m.ServerID),
 				slog.Time("collected_at", m.CollectedAt),
 			)
@@ -144,7 +144,7 @@ func (s *Store) fetchFrontProjections(ctx context.Context, staleAfterSec int, li
 			report.Metrics.Network = nics
 		}
 		if _, err := nodetags.ParseStored(srv.Tags); err != nil {
-			logger.Warn("discard invalid stored node tags", err,
+			logger.Warn(ctx, "discard invalid stored node tags", err,
 				slog.Int64("server_id", srv.ID),
 			)
 		}

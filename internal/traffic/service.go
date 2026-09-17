@@ -115,7 +115,7 @@ func (s *Service) Run(ctx context.Context) error {
 
 func (s *Service) materialize(ctx context.Context) {
 	if err := s.materializeOnce(ctx); err != nil {
-		s.logger.Warn("materialize traffic failed", err)
+		s.logger.Warn(ctx, "materialize traffic failed", err)
 	}
 }
 
@@ -227,7 +227,7 @@ func (s *Service) factsStep(ctx context.Context, target, sourceFloor time.Time) 
 
 func (s *Service) snapshot(ctx context.Context) {
 	if err := s.gate.with(ctx, s.snapshotOnce); err != nil {
-		s.logger.Warn("refresh traffic monthly snapshots failed", err)
+		s.logger.Warn(ctx, "refresh traffic monthly snapshots failed", err)
 	}
 }
 

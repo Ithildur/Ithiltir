@@ -18,7 +18,7 @@ import (
 func TestRedisGuestVisibilityMissingIDsClearsMeta(t *testing.T) {
 	ctx := context.Background()
 	srv := miniredis.RunT(t)
-	client := redis.NewClient(&redis.Options{Addr: srv.Addr()})
+	client := redis.NewClient(&redis.Options{ContextTimeoutEnabled: true, Addr: srv.Addr()})
 	t.Cleanup(func() { _ = client.Close() })
 
 	st := newTestStore(nil, client)
@@ -40,7 +40,7 @@ func TestRedisGuestVisibilityMissingIDsClearsMeta(t *testing.T) {
 func TestRedisGuestVisibilityCorruptMetaClearsMeta(t *testing.T) {
 	ctx := context.Background()
 	srv := miniredis.RunT(t)
-	client := redis.NewClient(&redis.Options{Addr: srv.Addr()})
+	client := redis.NewClient(&redis.Options{ContextTimeoutEnabled: true, Addr: srv.Addr()})
 	t.Cleanup(func() { _ = client.Close() })
 
 	st := newTestStore(nil, client)
@@ -59,7 +59,7 @@ func TestRedisGuestVisibilityCorruptMetaClearsMeta(t *testing.T) {
 func TestGuestVisibilityPublishedEmptySet(t *testing.T) {
 	ctx := context.Background()
 	srv := miniredis.RunT(t)
-	client := redis.NewClient(&redis.Options{Addr: srv.Addr()})
+	client := redis.NewClient(&redis.Options{ContextTimeoutEnabled: true, Addr: srv.Addr()})
 	t.Cleanup(func() { _ = client.Close() })
 
 	st := newTestStore(nil, client)
@@ -154,7 +154,7 @@ func TestIntegrationEnsureGuestVisibleIDs(t *testing.T) {
 func TestGuestVisibilitySurvivesStoreRestart(t *testing.T) {
 	ctx := context.Background()
 	srv := miniredis.RunT(t)
-	client := redis.NewClient(&redis.Options{Addr: srv.Addr()})
+	client := redis.NewClient(&redis.Options{ContextTimeoutEnabled: true, Addr: srv.Addr()})
 	t.Cleanup(func() { _ = client.Close() })
 
 	first := newTestStore(nil, client)

@@ -66,7 +66,7 @@ func (h *handler) testMessageHandler(w http.ResponseWriter, r *http.Request, raw
 		session, isMTProto, err := notify.SessionFromConfig(item.Config)
 		if err != nil {
 			if recordErr := h.recordTestFailure(r.Context(), item, err); recordErr != nil {
-				h.writeTestFailureStoreError(w, recordErr)
+				h.writeTestFailureStoreError(r.Context(), w, recordErr)
 				return
 			}
 			httperr.Write(w, http.StatusBadRequest, "invalid_fields", "invalid config")
@@ -74,7 +74,7 @@ func (h *handler) testMessageHandler(w http.ResponseWriter, r *http.Request, raw
 		}
 		if isMTProto && strings.TrimSpace(session) == "" {
 			if recordErr := h.recordTestFailure(r.Context(), item, notify.ErrInvalidConfig); recordErr != nil {
-				h.writeTestFailureStoreError(w, recordErr)
+				h.writeTestFailureStoreError(r.Context(), w, recordErr)
 				return
 			}
 			httperr.Write(w, http.StatusBadRequest, "not_logged_in", "mtproto not logged in")
@@ -104,7 +104,7 @@ func (h *handler) testMessageHandler(w http.ResponseWriter, r *http.Request, raw
 	}
 
 	if err := h.recoverTestedChannel(r.Context(), item.ID, item.Revision); err != nil {
-		h.logger.Warn("recover tested notification channel failed", err)
+		h.logger.Warn(r.Context(), "recover tested notification channel failed", err)
 		httperr.Write(w, http.StatusServiceUnavailable, "db_error", "test message sent but channel recovery failed")
 		return
 	}
@@ -113,7 +113,7 @@ func (h *handler) testMessageHandler(w http.ResponseWriter, r *http.Request, raw
 
 func (h *handler) writeTestSendError(w http.ResponseWriter, r *http.Request, item *model.NotifyChannel, err error) {
 	if recordErr := h.recordTestFailure(r.Context(), item, err); recordErr != nil {
-		h.writeTestFailureStoreError(w, recordErr)
+		h.writeTestFailureStoreError(r.Context(), w, recordErr)
 		return
 	}
 	if errors.Is(err, notify.ErrInvalidConfig) {
@@ -157,7 +157,7 @@ func (h *handler) recordTestFailure(
 	return nil
 }
 
-func (h *handler) writeTestFailureStoreError(w http.ResponseWriter, err error) {
-	h.logger.Warn("record tested notification channel failure failed", err)
+func (h *handler) writeTestFailureStoreError(ctx context.Context, w http.ResponseWriter, err error) {
+	h.logger.Warn(ctx, "record tested notification channel failure failed", err)
 	httperr.Write(w, http.StatusServiceUnavailable, "db_error", "test message failed and channel status update failed")
 }

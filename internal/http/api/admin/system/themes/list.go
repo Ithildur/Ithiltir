@@ -36,7 +36,7 @@ func (h *handler) listHandler(w http.ResponseWriter, r *http.Request) {
 		httperr.WriteWarningHeader(w, "theme_active_missing")
 	case themefs.ActiveBroken:
 		httperr.WriteWarningHeader(w, "theme_active_broken")
-		h.logger.Warn(
+		h.logger.Warn(r.Context(),
 			"active theme package is broken",
 			state.Err,
 			slog.String("theme_id", state.ConfiguredID),
@@ -54,14 +54,14 @@ func (h *handler) listHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	for _, warning := range warnings {
-		h.logger.Warn(
+		h.logger.Warn(r.Context(),
 			"theme package warning",
 			warning.Err,
 			slog.String("theme_id", warning.ID),
 		)
 	}
 
-	builtin, err := h.builtinViews(state.ResolvedID)
+	builtin, err := h.builtinViews(r.Context(), state.ResolvedID)
 	if err != nil {
 		httperr.Write(w, http.StatusInternalServerError, "theme_unavailable", "failed to load builtin themes")
 		return

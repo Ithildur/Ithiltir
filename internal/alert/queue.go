@@ -95,7 +95,7 @@ func (s *Service) loadRuntimeState(ctx context.Context, serverID int64) (map[str
 		return nil, fmt.Errorf("repair alert runtime for server %d: %w", serverID, err)
 	}
 	if s.logger != nil {
-		s.logger.Info(
+		s.logger.Info(ctx,
 			"repaired corrupt alert runtime",
 			nil,
 			kitlog.Int64("server_id", serverID),

@@ -104,7 +104,7 @@ func (s *Service) runNotificationLoop(ctx context.Context) error {
 	for {
 		processed, err := s.processNotifications(ctx)
 		if err != nil {
-			s.logger.Warn("process alert notifications failed", err)
+			s.logger.Warn(ctx, "process alert notifications failed", err)
 			ticker.Reset(notificationPollInterval)
 		} else if processed {
 			continue
@@ -172,24 +172,24 @@ func (s *Service) processNotifications(ctx context.Context) (bool, error) {
 			if err := s.store.RetryNotification(ctx, stored); err != nil {
 				return processed, fmt.Errorf("schedule alert notification %d retry: %w", item.ID, err)
 			}
-			s.logger.Warn("alert notification retry scheduled", failure.err, fields...)
+			s.logger.Warn(ctx, "alert notification retry scheduled", failure.err, fields...)
 		case model.OutboxStatusBlocked:
 			delay := max(notificationBlockedDelay(item.ProbeCount), failure.retryAfter)
 			stored.NextAttemptAt = failedAt.Add(delay)
 			if err := s.store.BlockNotification(ctx, stored); err != nil {
 				return processed, fmt.Errorf("block alert notification %d: %w", item.ID, err)
 			}
-			s.logger.Warn("alert notification blocked", failure.err, fields...)
+			s.logger.Warn(ctx, "alert notification blocked", failure.err, fields...)
 		case model.OutboxStatusPaused:
 			if err := s.store.PauseNotification(ctx, stored); err != nil {
 				return processed, fmt.Errorf("pause alert notification %d: %w", item.ID, err)
 			}
-			s.logger.Warn("alert notification paused", failure.err, fields...)
+			s.logger.Warn(ctx, "alert notification paused", failure.err, fields...)
 		case model.OutboxStatusDiscarded:
 			if err := s.store.DiscardNotification(ctx, stored); err != nil {
 				return processed, fmt.Errorf("discard alert notification %d: %w", item.ID, err)
 			}
-			s.logger.Warn("alert notification discarded", failure.err, fields...)
+			s.logger.Warn(ctx, "alert notification discarded", failure.err, fields...)
 		default:
 			return processed, fmt.Errorf("unsupported notification failure status %q", failure.status)
 		}
@@ -240,7 +240,7 @@ func (s *Service) completeNotificationUntil(
 			return fmt.Errorf("complete alert notification %d: %w", item.ID, errors.Join(err, ctx.Err()))
 		}
 
-		s.logger.Warn(
+		s.logger.Warn(ctx,
 			"persist sent alert notification failed; retrying without resending",
 			err,
 			notificationLogFields(item)...,

@@ -55,7 +55,7 @@ func (h *handler) onlineHandler(w http.ResponseWriter, r *http.Request) {
 	if !h.isAuthorized(r) {
 		ok, err := h.isGuestVisible(r.Context(), in.ServerID)
 		if err != nil {
-			infra.WithModule("metrics").Warn("guest visibility check failed", err)
+			infra.WithModule("metrics").Warn(r.Context(), "guest visibility check failed", err)
 			httperr.TryWrite(w, httperr.ServiceUnavailable(err))
 			return
 		}

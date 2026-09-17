@@ -95,7 +95,7 @@ func (s *Service) Run(ctx context.Context) error {
 func (s *Service) tick(ctx context.Context) {
 	s.notifyFinishedAutoUpdate(ctx)
 	if err := s.checkAndAct(ctx); err != nil {
-		s.logger.Warn("dash update auto check failed", err)
+		s.logger.Warn(ctx, "dash update auto check failed", err)
 	}
 }
 
@@ -182,13 +182,13 @@ func (s *Service) checkAndAct(ctx context.Context) error {
 func (s *Service) notifyFinishedAutoUpdate(ctx context.Context) {
 	paths, err := s.runner.paths()
 	if err != nil {
-		s.logger.Warn("resolve dash update state path failed", err)
+		s.logger.Warn(ctx, "resolve dash update state path failed", err)
 		return
 	}
 	current := s.runner.Status(ctx)
 	jobs, scanErr := pendingFinishedAutoJobs(paths)
 	if scanErr != nil {
-		s.logger.Warn("scan finished dash auto updates failed", scanErr)
+		s.logger.Warn(ctx, "scan finished dash auto updates failed", scanErr)
 	}
 	for _, job := range jobs {
 		err := s.enqueueNotification(
@@ -197,16 +197,16 @@ func (s *Service) notifyFinishedAutoUpdate(ctx context.Context) {
 			finishedMessages(job.status),
 		)
 		if err != nil {
-			s.logger.Warn("enqueue dash update finish notification failed", err)
+			s.logger.Warn(ctx, "enqueue dash update finish notification failed", err)
 			continue
 		}
 		if err := markAutoJobHandled(job.handledPath); err != nil {
-			s.logger.Warn("mark dash update finish notification handled failed", err)
+			s.logger.Warn(ctx, "mark dash update finish notification handled failed", err)
 		}
 	}
 	s.notifyLegacyFinishedAutoUpdate(ctx, paths, current)
 	if err := cleanupUpdateJobs(paths, current.ID); err != nil {
-		s.logger.Warn("clean up finished dash update jobs failed", err)
+		s.logger.Warn(ctx, "clean up finished dash update jobs failed", err)
 	}
 }
 
@@ -214,7 +214,7 @@ func (s *Service) notifyLegacyFinishedAutoUpdate(ctx context.Context, paths runn
 	autoStatePath := filepath.Join(paths.stateDir, updateAutoStateName)
 	state, err := readAutoStateFile(autoStatePath)
 	if err != nil {
-		s.logger.Warn("read legacy dash update auto state failed", err)
+		s.logger.Warn(ctx, "read legacy dash update auto state failed", err)
 		return
 	}
 	if state.LastStartedID == "" || state.LastFinishedID == state.LastStartedID {
@@ -234,12 +234,12 @@ func (s *Service) notifyLegacyFinishedAutoUpdate(ctx context.Context, paths runn
 		"dash-update:finished:"+state.LastStartedID,
 		finishedMessages(status),
 	); err != nil {
-		s.logger.Warn("enqueue dash update finish notification failed", err)
+		s.logger.Warn(ctx, "enqueue dash update finish notification failed", err)
 		return
 	}
 	state.LastFinishedID = state.LastStartedID
 	if err := writeAutoStateFile(autoStatePath, state); err != nil {
-		s.logger.Warn("write legacy dash update auto state failed", err)
+		s.logger.Warn(ctx, "write legacy dash update auto state failed", err)
 	}
 }
 
@@ -254,7 +254,7 @@ func (s *Service) enqueueNotification(ctx context.Context, key string, messages 
 	switch status {
 	case notify.EnqueueQueued, notify.EnqueueSkippedNoTargets:
 		if err != nil {
-			s.logger.Warn("notification request handled with warning", err)
+			s.logger.Warn(ctx, "notification request handled with warning", err)
 		}
 		return nil
 	default:

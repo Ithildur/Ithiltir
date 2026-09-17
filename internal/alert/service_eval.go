@@ -21,7 +21,7 @@ func (s *Service) runEvalWorker(ctx context.Context, workerID int) error {
 
 		err := s.processServer(ctx, serverID, snapshot)
 		if err != nil {
-			s.logger.Warn("process server alert reconcile failed", err,
+			s.logger.Warn(ctx, "process server alert reconcile failed", err,
 				kitlog.Int("worker", workerID),
 				kitlog.Int64("server_id", serverID),
 			)
@@ -56,7 +56,7 @@ func (s *Service) processServer(ctx context.Context, serverID int64, snapshot *m
 		return errors.New("alert rule cache returned no compiled rules")
 	}
 	if cacheErr != nil {
-		s.logger.Warn("refresh rule cache failed during evaluation", cacheErr)
+		s.logger.Warn(ctx, "refresh rule cache failed during evaluation", cacheErr)
 	}
 
 	current, err := s.loadRuntimeState(ctx, serverID)
@@ -83,7 +83,7 @@ func (s *Service) processServer(ctx context.Context, serverID int64, snapshot *m
 	for _, transition := range result.CloseTransitions {
 		notifications, notifyErr := s.closeNotificationParams(ctx, transition)
 		if notifyErr != nil {
-			s.logNotificationTargetError(notifyErr, serverID, transition.StateKey, notifications)
+			s.logNotificationTargetError(ctx, notifyErr, serverID, transition.StateKey, notifications)
 			if errors.Is(notifyErr, errNotificationTargetsUnavailable) {
 				continue
 			}
@@ -104,7 +104,7 @@ func (s *Service) processServer(ctx context.Context, serverID int64, snapshot *m
 				delete(result.Next, transition.StateKey)
 				continue
 			}
-			s.logger.Warn("write close transition failed", err, kitlog.Int64("server_id", serverID), kitlog.String("state_key", transition.StateKey))
+			s.logger.Warn(ctx, "write close transition failed", err, kitlog.Int64("server_id", serverID), kitlog.String("state_key", transition.StateKey))
 			continue
 		}
 		closingStateKeys[transition.StateKey] = struct{}{}
@@ -124,7 +124,7 @@ func (s *Service) processServer(ctx context.Context, serverID int64, snapshot *m
 		message := buildOpenMessage(transition, s.message)
 		notifications, notifyErr := s.openNotificationParams(ctx, transition)
 		if notifyErr != nil {
-			s.logNotificationTargetError(notifyErr, serverID, transition.StateKey, notifications)
+			s.logNotificationTargetError(ctx, notifyErr, serverID, transition.StateKey, notifications)
 			if errors.Is(notifyErr, errNotificationTargetsUnavailable) {
 				continue
 			}
@@ -147,7 +147,7 @@ func (s *Service) processServer(ctx context.Context, serverID int64, snapshot *m
 			if errors.Is(err, alertstore.ErrAlertRuleVersionStale) {
 				continue
 			}
-			s.logger.Warn("write open transition failed", err, kitlog.Int64("server_id", serverID), kitlog.String("state_key", transition.StateKey))
+			s.logger.Warn(ctx, "write open transition failed", err, kitlog.Int64("server_id", serverID), kitlog.String("state_key", transition.StateKey))
 			continue
 		}
 		if outcome.EventID > 0 {
@@ -159,12 +159,12 @@ func (s *Service) processServer(ctx context.Context, serverID int64, snapshot *m
 	return saveRuntimeState(ctx, s.store, serverID, current, result.Next)
 }
 
-func (s *Service) logNotificationTargetError(err error, serverID int64, stateKey string, notifications []alertstore.AlertNotificationParams) {
+func (s *Service) logNotificationTargetError(ctx context.Context, err error, serverID int64, stateKey string, notifications []alertstore.AlertNotificationParams) {
 	if errors.Is(err, errNotificationTargetsUnavailable) {
-		s.logger.Warn("alert notification targets unavailable; deferring transition", err, kitlog.Int64("server_id", serverID), kitlog.String("state_key", stateKey))
+		s.logger.Warn(ctx, "alert notification targets unavailable; deferring transition", err, kitlog.Int64("server_id", serverID), kitlog.String("state_key", stateKey))
 		return
 	}
-	s.logger.Warn("load alert notification targets failed; using cached notification targets", err, kitlog.Int64("server_id", serverID), kitlog.String("state_key", stateKey))
+	s.logger.Warn(ctx, "load alert notification targets failed; using cached notification targets", err, kitlog.Int64("server_id", serverID), kitlog.String("state_key", stateKey))
 }
 
 func (s *Service) flushHeartbeats(ctx context.Context, current, next map[string]RuntimeState, closingStateKeys map[string]struct{}, serverID int64) {
@@ -176,7 +176,7 @@ func (s *Service) flushHeartbeats(ctx context.Context, current, next map[string]
 		}
 		found, err := s.store.TouchOpenEvent(ctx, state.EventID, state.LastObservedAtTime(), state.CurrentValue, state.EffectiveThreshold)
 		if err != nil {
-			s.logger.Warn("touch firing alert failed", err, kitlog.Int64("server_id", serverID), kitlog.String("state_key", key))
+			s.logger.Warn(ctx, "touch firing alert failed", err, kitlog.Int64("server_id", serverID), kitlog.String("state_key", key))
 			continue
 		}
 		if !found {

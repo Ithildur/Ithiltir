@@ -115,14 +115,14 @@ func (h *handler) metricsHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if errors.Is(err, errMetricsIdentityChanged) {
-		logger.Warn("node identity kept changing during metrics ingest", err)
+		logger.Warn(ctx, "node identity kept changing during metrics ingest", err)
 		err = httperr.ServiceUnavailable(err)
 	}
 	if err != nil {
 		h.writeError(w, r, logger, err)
 		return
 	}
-	h.writeMetricsResponse(w, validated, logger)
+	h.writeMetricsResponse(ctx, w, validated, logger)
 }
 
 type metricsInput struct {
@@ -219,7 +219,7 @@ func (h *handler) persistMetrics(ctx context.Context, validated *validatedMetric
 		Network:   validated.report.Metrics.Network,
 	})
 	if err != nil {
-		logger.Error("save metrics failed", err, kitlog.String("node", validated.report.Hostname))
+		logger.Error(ctx, "save metrics failed", err, kitlog.String("node", validated.report.Hostname))
 		return false, httperr.ServiceUnavailable(err)
 	}
 	if currentUpdated && nextIP != nil {
@@ -233,9 +233,9 @@ func (h *handler) persistMetrics(ctx context.Context, validated *validatedMetric
 		frontNode := metrics.BuildNodeView(validated.server, validated.report, h.staleAfterSec)
 		validated.snapshot = &frontNode
 		if err := h.refreshFrontSnapshot(ctx, frontNode, validated.report); err != nil {
-			logger.Warn("refresh front snapshot failed", err)
+			logger.Warn(ctx, "refresh front snapshot failed", err)
 			if clearErr := h.clearFrontMeta(ctx); clearErr != nil {
-				logger.Warn("clear front snapshot meta failed", clearErr)
+				logger.Warn(ctx, "clear front snapshot meta failed", clearErr)
 			}
 		}
 	}
@@ -258,12 +258,12 @@ func buildServerUpdates(server model.Server, r *http.Request) (map[string]any, *
 	return updates, &ipStr
 }
 
-func (h *handler) writeMetricsResponse(w http.ResponseWriter, validated *validatedMetrics, logger *kitlog.Helper) {
+func (h *handler) writeMetricsResponse(ctx context.Context, w http.ResponseWriter, validated *validatedMetrics, logger *kitlog.Helper) {
 	resp := metricsResponse{OK: true}
 
 	manifest, err := h.updateManifest(validated)
 	if err != nil {
-		logger.Warn("node update manifest unavailable", err, kitlog.Int64("server_id", validated.server.ID))
+		logger.Warn(ctx, "node update manifest unavailable", err, kitlog.Int64("server_id", validated.server.ID))
 	} else {
 		resp.Update = manifest
 	}

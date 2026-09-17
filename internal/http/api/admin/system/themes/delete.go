@@ -61,7 +61,7 @@ func (h *handler) deleteHandler(w http.ResponseWriter, r *http.Request, rawID st
 			httperr.Write(w, http.StatusNotFound, "not_found", "theme not found")
 			return
 		}
-		h.logger.Warn("failed to remove theme files", err, slog.String("theme_id", id))
+		h.logger.Warn(r.Context(), "failed to remove theme files", err, slog.String("theme_id", id))
 		httperr.Write(w, http.StatusInternalServerError, "theme_storage_unavailable", "failed to delete theme files")
 		return
 	}

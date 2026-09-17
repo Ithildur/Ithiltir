@@ -48,7 +48,7 @@ func (h *handler) serverBySecret(ctx context.Context, secret string, logger *kit
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return model.Server{}, httperr.Unauthorized(err)
 	}
-	logger.Error("node auth lookup failed", err)
+	logger.Error(ctx, "node auth lookup failed", err)
 	return model.Server{}, httperr.ServiceUnavailable(err)
 }
 
@@ -58,5 +58,5 @@ func (h *handler) writeError(w http.ResponseWriter, r *http.Request, logger *kit
 		h.failedAuth.ServeHTTP(w, r)
 		return
 	}
-	httperr.WriteOrInternal(w, logger, err)
+	httperr.WriteOrInternal(r.Context(), w, logger, err)
 }

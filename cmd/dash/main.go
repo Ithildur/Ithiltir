@@ -66,7 +66,7 @@ func main() {
 	initialFormat := os.Getenv("APP_LOG_FORMAT")
 	if _, err := infra.InitLogger(initialLevel, initialFormat); err != nil {
 		_, _ = infra.InitLogger("info", "text")
-		infra.Log().Warn("init logger from env failed", err)
+		infra.Log().Warn(ctx, "init logger from env failed", err)
 	}
 
 	cfg, err := config.LoadRuntime("", !noRedis)
@@ -88,11 +88,11 @@ func main() {
 	}
 
 	if debug {
-		logger.Info("debug logging enabled", nil)
+		logger.Info(ctx, "debug logging enabled", nil)
 		if dumped, err := yaml.Marshal(config.RedactedForLog(cfg)); err == nil {
-			logger.Debug("config after env overrides", nil, slog.String("config", string(dumped)))
+			logger.Debug(ctx, "config after env overrides", nil, slog.String("config", string(dumped)))
 		} else {
-			logger.Warn("config dump failed", err)
+			logger.Warn(ctx, "config dump failed", err)
 		}
 	}
 
@@ -159,16 +159,16 @@ func main() {
 			infra.Fatal("compare redis version failed", compareErr, slog.String("version", redisVersion))
 		}
 		if recommended < 0 {
-			logger.Warn("redis connected below recommended version",
+			logger.Warn(ctx, "redis connected below recommended version",
 				nil,
 				slog.String("version", redisVersion),
 				slog.String("recommended", infra.RedisRecommendedVersion))
 		} else {
-			logger.Info("redis connected", nil, slog.String("version", redisVersion))
+			logger.Info(ctx, "redis connected", nil, slog.String("version", redisVersion))
 		}
 		defer redisClient.Close()
 	} else {
-		logger.Warn("redis disabled by startup flag", nil)
+		logger.Warn(ctx, "redis disabled by startup flag", nil)
 	}
 
 	appLocation := cfg.App.EffectiveLocation()
