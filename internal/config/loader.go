@@ -111,6 +111,12 @@ func LoadForMigrate(path string) (*Config, error) {
 		return nil, err
 	}
 	compileLanguage(&cfg)
+	if err := compileLocation(&cfg); err != nil {
+		return nil, err
+	}
+	if err := compileDurations(&cfg, false); err != nil {
+		return nil, err
+	}
 	if err := compileHTTP(&cfg); err != nil {
 		return nil, err
 	}

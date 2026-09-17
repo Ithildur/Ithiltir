@@ -59,23 +59,28 @@ func TestIntegrationUptime(t *testing.T) {
 		(102,'hidden','hidden','hidden',false,false),
 		(103,'deleted','deleted','deleted',true,true),
 		(104,'new','new','new',true,false);
-		UPDATE system_settings SET uptime_warning_sla=99.5, uptime_error_sla=97.5;
+		UPDATE system_settings SET uptime_guest_visible=false, uptime_warning_sla=99.5, uptime_error_sla=97.5;
 	`).Error; err != nil {
 		t.Fatal(err)
 	}
 	now := time.Now().In(loc)
 	day := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, loc).AddDate(0, 0, -1)
 	if err := db.Exec(`
-		INSERT INTO node_online(server_id,minute,online) VALUES
-		(101,?,true),(101,?,false),(101,?,true),(102,?,true),(103,?,false)
+		INSERT INTO node_online(server_id,minute,online_ms,observed_ms) VALUES
+		(101,?,30000,30000),(101,?,0,60000),(101,?,60000,60000),(102,?,60000,60000),(103,?,0,60000)
 	`, day.Add(time.Minute), day.Add(2*time.Minute), day.Add(24*time.Hour-time.Minute), day, day).Error; err != nil {
 		t.Fatal(err)
 	}
-	// Materialize the closed day; the endpoint must also include newer raw data.
-	if err := db.Exec("CALL refresh_continuous_aggregate('node_online_1h', ?::timestamptz, ?::timestamptz)", day, day.AddDate(0, 0, 1)).Error; err != nil {
+	var refreshID int
+	if err := db.Raw(`SELECT job_id FROM timescaledb_information.jobs
+		WHERE hypertable_name='node_online_1h' AND proc_name='policy_refresh_continuous_aggregate'`).Scan(&refreshID).Error; err != nil {
 		t.Fatal(err)
 	}
-	if err := db.Exec("INSERT INTO node_online VALUES (101, ?, false)", now.UTC().Truncate(time.Minute)).Error; err != nil {
+	// Use the actual policy; recent completed minutes remain in the real-time tail.
+	if err := db.Exec("CALL run_job(?)", refreshID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Exec("INSERT INTO node_online VALUES (101, ?, 0, 60000)", now.UTC().Truncate(time.Minute)).Error; err != nil {
 		t.Fatal(err)
 	}
 	var denied dailyView
@@ -107,13 +112,13 @@ func TestIntegrationUptime(t *testing.T) {
 			}
 			if node.ServerID == "101" {
 				past, today := node.Days[43], node.Days[44]
-				if past.Percent == nil || math.Abs(*past.Percent-200.0/3) > 0.00001 || past.Samples != 3 || today.Percent == nil || *today.Percent != 0 || today.Samples != 1 {
+				if past.Percent == nil || *past.Percent != 60 || past.ObservedMS != 150000 || today.Percent == nil || *today.Percent != 0 || today.ObservedMS != 60000 {
 					t.Fatalf("weighted daily rates or real-time data: past %+v, today %+v", past, today)
 				}
 			}
 			if node.ServerID == "104" {
 				for _, empty := range node.Days {
-					if empty.Percent != nil || empty.Samples != 0 {
+					if empty.Percent != nil || empty.ObservedMS != 0 {
 						t.Fatalf("unreported node has uptime: %+v", empty)
 					}
 				}
@@ -123,7 +128,7 @@ func TestIntegrationUptime(t *testing.T) {
 		if err := json.Unmarshal(request(dayPath, admin, 200), &hourly); err != nil {
 			t.Fatal(err)
 		}
-		if hourly.Hours[0] == nil || *hourly.Hours[0] != 50 || hourly.Hours[23] == nil || *hourly.Hours[23] != 100 || hourly.Samples[0] != 2 || hourly.Hours[12] != nil {
+		if hourly.Hours[0] == nil || math.Abs(*hourly.Hours[0]-100.0/3) > 0.00001 || hourly.Hours[23] == nil || *hourly.Hours[23] != 100 || hourly.ObservedMS[0] != 90000 || hourly.Hours[12] != nil {
 			t.Fatalf("hourly observations: %+v", hourly)
 		}
 	}
@@ -137,6 +142,46 @@ func TestIntegrationUptime(t *testing.T) {
 		t.Fatal(err)
 	}
 	request(dayPath, false, 403)
+	// The last minute may commit after the hourly job. Both endpoints must see it
+	// without waiting for another refresh of that hour.
+	previousHour := time.Date(now.Year(), now.Month(), now.Day(), now.Hour(), 0, 0, 0, loc).Add(-time.Hour)
+	if err := db.Exec("INSERT INTO node_online VALUES (102, ?, 0, 60000)", previousHour).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Exec("CALL run_job(?)", refreshID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Exec("INSERT INTO node_online VALUES (102, ?, 60000, 60000)", previousHour.Add(59*time.Minute)).Error; err != nil {
+		t.Fatal(err)
+	}
+	var late metricdata.UptimeHours
+	if err := json.Unmarshal(request("/day?server_id=102&date="+previousHour.Format(time.DateOnly), true, 200), &late); err != nil {
+		t.Fatal(err)
+	}
+	if rate := late.Hours[previousHour.Hour()]; rate == nil || *rate != 50 || late.ObservedMS[previousHour.Hour()] != 120000 {
+		t.Fatalf("late minute missing from hourly view: %+v", late)
+	}
+	var dailyLate dailyView
+	if err := json.Unmarshal(request("", true, 200), &dailyLate); err != nil {
+		t.Fatal(err)
+	}
+	for _, node := range dailyLate.Nodes {
+		if node.ServerID != "102" {
+			continue
+		}
+		for _, observed := range node.Days {
+			if observed.Date != previousHour.Format(time.DateOnly) {
+				continue
+			}
+			wantMS, wantPercent := int64(120000), 50.0
+			if observed.Date == day.Format(time.DateOnly) {
+				wantMS, wantPercent = 180000, 200.0/3
+			}
+			if observed.ObservedMS != wantMS || observed.Percent == nil || math.Abs(*observed.Percent-wantPercent) > 0.00001 {
+				t.Fatalf("late minute missing from daily view: %+v", observed)
+			}
+		}
+	}
 	// Changing the statistics timezone rebuilds only derived buckets. Returning
 	// to the original timezone must preserve the minute history and its rates.
 	for _, zone := range []*time.Location{time.UTC, loc} {
@@ -149,7 +194,7 @@ func TestIntegrationUptime(t *testing.T) {
 	if err := db.Exec("ALTER MATERIALIZED VIEW node_online_1h SET (timescaledb.materialized_only=true)").Error; err != nil {
 		t.Fatal(err)
 	}
-	if err := json.Unmarshal(request(dayPath, true, 200), &after); err != nil || after.Hours[0] == nil || *after.Hours[0] != 50 || after.Samples[0] != 2 {
+	if err := json.Unmarshal(request(dayPath, true, 200), &after); err != nil || after.Hours[0] == nil || math.Abs(*after.Hours[0]-100.0/3) > 0.00001 || after.ObservedMS[0] != 90000 {
 		t.Fatalf("timezone rebuild changed observations: %+v, error %v", after, err)
 	}
 }

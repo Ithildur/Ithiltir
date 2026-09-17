@@ -5,7 +5,31 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
+
+func TestLoadForMigrateCompilesOnlineSettings(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(path, []byte(`app:
+  timezone: Asia/Kathmandu
+  node_offline_threshold: 14s
+database:
+  driver: postgres
+  host: localhost
+  port: 5432
+  user: dash
+  name: dash
+`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := LoadForMigrate(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.App.EffectiveLocation().String() != "Asia/Kathmandu" || cfg.App.EffectiveNodeOfflineThreshold() != 14*time.Second {
+		t.Fatalf("migration online settings: timezone %s, threshold %s", cfg.App.EffectiveLocation(), cfg.App.EffectiveNodeOfflineThreshold())
+	}
+}
 
 func TestReadConfigFileRejectsUnknownField(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.yaml")

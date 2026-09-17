@@ -30,11 +30,13 @@ func SyncOnlineJob(ctx context.Context, db *gorm.DB, offlineAfter time.Duration,
 		SELECT job_id FROM timescaledb_information.jobs
 		WHERE proc_schema = current_schema() AND proc_name = 'sample_node_online'
 		  AND to_regprocedure('configure_node_online_1h(text)') IS NOT NULL
+		  AND EXISTS (SELECT 1 FROM information_schema.columns
+		      WHERE table_schema = current_schema() AND table_name = 'node_online' AND column_name = 'observed_ms')
 	`).Scan(&jobID).Error; err != nil {
 			return fmt.Errorf("sync online job: %w", err)
 		}
 		if jobID == 0 {
-			return fmt.Errorf("sync online job: sampler or aggregate is missing; reapply db/migrations/0014_uptime.sql for databases upgraded by 0.3.3-alpha1 or alpha2")
+			return fmt.Errorf("sync online job: uptime duration schema is missing; initialize uptime storage using db/migrations/0014_uptime.sql")
 		}
 		if err := tx.Exec("CALL configure_node_online_1h(?)", zone).Error; err != nil {
 			return fmt.Errorf("configure hourly uptime: %w", err)

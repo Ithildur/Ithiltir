@@ -382,8 +382,8 @@ func TestIntegrationNodeOnlineMigration(t *testing.T) {
 
 	minute := time.Now().UTC().Truncate(time.Minute)
 	if err := db.Exec(`
-		INSERT INTO node_online (server_id, minute, online)
-		VALUES (?, ?, TRUE), (?, ?, FALSE), (?, ?, TRUE), (?, ?, FALSE)
+		INSERT INTO node_online (server_id, minute, online_ms, observed_ms)
+		VALUES (?, ?, 60000, 60000), (?, ?, 0, 60000), (?, ?, 60000, 60000), (?, ?, 0, 60000)
 	`, serverID, minute, serverID, minute.Add(-time.Minute), serverID, minute.Add(-45*24*time.Hour), serverID, minute.Add(-48*24*time.Hour)).Error; err != nil {
 		t.Fatalf("write online history for existing node: %v", err)
 	}
@@ -396,7 +396,7 @@ func TestIntegrationNodeOnlineMigration(t *testing.T) {
 		{"unaligned minute", minute.Add(time.Second), "23514"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			err := db.Exec("INSERT INTO node_online (server_id, minute, online) VALUES (?, ?, TRUE)", serverID, tc.at).Error
+			err := db.Exec("INSERT INTO node_online (server_id, minute, online_ms, observed_ms) VALUES (?, ?, 60000, 60000)", serverID, tc.at).Error
 			if pgErr, ok := errors.AsType[*pgconn.PgError](err); !ok || pgErr.Code != tc.code {
 				t.Fatalf("write error = %v, want SQLSTATE %s", err, tc.code)
 			}
@@ -428,13 +428,13 @@ func TestIntegrationNodeOnlineMigration(t *testing.T) {
 	}
 	if err := db.Raw(`
 		SELECT count(*) AS total,
-		       count(*) FILTER (WHERE online) AS online,
+		       sum(online_ms) AS online,
 		       count(*) FILTER (WHERE minute < ?) AS old
 		FROM node_online
 	`, minute.Add(-46*24*time.Hour)).Scan(&retained).Error; err != nil {
 		t.Fatal(err)
 	}
-	if retained.Total != 3 || retained.Online != 2 || retained.Old != 0 {
+	if retained.Total != 3 || retained.Online != 120000 || retained.Old != 0 {
 		t.Fatalf("retained history = %+v, want recent samples and the 45-day-old sample within retention", retained)
 	}
 
@@ -443,7 +443,7 @@ func TestIntegrationNodeOnlineMigration(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		// Reapply against the alpha schema with existing data and edited settings.
+		// Reapplication preserves recorded durations and edited settings.
 		if err := db.Exec(`
 			SELECT delete_job(job_id) FROM timescaledb_information.jobs WHERE proc_name = 'sample_node_online';
 			DROP PROCEDURE sample_node_online(INTEGER, JSONB);
@@ -467,7 +467,7 @@ func TestIntegrationNodeOnlineMigration(t *testing.T) {
 			SELECT min(job_id) AS id, count(*) AS count FROM timescaledb_information.jobs
 			WHERE proc_schema = current_schema() AND proc_name = 'sample_node_online'
 			  AND schedule_interval = INTERVAL '1 minute' AND fixed_schedule
-			  AND initial_start = date_trunc('minute', initial_start)
+		  AND initial_start = date_trunc('minute', initial_start) + INTERVAL '6 seconds'
 		`).Scan(&sampling).Error; err != nil || sampling.Count != 1 {
 			t.Fatalf("minute sampling schedule = %+v, error %v", sampling, err)
 		}
@@ -475,7 +475,7 @@ func TestIntegrationNodeOnlineMigration(t *testing.T) {
 		if err := db.Exec("SELECT alter_job(?, scheduled => false)", sampling.ID).Error; err != nil {
 			t.Fatal(err)
 		}
-		if err := migrate.SyncOnlineJob(ctx, db, 90*time.Second, time.UTC); err != nil {
+		if err := migrate.SyncOnlineJob(ctx, db, 14*time.Second, time.UTC); err != nil {
 			t.Fatal(err)
 		}
 		var hourlyJobs int
@@ -484,55 +484,108 @@ func TestIntegrationNodeOnlineMigration(t *testing.T) {
 			WHERE j.hypertable_name = 'node_online_1h' AND j.hypertable_schema = current_schema()
 			 AND j.proc_name = 'policy_refresh_continuous_aggregate'
 			 AND j.schedule_interval = INTERVAL '1 hour' AND j.fixed_schedule
-			 AND j.initial_start = date_trunc('hour', j.initial_start) + INTERVAL '5 seconds'
-			 AND (j.config->>'end_offset')::interval = INTERVAL '0 seconds'
+		 AND j.initial_start = date_trunc('hour', j.initial_start) + INTERVAL '10 seconds'
+			 AND (j.config->>'end_offset')::interval = INTERVAL '1 hour'
 		`).Scan(&hourlyJobs).Error; err != nil || hourlyJobs != 1 {
 			t.Fatalf("hourly refresh schedule: jobs %d, error %v", hourlyJobs, err)
+		}
+		// A fresh PostgreSQL deliberately leaves the restart minute unknown.
+		// Start the fixture transaction only once its previous minute is observable.
+		var readyAt time.Time
+		if err := db.Raw("SELECT date_trunc('minute', pg_postmaster_start_time()) + INTERVAL '2 minutes'").Scan(&readyAt).Error; err != nil {
+			t.Fatal(err)
+		}
+		if delay := time.Until(readyAt); delay > 0 {
+			t.Logf("waiting %s for the first complete minute after PostgreSQL startup", delay)
+			timer := time.NewTimer(delay)
+			defer timer.Stop()
+			select {
+			case <-timer.C:
+			case <-ctx.Done():
+				t.Fatal(ctx.Err())
+			}
 		}
 		if err := db.Transaction(func(tx *gorm.DB) error {
 			if err := tx.Exec(`
 				INSERT INTO servers (name, hostname, secret, is_deleted)
 				VALUES ('sample-live', 'sample-live', 'sample-live', false),
-				       ('sample-slow', 'sample-slow', 'sample-slow', false),
+				       ('sample-gap', 'sample-gap', 'sample-gap', false),
 				       ('sample-offline', 'sample-offline', 'sample-offline', false),
+				       ('sample-first', 'sample-first', 'sample-first', false),
+				       ('sample-boundary', 'sample-boundary', 'sample-boundary', false),
+				       ('sample-current', 'sample-current', 'sample-current', false),
 				       ('sample-deleted', 'sample-deleted', 'sample-deleted', true),
 				       ('sample-new', 'sample-new', 'sample-new', false);
-				INSERT INTO server_current_metrics (server_id, collected_at, reported_at)
-				SELECT id, CASE name
-				    WHEN 'sample-slow' THEN now() - INTERVAL '1 minute'
-				    WHEN 'sample-offline' THEN now() - INTERVAL '50 days'
-				    ELSE now() END, now() - INTERVAL '50 days'
+				INSERT INTO server_current_metrics (server_id, collected_at, reported_at, created_at)
+				SELECT id, now() - INTERVAL '50 days', now() - INTERVAL '50 days',
+				    CASE name
+				    WHEN 'sample-first' THEN date_trunc('minute',now()) - INTERVAL '29.5 seconds'
+				    WHEN 'sample-current' THEN date_trunc('minute',now())
+				    ELSE now() - INTERVAL '50 days' END
 				FROM servers WHERE name LIKE 'sample-%' AND name <> 'sample-new';
+				INSERT INTO server_metrics(server_id,collected_at)
+				SELECT id,ts FROM servers CROSS JOIN generate_series(
+				    date_trunc('minute',now())-INTERVAL '1 minute 14 seconds',
+				    date_trunc('minute',now())-INTERVAL '1 second', INTERVAL '3 seconds') ts
+				WHERE name IN ('sample-live','sample-gap');
+				DELETE FROM server_metrics WHERE server_id=(SELECT id FROM servers WHERE name='sample-gap')
+				  AND collected_at>date_trunc('minute',now())-INTERVAL '56 seconds'
+				  AND collected_at<date_trunc('minute',now())-INTERVAL '11 seconds';
+				INSERT INTO server_metrics(server_id,collected_at)
+				SELECT id,ts FROM servers CROSS JOIN generate_series(
+				    date_trunc('minute',now())-INTERVAL '29.5 seconds',
+				    date_trunc('minute',now())-INTERVAL '1 second', INTERVAL '3 seconds') ts
+				WHERE name='sample-first';
+				INSERT INTO server_metrics(server_id,collected_at)
+				SELECT id,date_trunc('minute',now())-INTERVAL '70 seconds'
+				FROM servers WHERE name='sample-boundary';
 			`).Error; err != nil {
 				return err
 			}
-			check := func(total, online int64) error {
-				var got struct{ Total, Online int64 }
+			check := func(gapMS int64) error {
+				var rows []struct {
+					Name                 string
+					OnlineMS, ObservedMS int64
+				}
 				if err := tx.Raw(`
-					SELECT count(*) AS total, count(*) FILTER (WHERE online) AS online
+					SELECT s.name, o.online_ms, o.observed_ms
 					FROM node_online o JOIN servers s ON s.id = o.server_id
 					WHERE s.name LIKE 'sample-%'
-				`).Scan(&got).Error; err != nil {
+				`).Scan(&rows).Error; err != nil {
 					return err
 				}
-				if got.Total != total || got.Online != online {
-					t.Errorf("sampled history = %+v, want total %d, online %d", got, total, online)
+				want := map[string][2]int64{"sample-live": {60000, 60000}, "sample-gap": {gapMS, 60000}, "sample-offline": {0, 60000}, "sample-first": {29500, 29500}, "sample-boundary": {4000, 60000}}
+				if len(rows) != len(want) {
+					t.Errorf("duration rows: %+v", rows)
+				}
+				for _, row := range rows {
+					if expected, ok := want[row.Name]; !ok || [2]int64{row.OnlineMS, row.ObservedMS} != expected {
+						t.Errorf("duration: %+v, want %v", row, expected)
+					}
 				}
 				return nil
 			}
 			if err := tx.Exec("CALL run_job(?)", sampling.ID).Error; err != nil {
 				return err
 			}
-			if err := check(3, 2); err != nil {
+			if err := check(29000); err != nil {
 				return err
 			}
-			if err := tx.Exec(`UPDATE server_current_metrics SET collected_at = now() - INTERVAL '1 day'`).Error; err != nil {
+			// A report committed after the first read is incorporated by a retry.
+			if err := tx.Exec(`INSERT INTO server_metrics(server_id,collected_at)
+				SELECT id,date_trunc('minute',now())-INTERVAL '35 seconds' FROM servers WHERE name='sample-gap'`).Error; err != nil {
 				return err
 			}
 			if err := tx.Exec("CALL run_job(?)", sampling.ID).Error; err != nil {
 				return err
 			}
-			if err := check(3, 2); err != nil {
+			if err := check(43000); err != nil {
+				return err
+			}
+			if err := tx.Exec("CALL run_job(?)", sampling.ID).Error; err != nil {
+				return err
+			}
+			if err := check(43000); err != nil {
 				return err
 			}
 			if err := tx.Exec(`
@@ -545,9 +598,19 @@ func TestIntegrationNodeOnlineMigration(t *testing.T) {
 			if err := tx.Exec("CALL run_job(?)", sampling.ID).Error; err != nil {
 				return err
 			}
-			// Deleted nodes keep their old observation but receive no new row;
-			// the missed minute is not filled, and stale nodes now sample false.
-			return check(5, 2)
+			// Deleted nodes keep old durations but receive no new row; skipped
+			// minutes remain absent, rather than being filled as online/offline.
+			var final struct{ Total, Deleted, Skipped int64 }
+			if err := tx.Raw(`SELECT count(*) AS total,
+			 count(*) FILTER(WHERE s.is_deleted) AS deleted,
+			 count(*) FILTER(WHERE minute=date_trunc('minute',now())-INTERVAL '2 minutes') AS skipped
+			 FROM node_online o JOIN servers s ON s.id=o.server_id WHERE s.name LIKE 'sample-%'`).Scan(&final).Error; err != nil {
+				return err
+			}
+			if final.Total != 9 || final.Deleted != 1 || final.Skipped != 0 {
+				t.Errorf("window lifecycle: %+v", final)
+			}
+			return nil
 		}); err != nil {
 			t.Fatalf("sample node state: %v", err)
 		}

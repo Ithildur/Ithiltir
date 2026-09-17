@@ -10,9 +10,9 @@ import (
 const UptimeDays = 45
 
 type UptimeDay struct {
-	Date    string   `json:"date"`
-	Percent *float64 `json:"percent"`
-	Samples int64    `json:"samples"`
+	Date       string   `json:"date"`
+	Percent    *float64 `json:"percent"`
+	ObservedMS int64    `json:"observed_ms"`
 }
 
 type NodeUptime struct {
@@ -21,9 +21,9 @@ type NodeUptime struct {
 }
 
 type UptimeHours struct {
-	Date    string       `json:"date"`
-	Hours   [24]*float64 `json:"hours"`
-	Samples [24]int64    `json:"samples"`
+	Date       string       `json:"date"`
+	Hours      [24]*float64 `json:"hours"`
+	ObservedMS [24]int64    `json:"observed_ms"`
 }
 
 func UptimeStart(now time.Time, loc *time.Location) time.Time {
@@ -66,18 +66,18 @@ func (s *Store) FetchUptime(ctx context.Context, now time.Time, loc *time.Locati
 		SELECT id FROM servers WHERE NOT is_deleted AND (? OR is_guest_visible)
 	), totals AS MATERIALIZED (
 		SELECT o.server_id, width_bucket(o.bucket, ARRAY[` + strings.Join(bounds, ",") + `]) - 1 AS day,
-		       sum(o.samples)::bigint AS samples, sum(o.online)::bigint AS online
+		       sum(o.observed_ms)::bigint AS observed_ms, sum(o.online_ms)::bigint AS online_ms
 		FROM node_online_1h o JOIN eligible s ON s.id = o.server_id
 		WHERE o.bucket >= ? AND o.bucket <= ?
 		GROUP BY o.server_id, day
 	)
-	SELECT s.id AS server_id, d.day, COALESCE(o.samples, 0) AS samples, COALESCE(o.online, 0) AS online
+	SELECT s.id AS server_id, d.day, COALESCE(o.observed_ms, 0) AS observed_ms, COALESCE(o.online_ms, 0) AS online_ms
 	FROM eligible s CROSS JOIN generate_series(0, ?) AS d(day)
 	LEFT JOIN totals o ON o.server_id = s.id AND o.day = d.day
 	ORDER BY s.id, d.day`
 	var rows []struct {
-		ServerID, Samples, Online int64
-		Day                       int
+		ServerID, ObservedMS, OnlineMS int64
+		Day                            int
 	}
 	if err := s.db.WithContext(ctx).Raw(query, args...).Scan(&rows).Error; err != nil {
 		return nil, err
@@ -92,7 +92,7 @@ func (s *Store) FetchUptime(ctx context.Context, now time.Time, loc *time.Locati
 		days := &nodes[len(nodes)-1].Days
 		*days = append(*days, UptimeDay{
 			Date:    firstDate.AddDate(0, 0, row.Day).Format(time.DateOnly),
-			Percent: uptimePercent(row.Online, row.Samples), Samples: row.Samples,
+			Percent: uptimePercent(row.OnlineMS, row.ObservedMS), ObservedMS: row.ObservedMS,
 		})
 	}
 	return nodes, nil
@@ -101,11 +101,11 @@ func (s *Store) FetchUptime(ctx context.Context, now time.Time, loc *time.Locati
 func (s *Store) FetchUptimeDay(ctx context.Context, serverID int64, day, now time.Time, authorized bool) (UptimeHours, error) {
 	out := UptimeHours{Date: day.Format(time.DateOnly)}
 	var rows []struct {
-		Bucket          *time.Time
-		Online, Samples int64
+		Bucket               *time.Time
+		OnlineMS, ObservedMS int64
 	}
 	if err := s.db.WithContext(ctx).Raw(`
-		SELECT o.bucket, COALESCE(o.online, 0) AS online, COALESCE(o.samples, 0) AS samples
+		SELECT o.bucket, COALESCE(o.online_ms, 0) AS online_ms, COALESCE(o.observed_ms, 0) AS observed_ms
 		FROM servers s LEFT JOIN node_online_1h o ON o.server_id = s.id
 		 AND o.bucket >= ? AND o.bucket < ? AND o.bucket <= ?
 		WHERE s.id = ? AND NOT s.is_deleted AND (? OR s.is_guest_visible)
@@ -121,18 +121,18 @@ func (s *Store) FetchUptimeDay(ctx context.Context, serverID int64, day, now tim
 			continue
 		}
 		hour := row.Bucket.In(day.Location()).Hour()
-		out.Samples[hour] += row.Samples
-		online[hour] += row.Online
+		out.ObservedMS[hour] += row.ObservedMS
+		online[hour] += row.OnlineMS
 	}
 	for hour := range out.Hours {
-		out.Hours[hour] = uptimePercent(online[hour], out.Samples[hour])
+		out.Hours[hour] = uptimePercent(online[hour], out.ObservedMS[hour])
 	}
 	return out, nil
 }
 
-func uptimePercent(online, samples int64) *float64 {
-	if samples == 0 {
+func uptimePercent(onlineMS, observedMS int64) *float64 {
+	if observedMS == 0 {
 		return nil
 	}
-	return new(100 * float64(online) / float64(samples))
+	return new(100 * float64(onlineMS) / float64(observedMS))
 }

@@ -131,10 +131,10 @@ Bearer 可选端点会把缺失、格式错误、过期、已撤销或其他非�
 
 ## 节点 Uptime
 
-- `GET /api/metrics/uptime`（兼容尾斜线）返回 `{enabled, timezone, generated_at, warning_sla, error_sla, nodes}`。每个节点包含字符串 `server_id` 和按日期升序排列的 45 个 `days`，包括今天；每天包含 `date`（`YYYY-MM-DD`）、`percent`（0～100 或 `null`）和 `samples`（已观测分钟数）。日期使用 `app.timezone`，未配置时使用服务端本地时区；没有采样的日期也始终返回。
+- `GET /api/metrics/uptime`（兼容尾斜线）返回 `{enabled, timezone, generated_at, warning_sla, error_sla, nodes}`。每个节点包含字符串 `server_id` 和按日期升序排列的 45 个 `days`，包括今天；每天包含 `date`（`YYYY-MM-DD`）、`percent`（0～100 或 `null`）和 `observed_ms`（已观测毫秒数）。日期使用 `app.timezone`，未配置时使用服务端本地时区；没有观测的日期也始终返回。
 - 已认证请求返回全部未删除节点。游客只有在 `uptime_guest_visible` 开启时才能读取游客可见节点；关闭时日统计返回 `200`、`enabled: false` 和空节点列表。SLA 阈值来自系统设置，不影响采样。
-- `GET /api/metrics/uptime/day?server_id=<id>&date=YYYY-MM-DD`（兼容 `/day/`）返回 `{date, hours, samples}`，两个数组各有 24 项，按当地钟表小时索引。缺失和未来小时的百分比为 `null`、样本数为零；夏令时跳过的小时为未知，重复小时合并观测。游客访问关闭返回 `403 forbidden`；对游客，隐藏、删除或不存在的节点统一返回 `404 not_found`。节点 ID 非法或日期超出同一 45 天窗口时返回 `400 invalid_request`，数据库故障返回 `503 service_unavailable`。
-- 在线率为 `100 × 在线观测数 / 已记录观测数`，按样本数加权。缺失分钟表示未知，不计入分母；百分比不保证覆盖完整，`samples` 表明已观测数量。既有 `/api/metrics/online` 保持原有契约和数据来源。
+- `GET /api/metrics/uptime/day?server_id=<id>&date=YYYY-MM-DD`（兼容 `/day/`）返回 `{date, hours, observed_ms}`，两个数组各有 24 项，按当地钟表小时索引。缺失和未来小时的百分比为 `null`、观测毫秒数为零；夏令时跳过的小时为未知，重复小时合并时长。游客访问关闭返回 `403 forbidden`；对游客，隐藏、删除或不存在的节点统一返回 `404 not_found`。节点 ID 非法或日期超出同一 45 天窗口时返回 `400 invalid_request`，数据库故障返回 `503 service_unavailable`。
+- 在线率为 `100 × 在线毫秒数 / 观测毫秒数`，按时长加权。一次上报的有效区间从服务端接收时间延续至 `app.node_offline_threshold` 之后，重叠区间只计算一次；节点首次创建当前指标行时开始统计。只计入已结束的分钟，正常在整分后 6 秒归集，今天和当前小时的值最多约滞后一分钟加归集延时。缺失分钟表示未知，不计入分母；百分比不保证覆盖完整，`observed_ms` 表明已观测时长。既有 `/api/metrics/online` 保持原有契约和数据来源。
 - 卡片的日统计独立每 60 秒刷新，仅在展开某天时加载小时明细。关闭游客访问会隐藏 Uptime；退出登录后丢弃已认证状态下读取的 Uptime 数据。
 
 ## 管理系统设置

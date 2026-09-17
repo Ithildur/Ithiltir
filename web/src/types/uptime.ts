@@ -6,12 +6,12 @@ export interface UptimeDaily {
   error_sla: number;
   nodes: Array<{
     server_id: string;
-    days: Array<{ date: string; percent: number | null; samples: number }>;
+    days: Array<{ date: string; percent: number | null; observed_ms: number }>;
   }>;
 }
 
 export interface UptimeHours {
   date: string;
   hours: Array<number | null>;
-  samples: number[];
+  observed_ms: number[];
 }
