@@ -30,7 +30,7 @@ COMMENT ON COLUMN node_online.observed_ms IS '该分钟内从首次有效上报�
 SELECT add_retention_policy('node_online', INTERVAL '46 days', if_not_exists => TRUE);
 
 ALTER TABLE system_settings
-    ADD COLUMN IF NOT EXISTS uptime_guest_visible BOOLEAN NOT NULL DEFAULT FALSE,
+    ADD COLUMN IF NOT EXISTS uptime_guest_visible BOOLEAN NOT NULL DEFAULT TRUE,
     ADD COLUMN IF NOT EXISTS uptime_warning_sla DOUBLE PRECISION NOT NULL DEFAULT 99,
     ADD COLUMN IF NOT EXISTS uptime_error_sla DOUBLE PRECISION NOT NULL DEFAULT 95;
 

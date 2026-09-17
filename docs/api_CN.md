@@ -142,7 +142,7 @@ Bearer 可选端点会把缺失、格式错误、过期、已撤销或其他非�
 - `GET /api/admin/system/settings` 返回 `history_guest_access_mode`、`dash_update_channel`、`dash_update_mode`、`logo_url`、`page_title`、`topbar_text`、`uptime_guest_visible`、`uptime_warning_sla` 和 `uptime_error_sla`。`dash_update_channel` 为 `release` 或 `prerelease`；`dash_update_mode` 为 `manual`、`notify` 或 `auto`。
 - `PATCH /api/admin/system/settings` 只校验并更新请求实际提交的字段，因此并发修改不同字段不会互相覆盖，未改动的旧 HTTP Logo 也不会阻断其他字段修改。空更新返回 `400 no_fields`；提交字段非法时返回 `400 invalid_fields`。
 - `PUT /api/admin/system/settings` 全量替换设置文档，必须提交 `history_guest_access_mode`、`dash_update_channel`、`dash_update_mode`、`logo_url`、`page_title` 和 `topbar_text`。
-- `uptime_guest_visible` 默认为 `false`；`uptime_warning_sla`、`uptime_error_sla` 使用百分数，默认分别为 `99`、`95`。阈值按每日在线率定义：低于 warning 为黄色，低于 error 为红色，错误状态优先；必须满足 `0 <= error < warning <= 100`，允许小数。PATCH 和 PUT 中未提交或为 `null` 的 uptime 字段保持原值，以兼容旧客户端；非法阈值返回 `400 invalid_fields`，整个设置更新回滚。这些设置控制新增 Uptime 接口和卡片展示；采样及既有 `/api/metrics/online` 的鉴权保持独立。
+- `uptime_guest_visible` 默认为 `true`；`uptime_warning_sla`、`uptime_error_sla` 使用百分数，默认分别为 `99`、`95`。阈值按每日在线率定义：低于 warning 为黄色，低于 error 为红色，错误状态优先；必须满足 `0 <= error < warning <= 100`，允许小数。PATCH 和 PUT 中未提交或为 `null` 的 uptime 字段保持原值，以兼容旧客户端；非法阈值返回 `400 invalid_fields`，整个设置更新回滚。这些设置控制新增 Uptime 接口和卡片展示；采样及既有 `/api/metrics/online` 的鉴权保持独立。
 - `logo_url` 可以是内置路径、同源绝对路径、base64 SVG、PNG、JPEG、GIF、WebP 或 ICO data URL，或外部 HTTPS URL；外部 HTTP URL 会被拒绝。
 - 旧版本已保存的外部 HTTP Logo 会为兼容继续读取。在 HTTPS 页面上，浏览器仍可能按混合内容（mixed content）规则拦截；此时 Logo 和 favicon 会回退到内置 Logo。
 

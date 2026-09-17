@@ -51,7 +51,7 @@ Ithiltir Dash 是单实例应用。根入口只启动一个 HTTP 进程，该进
 
 ## 状态和保留策略
 
-- Uptime 的游客展示开关和每日 SLA 阈值持久化在 `system_settings`，默认关闭游客展示，warning 为 99%、error 为 95%。数据库约束保证 `0 <= error < warning <= 100`，设置更新沿用同一事务，非法阈值不会留下部分更新。Uptime 接口校验游客展示权限，并返回供卡片着色的阈值；这些设置不影响采样。
+- Uptime 的游客展示开关和每日 SLA 阈值持久化在 `system_settings`，默认开启游客展示，warning 为 99%、error 为 95%。数据库约束保证 `0 <= error < warning <= 100`，设置更新沿用同一事务，非法阈值不会留下部分更新。Uptime 接口校验游客展示权限，并返回供卡片着色的阈值；这些设置不影响采样。
 
 - `node_online` 保存 `(server_id, minute, online_ms, observed_ms)`，每个节点每个已结束分钟至多一条时长结果。TimescaleDB 的 `sample_node_online` 任务在整分后 6 秒执行，给上报写入的 5 秒超时窗口留出余量，再读取上一分钟。每条已持久化的 `server_metrics.collected_at` 上报形成 `[接收时间, 接收时间 + app.node_offline_threshold)` 有效区间（阈值默认 17 秒），合并重叠区间并裁剪到目标分钟和节点统计起点。统计起点沿用首次创建当前指标行的 `server_current_metrics.created_at`，后续上报不改写。没有当前指标行和已软删除节点不生成记录；删除后的已有时长保留至过期。迁移和启动同步阈值，Go 不运行 uptime 采样循环。重复执行同一分钟会幂等重算，包括先前读取后才提交的报告。
 - `node_online` 缺少记录表示未知，任务不补写错过的分钟或更早历史，并跳过跨越 PostgreSQL 重启的分钟。数据库可用时，节点停止上报或 Dash 停止，超过阈值的部分计离线。它衡量上报可用性，并非独立的网络可达性；没有留下故障记录的数据库或接收链路异常，无法仅凭上报时间与节点掉线区分。时序表按一天分块并保留 46 天，策略按整个分块清理。任务调度与失败可通过 `timescaledb_information.jobs`、`job_stats`、`job_errors` 查看。现有在线率 API 仍读取 `server_online_30m`；预留的 `services` 和 `service_checks` 表保持独立。

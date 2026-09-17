@@ -40,7 +40,7 @@ func TestIntegrationUptimeSettings(t *testing.T) {
 		return view
 	}
 	initial := read()
-	if initial.UptimeGuestVisible || initial.UptimeWarningSLA != 99 || initial.UptimeErrorSLA != 95 {
+	if !initial.UptimeGuestVisible || initial.UptimeWarningSLA != 99 || initial.UptimeErrorSLA != 95 {
 		t.Fatalf("uptime defaults = %+v", initial)
 	}
 	request("PATCH", `{"uptime_guest_visible":true,"uptime_warning_sla":99.9,"uptime_error_sla":98}`, 204)

@@ -30,7 +30,7 @@ const UptimeSettings: React.FC<Props> = ({ settings, loading, onSaved }) => {
   const [saving, setSaving] = React.useState(false);
   const errorID = React.useId();
   const current = draft ?? {
-    guestVisible: settings?.uptime_guest_visible ?? false,
+    guestVisible: settings?.uptime_guest_visible ?? true,
     warning: String(settings?.uptime_warning_sla ?? 99),
     error: String(settings?.uptime_error_sla ?? 95),
   };
