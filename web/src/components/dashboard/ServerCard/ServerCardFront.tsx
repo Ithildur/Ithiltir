@@ -132,9 +132,9 @@ ${t('mem_total')}: ${toMB(view.memory.total)} MB`;
 
   return (
     <div
-      className={`absolute inset-0 backface-hidden rounded-xl border transition-all motion-reduce:transition-none cursor-pointer overflow-hidden flex flex-col ${cardStyle}`}
+      className={`absolute inset-0 backface-hidden rounded-xl border transition-all motion-reduce:transition-none cursor-pointer overflow-hidden flex flex-col justify-between gap-1.25 p-4 pb-2 ${cardStyle}`}
     >
-      <div className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-4 p-4 pb-0">
+      <div className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-4">
         <div className="flex min-w-0 items-center gap-3">
           <div
             className="p-2 flex shrink-0 items-center justify-center"
@@ -181,178 +181,171 @@ ${t('mem_total')}: ${toMB(view.memory.total)} MB`;
         )}
       </div>
 
-      <div className="px-4 pb-2 flex-1 flex flex-col transition-opacity duration-300">
-        <div className="flex flex-col flex-1 space-y-2">
-          <div className="h-6 min-w-0 overflow-hidden py-0.5" aria-hidden={tagCount === 0}>
-            {tagCount > 0 ? (
-              <Tooltip content={tagTooltip} className="min-w-0">
-                <div
-                  ref={tagRowRef}
-                  className="relative flex h-5 w-full flex-nowrap items-center justify-start gap-1 overflow-hidden whitespace-nowrap"
+      <div className="h-6 min-w-0 overflow-hidden py-0.5" aria-hidden={tagCount === 0}>
+        {tagCount > 0 ? (
+          <Tooltip content={tagTooltip} className="min-w-0">
+            <div
+              ref={tagRowRef}
+              className="relative flex h-5 w-full flex-nowrap items-center justify-start gap-1 overflow-hidden whitespace-nowrap"
+            >
+              {visibleTags.map((tag, index) => (
+                <span
+                  key={`${tag}-${index}`}
+                  className={`max-w-64 truncate rounded-md border border-(--theme-border-subtle) bg-(--theme-bg-muted) px-1.5 py-0.5 text-[10px]/3 font-medium text-(--theme-fg-muted) dark:border-(--theme-border-default) dark:bg-(--theme-canvas-muted) dark:text-(--theme-fg-neutral) ${
+                    index === visibleTags.length - 1 ? 'min-w-0 shrink' : 'shrink-0'
+                  }`}
                 >
-                  {visibleTags.map((tag, index) => (
+                  {tag}
+                </span>
+              ))}
+              {hiddenTagCount > 0 && (
+                <span className="shrink-0 rounded-md border border-(--theme-border-subtle) bg-(--theme-bg-muted) px-1.5 py-0.5 text-[10px]/3 font-medium text-(--theme-fg-subtle) dark:border-(--theme-border-default) dark:bg-(--theme-canvas-muted) dark:text-(--theme-fg-control-muted)">
+                  +{hiddenTagCount}
+                </span>
+              )}
+              <span className="pointer-events-none invisible absolute left-0 top-0 flex gap-1 whitespace-nowrap">
+                {view.tags.map((tag, index) => (
+                  <span
+                    key={`measure-${tag}-${index}`}
+                    ref={(node) => {
+                      tagMeasureRefs.current[index] = node;
+                    }}
+                    className="max-w-64 shrink-0 truncate rounded-md border border-(--theme-border-subtle) px-1.5 py-0.5 text-[10px]/3 font-medium"
+                  >
+                    {tag}
+                  </span>
+                ))}
+                {view.tags.map((_, index) => {
+                  const hidden = index + 1;
+
+                  return (
                     <span
-                      key={`${tag}-${index}`}
-                      className={`max-w-64 truncate rounded-md border border-(--theme-border-subtle) bg-(--theme-bg-muted) px-1.5 py-0.5 text-[10px]/3 font-medium text-(--theme-fg-muted) dark:border-(--theme-border-default) dark:bg-(--theme-canvas-muted) dark:text-(--theme-fg-neutral) ${
-                        index === visibleTags.length - 1 ? 'min-w-0 shrink' : 'shrink-0'
-                      }`}
+                      key={`more-measure-${hidden}`}
+                      ref={(node) => {
+                        moreMeasureRefs.current[hidden] = node;
+                      }}
+                      className="shrink-0 rounded-md border border-(--theme-border-subtle) px-1.5 py-0.5 text-[10px]/3 font-medium"
                     >
-                      {tag}
+                      +{hidden}
                     </span>
-                  ))}
-                  {hiddenTagCount > 0 && (
-                    <span className="shrink-0 rounded-md border border-(--theme-border-subtle) bg-(--theme-bg-muted) px-1.5 py-0.5 text-[10px]/3 font-medium text-(--theme-fg-subtle) dark:border-(--theme-border-default) dark:bg-(--theme-canvas-muted) dark:text-(--theme-fg-control-muted)">
-                      +{hiddenTagCount}
-                    </span>
-                  )}
-                  <span className="pointer-events-none invisible absolute left-0 top-0 flex gap-1 whitespace-nowrap">
-                    {view.tags.map((tag, index) => (
-                      <span
-                        key={`measure-${tag}-${index}`}
-                        ref={(node) => {
-                          tagMeasureRefs.current[index] = node;
-                        }}
-                        className="max-w-64 shrink-0 truncate rounded-md border border-(--theme-border-subtle) px-1.5 py-0.5 text-[10px]/3 font-medium"
-                      >
-                        {tag}
-                      </span>
-                    ))}
-                    {view.tags.map((_, index) => {
-                      const hidden = index + 1;
-
-                      return (
-                        <span
-                          key={`more-measure-${hidden}`}
-                          ref={(node) => {
-                            moreMeasureRefs.current[hidden] = node;
-                          }}
-                          className="shrink-0 rounded-md border border-(--theme-border-subtle) px-1.5 py-0.5 text-[10px]/3 font-medium"
-                        >
-                          +{hidden}
-                        </span>
-                      );
-                    })}
-                  </span>
-                </div>
-              </Tooltip>
-            ) : null}
-          </div>
-          <div className="flex justify-around items-center py-0 gap-6">
-            <Tooltip content={cpuTooltip} className="cursor-help">
-              <MiniGauge
-                value={view.cpu.usagePercent}
-                label={t('cpu')}
-                icon={Cpu}
-                detail={
-                  view.cpu.coresLogical ? (
-                    <span className="text-xs text-(--theme-fg-default) dark:text-(--theme-fg-default) font-mono">
-                      {view.cpu.coresLogical} Threads
-                    </span>
-                  ) : undefined
-                }
-              />
-            </Tooltip>
-            <div className="h-10 w-px bg-(--theme-border-default) dark:bg-(--theme-canvas-muted)/70" />
-            <Tooltip content={memTooltip} className="cursor-help">
-              <MiniGauge
-                value={view.memory.usedPercent}
-                label={t('memory')}
-                icon={MemoryStick}
-                detail={
-                  <span className="text-xs text-(--theme-fg-default) dark:text-(--theme-fg-default) font-mono">
-                    {(view.memory.used / 1024 / 1024 / 1024).toFixed(1)} G /{' '}
-                    {(view.memory.total / 1024 / 1024 / 1024).toFixed(1)} G
-                  </span>
-                }
-              />
-            </Tooltip>
-          </div>
-
-          <div className="flex flex-col space-y-1.25">
-            <NetworkRowFull
-              label={t('curr_speed')}
-              up={`${formatBytes(view.network.rateOut)}/s`}
-              down={`${formatBytes(view.network.rateIn)}/s`}
-            />
-            <NetworkRowFull
-              label={t('total_trans')}
-              up={formatBytes(view.network.totalOut)}
-              down={formatBytes(view.network.totalIn)}
-              isTotal
-            />
-            <div className="flex justify-between items-center bg-(--theme-bg-default) dark:bg-(--theme-bg-default) px-3 py-1.5 rounded-lg border border-(--theme-border-muted) dark:border-(--theme-border-default)">
-              <div className="flex items-center gap-2">
-                <span className="p-1 rounded bg-(--theme-bg-interactive-muted) dark:bg-(--theme-canvas-muted)/70 text-(--theme-fg-interactive)">
-                  <TrendingUp size={10} />
-                </span>
-                <span className="text-xs text-(--theme-fg-muted) dark:text-(--theme-fg-neutral) font-medium">
-                  {t('load')}
-                </span>
-              </div>
-              <span className="text-xs font-mono text-(--theme-fg-default) dark:text-(--theme-fg-default)">
-                {view.cpu.load1.toFixed(2)} / {view.cpu.load5.toFixed(2)} /{' '}
-                {view.cpu.load15.toFixed(2)}
+                  );
+                })}
               </span>
             </div>
-            {view.uptimeHistory && <UptimeRow serverID={view.id} history={view.uptimeHistory} />}
-            <div className="grid grid-cols-2 gap-2">
-              <Button
-                type="button"
-                variant="plain"
-                size="none"
-                disabled={!canOpenHistory}
-                onClick={openHistory}
-                onMouseDown={stopPropagation}
-                onKeyDown={stopPropagation}
-                className={`min-w-0 justify-between gap-1 rounded-lg border border-(--theme-border-muted) dark:border-(--theme-border-default) px-2.5 py-1.5 text-xs font-medium tracking-normal ring-inset active:scale-100 ${actionClass(canOpenHistory)}`}
-                aria-label={historyTitle}
-                title={historyTitle}
-              >
-                <span className="inline-flex min-w-0 items-center gap-1.5">
-                  <span className={iconClass(canOpenHistory)}>
-                    <BarChart3 size={10} />
-                  </span>
-                  <span className={labelClass(canOpenHistory)}>{t('dashboard_statistics')}</span>
+          </Tooltip>
+        ) : null}
+      </div>
+      <div className="flex justify-around items-center py-0 gap-6">
+        <Tooltip content={cpuTooltip} className="cursor-help">
+          <MiniGauge
+            value={view.cpu.usagePercent}
+            label={t('cpu')}
+            icon={Cpu}
+            detail={
+              view.cpu.coresLogical ? (
+                <span className="text-xs text-(--theme-fg-default) dark:text-(--theme-fg-default) font-mono">
+                  {view.cpu.coresLogical} Threads
                 </span>
-                <ChevronRight
-                  size={12}
-                  className={
-                    canOpenHistory
-                      ? 'shrink-0 text-(--theme-fg-default) dark:text-(--theme-fg-default)'
-                      : 'shrink-0 text-(--theme-fg-muted) dark:text-(--theme-fg-control-muted)'
-                  }
-                />
-              </Button>
-              <Button
-                type="button"
-                variant="plain"
-                size="none"
-                disabled={!canOpenTraffic}
-                onClick={openTraffic}
-                onMouseDown={stopPropagation}
-                onKeyDown={stopPropagation}
-                className={`min-w-0 justify-between gap-1 rounded-lg border border-(--theme-border-muted) dark:border-(--theme-border-default) px-2.5 py-1.5 text-xs font-medium tracking-normal ring-inset active:scale-100 ${actionClass(canOpenTraffic)}`}
-                aria-label={trafficTitle}
-                title={trafficTitle}
-              >
-                <span className="inline-flex min-w-0 items-center gap-1.5">
-                  <span className={iconClass(canOpenTraffic)}>
-                    <Network size={10} />
-                  </span>
-                  <span className={labelClass(canOpenTraffic)}>{t('traffic_short')}</span>
-                </span>
-                <ChevronRight
-                  size={12}
-                  className={
-                    canOpenTraffic
-                      ? 'shrink-0 text-(--theme-fg-default) dark:text-(--theme-fg-default)'
-                      : 'shrink-0 text-(--theme-fg-muted) dark:text-(--theme-fg-control-muted)'
-                  }
-                />
-              </Button>
-            </div>
-          </div>
+              ) : undefined
+            }
+          />
+        </Tooltip>
+        <div className="h-10 w-px bg-(--theme-border-default) dark:bg-(--theme-canvas-muted)/70" />
+        <Tooltip content={memTooltip} className="cursor-help">
+          <MiniGauge
+            value={view.memory.usedPercent}
+            label={t('memory')}
+            icon={MemoryStick}
+            detail={
+              <span className="text-xs text-(--theme-fg-default) dark:text-(--theme-fg-default) font-mono">
+                {(view.memory.used / 1024 / 1024 / 1024).toFixed(1)} G /{' '}
+                {(view.memory.total / 1024 / 1024 / 1024).toFixed(1)} G
+              </span>
+            }
+          />
+        </Tooltip>
+      </div>
+
+      <NetworkRowFull
+        label={t('curr_speed')}
+        up={`${formatBytes(view.network.rateOut)}/s`}
+        down={`${formatBytes(view.network.rateIn)}/s`}
+      />
+      <NetworkRowFull
+        label={t('total_trans')}
+        up={formatBytes(view.network.totalOut)}
+        down={formatBytes(view.network.totalIn)}
+        isTotal
+      />
+      <div className="flex justify-between items-center bg-(--theme-bg-default) dark:bg-(--theme-bg-default) px-3 py-1.5 rounded-lg border border-(--theme-border-muted) dark:border-(--theme-border-default)">
+        <div className="flex items-center gap-2">
+          <span className="p-1 rounded bg-(--theme-bg-interactive-muted) dark:bg-(--theme-canvas-muted)/70 text-(--theme-fg-interactive)">
+            <TrendingUp size={10} />
+          </span>
+          <span className="text-xs text-(--theme-fg-muted) dark:text-(--theme-fg-neutral) font-medium">
+            {t('load')}
+          </span>
         </div>
+        <span className="text-xs font-mono text-(--theme-fg-default) dark:text-(--theme-fg-default)">
+          {view.cpu.load1.toFixed(2)} / {view.cpu.load5.toFixed(2)} / {view.cpu.load15.toFixed(2)}
+        </span>
+      </div>
+      {view.uptimeHistory && <UptimeRow serverID={view.id} history={view.uptimeHistory} />}
+      <div className="grid grid-cols-2 gap-2">
+        <Button
+          type="button"
+          variant="plain"
+          size="none"
+          disabled={!canOpenHistory}
+          onClick={openHistory}
+          onMouseDown={stopPropagation}
+          onKeyDown={stopPropagation}
+          className={`min-w-0 justify-between gap-1 rounded-lg border border-(--theme-border-muted) dark:border-(--theme-border-default) px-2.5 py-1.5 text-xs font-medium tracking-normal ring-inset active:scale-100 ${actionClass(canOpenHistory)}`}
+          aria-label={historyTitle}
+          title={historyTitle}
+        >
+          <span className="inline-flex min-w-0 items-center gap-1.5">
+            <span className={iconClass(canOpenHistory)}>
+              <BarChart3 size={10} />
+            </span>
+            <span className={labelClass(canOpenHistory)}>{t('dashboard_statistics')}</span>
+          </span>
+          <ChevronRight
+            size={12}
+            className={
+              canOpenHistory
+                ? 'shrink-0 text-(--theme-fg-default) dark:text-(--theme-fg-default)'
+                : 'shrink-0 text-(--theme-fg-muted) dark:text-(--theme-fg-control-muted)'
+            }
+          />
+        </Button>
+        <Button
+          type="button"
+          variant="plain"
+          size="none"
+          disabled={!canOpenTraffic}
+          onClick={openTraffic}
+          onMouseDown={stopPropagation}
+          onKeyDown={stopPropagation}
+          className={`min-w-0 justify-between gap-1 rounded-lg border border-(--theme-border-muted) dark:border-(--theme-border-default) px-2.5 py-1.5 text-xs font-medium tracking-normal ring-inset active:scale-100 ${actionClass(canOpenTraffic)}`}
+          aria-label={trafficTitle}
+          title={trafficTitle}
+        >
+          <span className="inline-flex min-w-0 items-center gap-1.5">
+            <span className={iconClass(canOpenTraffic)}>
+              <Network size={10} />
+            </span>
+            <span className={labelClass(canOpenTraffic)}>{t('traffic_short')}</span>
+          </span>
+          <ChevronRight
+            size={12}
+            className={
+              canOpenTraffic
+                ? 'shrink-0 text-(--theme-fg-default) dark:text-(--theme-fg-default)'
+                : 'shrink-0 text-(--theme-fg-muted) dark:text-(--theme-fg-control-muted)'
+            }
+          />
+        </Button>
       </div>
     </div>
   );
