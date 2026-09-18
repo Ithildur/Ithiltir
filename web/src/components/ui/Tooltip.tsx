@@ -11,6 +11,7 @@ interface Props {
   children: React.ReactNode;
   className?: string;
   variant?: 'default' | 'surface';
+  onOpenChange?: (open: boolean) => void;
 }
 
 export const Tooltip: React.FC<Props> = ({
@@ -19,6 +20,7 @@ export const Tooltip: React.FC<Props> = ({
   children,
   className,
   variant = 'default',
+  onOpenChange,
 }) => {
   const [isVisible, setIsVisible] = useState(false);
   const [coords, setCoords] = useState({ top: 0, left: 0 });
@@ -28,6 +30,15 @@ export const Tooltip: React.FC<Props> = ({
   const frameRef = useRef<number | null>(null);
   const tooltipId = React.useId();
   const renderedContent = typeof content === 'function' ? (isVisible ? content() : null) : content;
+
+  const hide = React.useCallback(() => {
+    if (frameRef.current !== null) {
+      window.cancelAnimationFrame(frameRef.current);
+      frameRef.current = null;
+    }
+    setIsVisible(false);
+    onOpenChange?.(false);
+  }, [onOpenChange]);
 
   React.useLayoutEffect(() => {
     const tooltip = tooltipRef.current;
@@ -81,14 +92,18 @@ export const Tooltip: React.FC<Props> = ({
 
   React.useEffect(() => {
     if (!isVisible) return;
-    const dismiss = () => setIsVisible(false);
-    window.addEventListener('resize', dismiss);
-    window.addEventListener('scroll', dismiss, true);
-    return () => {
-      window.removeEventListener('resize', dismiss);
-      window.removeEventListener('scroll', dismiss, true);
+    const dismissOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') hide();
     };
-  }, [isVisible]);
+    window.addEventListener('resize', hide);
+    window.addEventListener('scroll', hide, true);
+    window.addEventListener('keydown', dismissOnEscape);
+    return () => {
+      window.removeEventListener('resize', hide);
+      window.removeEventListener('scroll', hide, true);
+      window.removeEventListener('keydown', dismissOnEscape);
+    };
+  }, [hide, isVisible]);
 
   React.useEffect(
     () => () => {
@@ -134,14 +149,7 @@ export const Tooltip: React.FC<Props> = ({
       positionFromRect();
     }
     setIsVisible(true);
-  };
-
-  const hide = () => {
-    if (frameRef.current !== null) {
-      window.cancelAnimationFrame(frameRef.current);
-      frameRef.current = null;
-    }
-    setIsVisible(false);
+    onOpenChange?.(true);
   };
 
   React.useImperativeHandle(ref, () => ({ show: () => show() }));
@@ -158,9 +166,6 @@ export const Tooltip: React.FC<Props> = ({
         onPointerLeave={hide}
         onFocus={() => show()}
         onBlur={hide}
-        onKeyDown={(event) => {
-          if (event.key === 'Escape') hide();
-        }}
       >
         {children}
       </div>

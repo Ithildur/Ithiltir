@@ -4,8 +4,63 @@ import { Tooltip } from '@components/ui/Tooltip';
 import type { TooltipHandle } from '@components/ui/Tooltip';
 import { useI18n } from '@i18n';
 import type { UptimeHistory } from '@pages/dashboard/viewModel';
+import { fetchUptimeDay } from '@lib/uptimeApi';
+import { isCanceledRequestError } from '@utils/errors';
 import { observeUptimeCanvas, uptimeDays as dayCount } from './uptimeCanvas';
-import { UptimeDayTooltip, type UptimeHoursCache } from './UptimeDayTooltip';
+import { UptimeDayTooltip } from './UptimeDayTooltip';
+
+interface Hours {
+  date: string;
+  hours: Array<number | null> | null;
+}
+
+const useUptimeHours = (serverID: string, date: string | undefined, asOf: string) => {
+  const [open, setOpen] = React.useState(false);
+  const [detail, setDetail] = React.useState<Hours | null>(null);
+  const hoursCache = React.useRef(
+    new Map<string, { expires: number; hours: Array<number | null> }>(),
+  );
+
+  React.useEffect(() => {
+    if (!open || !date) return;
+    const now = Date.now();
+    const cache = hoursCache.current;
+    const cached = cache.get(date);
+    if (cached && cached.expires > now) {
+      setDetail({ date, hours: cached.hours });
+      return;
+    }
+
+    setDetail(null);
+    const controller = new AbortController();
+    // Wait for the pointer to rest on a day before loading its tooltip.
+    const timer = window.setTimeout(() => {
+      void fetchUptimeDay(serverID, date, controller.signal)
+        .then((day) => {
+          if (controller.signal.aborted) return;
+          cache.set(date, { expires: Date.now() + 60_000, hours: day.hours });
+          if (cache.size > dayCount) cache.delete(cache.keys().next().value!);
+          setDetail({ date, hours: day.hours });
+        })
+        .catch((error) => {
+          if (!controller.signal.aborted && !isCanceledRequestError(error)) {
+            setDetail({ date, hours: null });
+          }
+        });
+    }, 200);
+    return () => {
+      window.clearTimeout(timer);
+      controller.abort();
+    };
+  }, [date, asOf, open, serverID]);
+
+  const changeOpen = React.useCallback((next: boolean) => {
+    setOpen(next);
+    if (!next) setDetail(null);
+  }, []);
+
+  return [detail, changeOpen] as const;
+};
 
 interface Props {
   serverID: string;
@@ -17,12 +72,13 @@ const UptimeRow: React.FC<Props> = ({ serverID, history }) => {
   const [activeIndex, setActiveIndex] = React.useState(dayCount - 1);
   const canvasRef = React.useRef<HTMLCanvasElement>(null);
   const tooltipRef = React.useRef<TooltipHandle>(null);
-  const hoursCache = React.useRef<UptimeHoursCache>(new Map());
   const recent = history?.days.slice(-dayCount) ?? [];
   const days = Array.from(
     { length: dayCount },
     (_, index) => recent[index - (dayCount - recent.length)],
   );
+  const date = days[activeIndex]?.date;
+  const [detail, changeOpen] = useUptimeHours(serverID, date, history.asOf);
   const description = (day: (typeof days)[number]) =>
     day
       ? `${day.date} · ${day.percent === null ? t('no_data') : `${day.percent.toFixed(2)}%`}`
@@ -69,20 +125,19 @@ const UptimeRow: React.FC<Props> = ({ serverID, history }) => {
     <Tooltip
       ref={tooltipRef}
       variant="surface"
+      onOpenChange={changeOpen}
       content={() => {
         const day = days[activeIndex];
-        return day ? (
+        if (!day || detail?.date !== day.date) return null;
+        return (
           <UptimeDayTooltip
-            key={`${serverID}:${day.date}`}
-            serverID={serverID}
             date={day.date}
             percent={day.percent}
             warningSLA={history.warningSLA}
             errorSLA={history.errorSLA}
-            asOf={history.asOf}
-            cache={hoursCache.current}
+            hours={detail.hours}
           />
-        ) : null;
+        );
       }}
     >
       <div className="flex items-center gap-2 rounded-lg border border-(--theme-border-muted) bg-(--theme-bg-default) px-3 py-1.5 dark:border-(--theme-border-default)">
