@@ -1,11 +1,12 @@
 # Breaking Changes
 
-## Unreleased
+## 0.3.3 (2026-09-19)
 
 ### Uptime duration statistics
 
-- Unreleased migration `0014` directly uses minute durations: `node_online.online` becomes `online_ms` and `observed_ms`, and the hourly aggregate sums those durations. Both uptime endpoints replace `samples` with `observed_ms`. Boolean observations cannot reconstruct durations; no old-format adapter or fabricated conversion is provided.
-- Test installations already using an earlier `0014` must stop Dash, back up and recreate the uptime minute table, hourly aggregate and jobs, then apply the updated `0014` and run `dash migrate`. Uptime history starts over; node metadata and CPU/memory metrics history are not rebuilt. Update the database and Dash together; Goose does not rerun an already applied `0014`.
+- Upgrades from `0.3.2` add migration `0014` and start collecting uptime history; earlier uptime is not reconstructed automatically. Existing node metadata and metric history are preserved.
+- Early `0.3.3` prereleases used `node_online.online` and `samples`. The release uses `online_ms` and `observed_ms`, and the hourly aggregate sums those durations. Boolean observations cannot reconstruct durations; no old-format adapter or fabricated conversion is provided.
+- Test installations still using the boolean version of `0014` must stop Dash, back up and recreate the uptime minute table, hourly aggregate and jobs, then apply the release's `0014` and run `dash migrate`. Uptime history starts over; node metadata and CPU/memory metrics history are not rebuilt. Installations already using the duration schema retain their uptime history. Update the database and Dash together; Goose does not rerun an already applied `0014`.
 
 ## 0.3.0 (2026-08-01)
 
