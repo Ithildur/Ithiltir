@@ -48,13 +48,9 @@ type rebuildStore interface {
 	RebuildTraffic5mChunk(context.Context, int64, []string, time.Time, time.Time) error
 }
 
-type trafficWriteGate interface {
-	with(context.Context, func(context.Context) error) error
-}
-
 type RebuildRunner struct {
 	store   rebuildStore
-	gate    trafficWriteGate
+	gate    *writeGate
 	ctx     context.Context
 	stop    context.CancelFunc
 	mu      sync.Mutex
@@ -65,7 +61,7 @@ type RebuildRunner struct {
 	now     func() time.Time
 }
 
-func newRebuildRunner(ctx context.Context, store rebuildStore, gate trafficWriteGate, retain time.Duration) *RebuildRunner {
+func newRebuildRunner(ctx context.Context, store rebuildStore, gate *writeGate, retain time.Duration) *RebuildRunner {
 	runCtx, stop := context.WithCancel(ctx)
 	return &RebuildRunner{
 		store:  store,

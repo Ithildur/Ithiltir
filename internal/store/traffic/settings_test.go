@@ -9,13 +9,9 @@ import (
 )
 
 func TestNormalizeSettingsRejectsInvalidDirection(t *testing.T) {
-	_, err := NormalizeSettings(Settings{
-		GuestAccessMode: GuestAccessMode(""),
-		UsageMode:       UsageMode(""),
-		CycleMode:       BillingCycleMode(""),
-		BillingStartDay: 0,
-		DirectionMode:   DirectionMode("dominant"),
-	})
+	settings := defaultSettings()
+	settings.DirectionMode = "dominant"
+	_, err := NormalizeSettings(settings)
 	if !errors.Is(err, ErrInvalidSettings) {
 		t.Fatalf("NormalizeSettings(invalid) error = %v, want %v", err, ErrInvalidSettings)
 	}

@@ -2,10 +2,12 @@ package httpserver
 
 import (
 	"bytes"
+	"context"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"testing"
@@ -184,6 +186,51 @@ func TestThemeBootstrapIsNotCached(t *testing.T) {
 	}
 }
 
+func TestLinuxInstallDownloadsSendNodeSecret(t *testing.T) {
+	bash, err := exec.LookPath("bash")
+	if err != nil {
+		t.Skip("installer download test requires bash")
+	}
+	script, err := renderInstallScript(&config.Config{}, "linux")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Load the real download functions without running the system installer.
+	functions, ok := bytes.CutSuffix(bytes.TrimSpace(script), []byte(`main "$@"`))
+	if !ok {
+		t.Fatal("installer entry point changed")
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get(request.NodeSecretHeader) != "download-secret" {
+			http.Error(w, "invalid node secret", http.StatusUnauthorized)
+			return
+		}
+		_, _ = io.WriteString(w, "node asset")
+	}))
+	defer server.Close()
+
+	for _, client := range []string{"curl", "wget"} {
+		t.Run(client, func(t *testing.T) {
+			if _, err := exec.LookPath(client); err != nil {
+				t.Skipf("installer download test requires %s", client)
+			}
+			asset := filepath.Join(t.TempDir(), "node")
+			ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+			defer cancel()
+			cmd := exec.CommandContext(ctx, bash, "-c", string(functions)+"\n\"$1\" \"$2\" \"$3\" \"$4\"\n",
+				"install-download", "download_with_"+client, server.URL, asset, "download-secret")
+			cmd.WaitDelay = time.Second
+			if output, err := cmd.CombinedOutput(); err != nil {
+				t.Fatalf("installer download: %v\n%s", err, output)
+			}
+			body, err := os.ReadFile(asset)
+			if err != nil || string(body) != "node asset" {
+				t.Fatalf("downloaded asset = %q, error %v", body, err)
+			}
+		})
+	}
+}
+
 func TestInstallScriptsSendNodeSecretHeader(t *testing.T) {
 	cfg := &config.Config{
 		App: config.AppConfig{
@@ -191,7 +238,7 @@ func TestInstallScriptsSendNodeSecretHeader(t *testing.T) {
 			PublicURLHost:   "dash.example.com",
 		},
 	}
-	for _, platform := range []string{"linux", "macos", "windows"} {
+	for _, platform := range []string{"macos", "windows"} {
 		t.Run(platform, func(t *testing.T) {
 			script, err := renderInstallScript(cfg, platform)
 			if err != nil {

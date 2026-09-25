@@ -1,12 +1,16 @@
 package notify
 
 import (
+	"encoding/json/v2"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
-	"strings"
 	"testing"
+
+	"dash/internal/model"
+
+	"gorm.io/datatypes"
 )
 
 func TestControlledRedirect(t *testing.T) {
@@ -60,7 +64,7 @@ func TestControlledRedirectLimitsHops(t *testing.T) {
 	}
 }
 
-func TestHTTPClientOnlyFollowsBodyPreservingRedirects(t *testing.T) {
+func TestSendOnlyFollowsBodyPreservingRedirects(t *testing.T) {
 	for _, tt := range []struct {
 		name       string
 		status     int
@@ -72,32 +76,30 @@ func TestHTTPClientOnlyFollowsBodyPreservingRedirects(t *testing.T) {
 		{name: "307 preserves POST body", status: http.StatusTemporaryRedirect, wantMethod: http.MethodPost, wantBody: "payload"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			var finalMethod, finalBody string
+			var originalBody, finalMethod, finalBody string
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				body, err := io.ReadAll(r.Body)
+				if err != nil {
+					t.Errorf("read webhook body: %v", err)
+				}
 				if r.URL.Path == "/start" {
+					originalBody = string(body)
 					http.Redirect(w, r, "/final", tt.status)
 					return
 				}
 				finalMethod = r.Method
-				body, err := io.ReadAll(r.Body)
-				if err != nil {
-					t.Errorf("read redirected body: %v", err)
-				}
 				finalBody = string(body)
 				w.WriteHeader(http.StatusNoContent)
 			}))
 			defer server.Close()
 
-			request, err := http.NewRequest(http.MethodPost, server.URL+"/start", strings.NewReader("payload"))
-			if err != nil {
-				t.Fatalf("http.NewRequest() error = %v", err)
-			}
-			response, err := (&http.Client{CheckRedirect: controlledRedirect}).Do(request)
-			if response != nil {
-				response.Body.Close()
-			}
+			err := Send(t.Context(), &model.NotifyChannel{
+				Type:   model.NotifyTypeWebhook,
+				Config: datatypes.JSON(`{"url":"` + server.URL + `/start"}`),
+			}, Message{Body: "payload"})
+			server.Close()
 			if tt.wantCode != "" {
-				failure := Classify(requestError(err))
+				failure := Classify(err)
 				if failure.Class != DeliveryBlocked || failure.Code != tt.wantCode {
 					t.Fatalf("redirect failure = %+v, want blocked/%s", failure, tt.wantCode)
 				}
@@ -107,10 +109,16 @@ func TestHTTPClientOnlyFollowsBodyPreservingRedirects(t *testing.T) {
 				return
 			}
 			if err != nil {
-				t.Fatalf("client.Do() error = %v", err)
+				t.Fatalf("Send() error = %v", err)
 			}
-			if finalMethod != tt.wantMethod || finalBody != tt.wantBody {
-				t.Fatalf("redirected request = %s %q, want %s %q", finalMethod, finalBody, tt.wantMethod, tt.wantBody)
+			var payload struct {
+				Message string `json:"message"`
+			}
+			if err := json.Unmarshal([]byte(finalBody), &payload); err != nil {
+				t.Fatalf("decode webhook body: %v", err)
+			}
+			if finalMethod != tt.wantMethod || payload.Message != tt.wantBody || finalBody != originalBody {
+				t.Fatalf("redirected request = %s %q, want %s with unchanged body containing %q", finalMethod, finalBody, tt.wantMethod, tt.wantBody)
 			}
 		})
 	}

@@ -3,8 +3,8 @@ package traffic
 import (
 	"context"
 	"errors"
-	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	trafficstore "dash/internal/store/traffic"
@@ -76,29 +76,6 @@ func (s *recordingRebuildStore) RebuildTraffic5mChunk(_ context.Context, _ int64
 	return nil
 }
 
-type blockingWriteGate struct {
-	entered chan struct{}
-	release chan struct{}
-	once    sync.Once
-}
-
-func newBlockingWriteGate() *blockingWriteGate {
-	return &blockingWriteGate{
-		entered: make(chan struct{}, 1),
-		release: make(chan struct{}),
-	}
-}
-
-func (g *blockingWriteGate) with(ctx context.Context, fn func(context.Context) error) error {
-	g.once.Do(func() { g.entered <- struct{}{} })
-	select {
-	case <-g.release:
-		return fn(ctx)
-	case <-ctx.Done():
-		return ctx.Err()
-	}
-}
-
 func rebuildTestNow() time.Time {
 	return time.Date(2026, time.April, 1, 1, 0, 0, 0, time.UTC)
 }
@@ -148,32 +125,34 @@ func TestRebuildRunnerRequiresBilling(t *testing.T) {
 }
 
 func TestRebuildRunnerUsesTrafficWriteGate(t *testing.T) {
-	store := newBlockingRebuildStore()
-	gate := newBlockingWriteGate()
-	runner := newRebuildRunner(context.Background(), store, gate, 45*24*time.Hour)
-	runner.now = rebuildTestNow
-	defer runner.Stop()
+	synctest.Test(t, func(t *testing.T) {
+		store := newBlockingRebuildStore()
+		gate := newWriteGate()
+		runner := newRebuildRunner(t.Context(), store, gate, 45*24*time.Hour)
+		runner.now = rebuildTestNow
+		defer runner.Stop()
 
-	if _, err := runner.Start(7); err != nil {
-		t.Fatalf("Start(7) error = %v", err)
-	}
-	select {
-	case <-gate.entered:
-	case <-time.After(time.Second):
-		t.Fatal("rebuild did not enter write gate")
-	}
-	select {
-	case started := <-store.started:
-		t.Fatalf("rebuild started while gate was held: %d", started)
-	default:
-	}
+		if err := gate.with(t.Context(), func(context.Context) error {
+			if _, err := runner.Start(7); err != nil {
+				t.Fatalf("Start(7) error = %v", err)
+			}
+			synctest.Wait()
+			select {
+			case started := <-store.started:
+				t.Fatalf("rebuild started while gate was held: %d", started)
+			default:
+			}
+			return nil
+		}); err != nil {
+			t.Fatalf("hold traffic write gate: %v", err)
+		}
 
-	close(gate.release)
-	if started := waitRebuildStarted(t, store.started); started != 7 {
-		t.Fatalf("started server = %d, want 7", started)
-	}
-	close(store.release)
-	waitRebuildStatus(t, runner, 7, RebuildCompleted)
+		if started := waitRebuildStarted(t, store.started); started != 7 {
+			t.Fatalf("started server = %d, want 7", started)
+		}
+		close(store.release)
+		waitRebuildStatus(t, runner, 7, RebuildCompleted)
+	})
 }
 
 func TestRebuildRunnerStopCancelsTask(t *testing.T) {

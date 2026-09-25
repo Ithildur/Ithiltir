@@ -6,6 +6,7 @@ import (
 	"math"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"testing"
 	"time"
 
@@ -99,14 +100,18 @@ func TestIntegrationUptime(t *testing.T) {
 		if err := json.Unmarshal(request("/", admin, 200), &daily); err != nil {
 			t.Fatal(err)
 		}
-		want := 2
+		wantIDs := map[string]bool{"101": true, "104": true}
 		if admin {
-			want = 3
+			wantIDs["102"] = true
 		}
-		if !daily.Enabled || len(daily.Nodes) != want || daily.Timezone != loc.String() || daily.WarningSLA != 99.5 || daily.ErrorSLA != 97.5 {
+		if !daily.Enabled || len(daily.Nodes) != len(wantIDs) || daily.Timezone != loc.String() || daily.WarningSLA != 99.5 || daily.ErrorSLA != 97.5 {
 			t.Fatalf("daily metadata admin=%v: %+v", admin, daily)
 		}
 		for _, node := range daily.Nodes {
+			if !wantIDs[node.ServerID] {
+				t.Fatalf("unexpected or duplicate node admin=%v: %q", admin, node.ServerID)
+			}
+			delete(wantIDs, node.ServerID)
 			if len(node.Days) != 45 || node.Days[0].Date != day.AddDate(0, 0, -43).Format(time.DateOnly) {
 				t.Fatalf("calendar dates: %+v", node)
 			}
@@ -165,22 +170,22 @@ func TestIntegrationUptime(t *testing.T) {
 	if err := json.Unmarshal(request("", true, 200), &dailyLate); err != nil {
 		t.Fatal(err)
 	}
-	for _, node := range dailyLate.Nodes {
-		if node.ServerID != "102" {
-			continue
-		}
-		for _, observed := range node.Days {
-			if observed.Date != previousHour.Format(time.DateOnly) {
-				continue
-			}
-			wantMS, wantPercent := int64(120000), 50.0
-			if observed.Date == day.Format(time.DateOnly) {
-				wantMS, wantPercent = 180000, 200.0/3
-			}
-			if observed.ObservedMS != wantMS || observed.Percent == nil || math.Abs(*observed.Percent-wantPercent) > 0.00001 {
-				t.Fatalf("late minute missing from daily view: %+v", observed)
-			}
-		}
+	nodeIndex := slices.IndexFunc(dailyLate.Nodes, func(node metricdata.NodeUptime) bool { return node.ServerID == "102" })
+	if nodeIndex < 0 {
+		t.Fatal("late minute node missing from daily view")
+	}
+	days := dailyLate.Nodes[nodeIndex].Days
+	dayIndex := slices.IndexFunc(days, func(observed metricdata.UptimeDay) bool { return observed.Date == previousHour.Format(time.DateOnly) })
+	if dayIndex < 0 {
+		t.Fatal("late minute date missing from daily view")
+	}
+	observed := days[dayIndex]
+	wantMS, wantPercent := int64(120000), 50.0
+	if observed.Date == day.Format(time.DateOnly) {
+		wantMS, wantPercent = 180000, 200.0/3
+	}
+	if observed.ObservedMS != wantMS || observed.Percent == nil || math.Abs(*observed.Percent-wantPercent) > 0.00001 {
+		t.Fatalf("late minute missing from daily view: %+v", observed)
 	}
 	// Changing the statistics timezone rebuilds only derived buckets. Returning
 	// to the original timezone must preserve the minute history and its rates.
