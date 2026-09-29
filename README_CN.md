@@ -35,6 +35,8 @@ AArch64 机器使用 `ARCH=arm64`。在受支持的 Debian/Ubuntu 系统上，�
 
 安装完成后访问配置的 `app.public_url`，在地址后加 `/login` 进入管理台。创建节点后，按管理台生成的命令安装 Node。
 
+可选 PVE VM 监控需要使用 `scripts/package.sh --with-pve` 打包采集工具，再在 PVE 宿主机的 Linux Node 安装命令末尾追加 `--pve`。目前提供独立上报和管理员读取接口，没有 UI。安装、更新和停用方式见 [Node 部署说明](deploy/node/README.md#optional-pve-monitoring)。
+
 ## 源码运行
 
 源码开发需要 Go 1.27.1+、Bun 1.3.11、PostgreSQL 16+ 及对应主版本的 TimescaleDB。除非用 `--no-redis` 启动，否则还需要 Redis。
@@ -115,3 +117,8 @@ bash scripts/package.sh --version 0.0.0-dev.0 --node-version 0.0.0-dev.0 \
 ## 许可证
 
 AGPL-3.0-only。见 [LICENSE](LICENSE)。
+
+
+## Node gRPC 传输
+
+为兼容已有安装，默认仍使用 HTTP。在 Node 服务环境中设置 `ITHILTIR_NODE_TRANSPORT=grpc`（仅 RPC）或 `auto`（发送报告前协商），再重启 Node。Dash 在现有 HTTP/2 监听地址提供 gRPC；代理必须以 gRPC 转发 `/ithiltir.node.v1.Node/`。这两种模式不会因鉴权或 TLS 失败降级到明文。PVE 历史还要求 root helper 常驻服务（`pve-cache --serve`）。浏览器 API 和资产下载继续使用 HTTP。

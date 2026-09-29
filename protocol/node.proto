@@ -1,0 +1,56 @@
+syntax = "proto3";
+
+package ithiltir.node.v1;
+option go_package = "github.com/Ithildur/Ithiltir/internal/nodewire;nodewire";
+
+// The JSON report is the existing versioned node payload, preserving integer
+// precision, missing fields and validation semantics across both transports.
+message Report { bytes json = 1; }
+message Reply { bytes json = 1; }
+message Empty {}
+message Identity {
+  string install_id = 1;
+  bool created = 2;
+  uint32 protocol_version = 3;
+}
+
+service Node {
+  rpc Identify(Empty) returns (Identity);
+  rpc Metrics(Report) returns (Reply);
+  rpc Static(Report) returns (Empty);
+  rpc Virt(Report) returns (Empty);
+  // The node opens this stream; Dash sends bounded read-only queries.
+  rpc Connect(stream NodeMessage) returns (stream DashMessage);
+}
+
+message Capabilities {
+  string version = 1;
+  bool pve_history = 2;
+  string helper_version = 3;
+}
+message HistoryQuery {
+  uint32 vm_id = 1;
+  string timeframe = 2;
+  string consolidation = 3;
+  uint32 timeout_ms = 4;
+}
+message QueryResult {
+  bytes json = 1;
+  string error = 2;
+}
+message NodeMessage {
+  string id = 1;
+  oneof body {
+    Capabilities capabilities = 2;
+    QueryResult result = 3;
+    bool heartbeat = 4;
+  }
+}
+message DashMessage {
+  string id = 1;
+  oneof body {
+    HistoryQuery history = 2;
+    bool cancel = 3;
+    bool heartbeat = 4;
+  }
+}

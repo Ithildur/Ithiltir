@@ -3,11 +3,12 @@ package node
 import (
 	"net/netip"
 
-	"dash/internal/config"
-	"dash/internal/serverid"
-	"dash/internal/store"
 	"github.com/Ithildur/EiluneKit/http/middleware"
 	"github.com/Ithildur/EiluneKit/http/routes"
+
+	"dash/internal/config"
+	nodevirt "dash/internal/http/api/node/virt"
+	"dash/internal/nodeingest"
 )
 
 func ingestMiddleware() []routes.Middleware {
@@ -17,13 +18,12 @@ func ingestMiddleware() []routes.Middleware {
 }
 
 // Router returns node routes.
-func Router(st *store.Stores, serverID *serverid.Store, staleAfterSec int, trustedProxies []netip.Prefix) *routes.Blueprint {
-	h := newHandler(st.Node, st.Metric, st.Front, st.Alert, serverID, staleAfterSec, failedAuthHandler(trustedProxies))
-	chain := ingestMiddleware()
-	all := append([]routes.Middleware{middleware.RequireJSONBody}, chain...)
-	r := routes.NewBlueprint(routes.DefaultMiddleware(all...))
+func Router(ingest *nodeingest.Receiver, trustedProxies []netip.Prefix) *routes.Blueprint {
+	h := &handler{ingest: ingest, failedAuth: failedAuthHandler(trustedProxies)}
+	r := routes.NewBlueprint(routes.DefaultMiddleware(middleware.RequireJSONBody))
 	h.metricsRoute(r)
 	h.staticRoute(r)
 	h.identityRoute(r)
+	r.Include("/virt", nodevirt.Router(ingest, h.failedAuth))
 	return r
 }

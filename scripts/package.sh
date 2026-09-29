@@ -14,6 +14,7 @@ NODE_LOCAL_DEFAULT_DIR="deploy/node"
 NODE_REMOTE_URL="https://github.com/Ithildur/Ithiltir-node.git"
 NODE_REPO_SLUG="Ithildur/Ithiltir-node"
 BUILD_CHANNEL="release"
+WITH_PVE="false"
 NODE_ASSET_MANIFEST=(
   "node_linux_amd64_sha256=linux/node_linux_amd64"
   "node_linux_arm64_sha256=linux/node_linux_arm64"
@@ -30,6 +31,7 @@ Usage:
   scripts/package.sh [-o OUT_DIR] [-t TARGETS] [--version VERSION|--use-git-tag] [--node-version VERSION] [--node-local|--node-local-dir DIR] [--release] [-z|-zip|--zip|--tar-gz]
 
 Options:
+  --with-pve       Bundle the optional precompiled PVE cache helpers
   -o OUT_DIR        Output directory (default: release)
   -t TARGETS        Target os/arch list. Repeatable or comma-separated (default: linux/amd64)
   --version VERSION Build version to inject into dash (default: 0.0.0-dev)
@@ -473,6 +475,10 @@ ensure_zip() {
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
+    --with-pve)
+      WITH_PVE="true"
+      shift
+      ;;
     -o)
       OUT_DIR="${2:-}"
       [[ -n "$OUT_DIR" ]] || { echo "missing value for -o" >&2; usage; exit 2; }
@@ -592,6 +598,26 @@ if [[ -n "$NODE_LOCAL_DIR" ]]; then
   prepare_local_node_deploy "$NODE_LOCAL_DIR" "$node_deploy_dir"
 else
   prepare_remote_node_deploy "$node_deploy_dir"
+fi
+
+if [[ "$WITH_PVE" == "true" ]]; then
+  for pve_arch in amd64 arm64; do
+    pve_file="pve_cache_linux_${pve_arch}"
+    if [[ -n "$NODE_LOCAL_DIR" ]]; then
+      copy_local_node_asset "$node_deploy_dir/linux/$pve_file" \
+        "$NODE_LOCAL_DIR/linux/$pve_file" \
+        "$NODE_LOCAL_DIR/Ithiltir-pve-cache-linux-${pve_arch}"
+    else
+      download_node_asset "Ithiltir-pve-cache-linux-${pve_arch}" "$node_deploy_dir/linux/$pve_file"
+    fi
+    chmod 755 "$node_deploy_dir/linux/$pve_file"
+  done
+  {
+    printf 'format_version=1\nnode_version=%s\n' "$NODE_RELEASE_VERSION"
+    for pve_arch in amd64 arm64; do
+      printf '%s_sha256=%s\n' "$pve_arch" "$(sha256_file "$node_deploy_dir/linux/pve_cache_linux_${pve_arch}")"
+    done
+  } >"$node_deploy_dir/linux/pve-cache.env"
 fi
 
 node_asset_sums=()

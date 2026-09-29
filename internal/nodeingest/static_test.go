@@ -1,7 +1,7 @@
-package node
+package nodeingest
 
 import (
-	"net/http/httptest"
+	"net/netip"
 	"strings"
 	"testing"
 	"time"
@@ -75,9 +75,9 @@ func TestStaticPatchDistinguishesUnavailableHardwareFromZero(t *testing.T) {
 			Arch:            "amd64",
 		},
 	}
-	req := httptest.NewRequest("POST", "/api/node/static", nil)
+	ip := netip.Addr{}
 
-	patch := staticPatch(snapshot, metrics.StaticDiskLogical{}, false, req)
+	patch := staticPatch(snapshot, metrics.StaticDiskLogical{}, false, ip)
 	if patch.CPUModel != nil || patch.CPUCoresLog != nil || patch.MemTotal != nil ||
 		patch.SwapTotal != nil || patch.Disk != nil {
 		t.Fatalf("staticPatch() marked unavailable hardware as observed: %+v", patch)
@@ -87,7 +87,7 @@ func TestStaticPatchDistinguishesUnavailableHardwareFromZero(t *testing.T) {
 	}
 
 	snapshot.Memory.SwapTotal = new(int64(0))
-	patch = staticPatch(snapshot, metrics.StaticDiskLogical{}, false, req)
+	patch = staticPatch(snapshot, metrics.StaticDiskLogical{}, false, ip)
 	if patch.SwapTotal == nil || *patch.SwapTotal != 0 {
 		t.Fatalf("staticPatch() swap total = %v, want explicit zero", patch.SwapTotal)
 	}
@@ -95,9 +95,9 @@ func TestStaticPatchDistinguishesUnavailableHardwareFromZero(t *testing.T) {
 
 func TestStaticPatchKeepsDiskFieldsInOneObservation(t *testing.T) {
 	snapshot := metrics.StaticMetrics{Version: "1.0.0", ReportIntervalSeconds: 10}
-	req := httptest.NewRequest("POST", "/api/node/static", nil)
+	ip := netip.Addr{}
 
-	missingIdentity := staticPatch(snapshot, metrics.StaticDiskLogical{Total: 1024}, true, req)
+	missingIdentity := staticPatch(snapshot, metrics.StaticDiskLogical{Total: 1024}, true, ip)
 	if missingIdentity.Disk != nil {
 		t.Fatalf("staticPatch() disk without identity = %+v, want no observation", missingIdentity.Disk)
 	}
@@ -108,7 +108,7 @@ func TestStaticPatchKeepsDiskFieldsInOneObservation(t *testing.T) {
 		Mountpoints: map[string]metrics.StaticDiskMountpoint{
 			"/data": {FSType: "xfs"},
 		},
-	}, true, req)
+	}, true, ip)
 	if observed.Disk == nil || observed.Disk.Path != "/data" ||
 		observed.Disk.FSType != "xfs" || observed.Disk.Total != 2048 {
 		t.Fatalf("staticPatch() disk = %+v, want one complete observation", observed.Disk)

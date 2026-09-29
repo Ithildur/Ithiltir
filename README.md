@@ -35,6 +35,8 @@ Use `ARCH=arm64` on AArch64 systems. On supported Debian/Ubuntu systems, the ins
 
 After installation, open the configured `app.public_url`; append `/login` for the admin console. Create a node there and follow the generated install command.
 
+Optional PVE VM monitoring requires helpers bundled with `scripts/package.sh --with-pve`; append `--pve` to the Linux Node installation command on the PVE host. It provides separate reporting and administrator read APIs, without a UI. See [Node deployment](deploy/node/README.md#optional-pve-monitoring) for installation, updates and disabling collection.
+
 ## Run From Source
 
 Source development requires Go 1.27.1+, Bun 1.3.11, PostgreSQL 16+ with a matching TimescaleDB build, and Redis unless Dash is started with `--no-redis`.
@@ -115,3 +117,8 @@ Local Node asset layouts are documented in [deploy/node/README.md](deploy/node/R
 ## License
 
 AGPL-3.0-only. See [LICENSE](LICENSE).
+
+
+## Node gRPC transport
+
+HTTP remains the default for compatibility. Set `ITHILTIR_NODE_TRANSPORT=grpc` (RPC only) or `auto` (negotiate before reports) in the Node service environment, then restart Node. Dash serves gRPC on its existing HTTP/2 listener; proxies must forward `/ithiltir.node.v1.Node/` with gRPC support. These modes never authorize plaintext fallback after authentication or TLS failures. PVE history also requires the root helper service (`pve-cache --serve`). Browser APIs and asset downloads remain HTTP.

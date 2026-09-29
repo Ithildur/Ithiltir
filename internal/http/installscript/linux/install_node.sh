@@ -28,6 +28,15 @@ SYSTEMD_CONNECTIONS_CACHE_ENABLED="0"
 MANUAL_RUN_COMMAND=""
 INSTALL_TMP=""
 INSTALL_STAGE=""
+PVE_MODE="keep"
+PVE_ENABLED=0
+PVE_STAGE=""
+PVE_HELPER="/usr/local/libexec/ithiltir-node/pve-cache"
+PVE_SERVICE="ithiltir-node-pve-cache.service"
+PVE_TIMER="ithiltir-node-pve-cache.timer"
+PVE_GUEST_SERVICE="ithiltir-node-pve-guest.service"
+PVE_GUEST_TIMER="ithiltir-node-pve-guest.timer"
+PVE_DROPIN="/etc/systemd/system/${APP}.service.d/pve.conf"
 INSTALL_RELEASE=""
 
 TMPFILES_FILE="/etc/tmpfiles.d/ithiltir-node.conf"
@@ -120,6 +129,13 @@ msg() {
       connections_timer) echo "     连接数缓存 timer：${CONNECTIONS_TIMER_NAME}" ;;
       connections_timer_skipped) echo "     连接数缓存 timer：已跳过（正在使用节点自带统计，容器连接数据可能不完整）" ;;
       lvm_cache) echo "     LVM 缓存：${CACHE_FILE}" ;;
+      pve_missing) echo "已有 PVE 工具缺失，请使用 --pve 重新安装" ;;
+      pve_manifest) echo "PVE 资产清单无效或版本不匹配" ;;
+      pve_checksum) echo "PVE 工具 SHA-256 校验失败" ;;
+      pve_version) echo "PVE 工具版本不匹配" ;;
+      pve_required) echo "PVE 监控要求本机 PVE、systemd 和 /usr/bin/pvesh" ;;
+      pve_sha256) echo "PVE 安装需要 sha256sum" ;;
+      pve_failed) echo "PVE 采集失败，node 将上报缓存状态。查看 journalctl -u $PVE_SERVICE" ;;
       *) echo "$key" ;;
     esac
     return
@@ -173,6 +189,13 @@ msg() {
     connections_timer) echo "     Connections cache timer: ${CONNECTIONS_TIMER_NAME}" ;;
     connections_timer_skipped) echo "     Connections cache timer: skipped (node built-in counting active; container connections may be incomplete)" ;;
     lvm_cache) echo "     LVM cache: ${CACHE_FILE}" ;;
+    pve_missing) echo "Existing PVE helper is missing; reinstall with --pve" ;;
+    pve_manifest) echo "Invalid or version-mismatched PVE asset manifest" ;;
+    pve_checksum) echo "PVE helper SHA-256 checksum mismatch" ;;
+    pve_version) echo "PVE helper version mismatch" ;;
+    pve_required) echo "PVE monitoring requires local PVE, systemd and /usr/bin/pvesh" ;;
+    pve_sha256) echo "PVE installation requires sha256sum" ;;
+    pve_failed) echo "PVE collection failed; node will report cache health. Check journalctl -u $PVE_SERVICE" ;;
     *) echo "$key" ;;
   esac
 }
@@ -193,6 +216,8 @@ usage() {
     cat >&2 <<EOF
 用法：sudo bash $0 <dash_ip> [dash_port] <secret> [interval_seconds] [--net iface1,iface2] [--service-manager=auto|systemd|openrc|none]
 
+PVE：--pve 安装或更新采集工具；--no-pve 停用；省略则保留现状。仅支持 PVE/systemd。
+
 示例：
   sudo bash $0 10.0.0.2 8080 mysecret
   sudo bash $0 dash.example.com mysecret
@@ -201,6 +226,8 @@ EOF
   else
     cat >&2 <<EOF
 Usage:  sudo bash $0 <dash_ip> [dash_port] <secret> [interval_seconds] [--net iface1,iface2] [--service-manager=auto|systemd|openrc|none]
+
+PVE: --pve installs/updates the collector; --no-pve disables it; omitted preserves current state. Requires PVE/systemd.
 
 Examples:
   sudo bash $0 10.0.0.2 8080 mysecret
@@ -811,6 +838,7 @@ finish_node_install() {
   set +e
   [[ -z "$INSTALL_TMP" ]] || rm -f "$INSTALL_TMP"
   [[ -z "$INSTALL_STAGE" ]] || as_root rm -rf "$INSTALL_STAGE"
+  [[ -z "$PVE_STAGE" ]] || as_root rm -rf "$PVE_STAGE"
   exit "$status"
 }
 
@@ -1962,10 +1990,87 @@ configure_openrc_collectors() {
   install_openrc_cron_jobs "$lvm_detected"
 }
 
+prepare_pve() {
+  local arch="$1" secret="$2" node_version="$3"
+  [[ "$PVE_ENABLED" -eq 1 ]] || return 0
+  if [[ "$PVE_MODE" == keep ]]; then
+    [[ -x "$PVE_HELPER" ]] || { msg pve_missing >&2; return 1; }
+    return 0
+  fi
+  local base="${DOWNLOAD_SCHEME}://${DOWNLOAD_HOST}${DOWNLOAD_PATH}"
+  local format="" version="" amd64="" arm64="" key value expected actual
+  as_root install -d -m 0755 -o root -g root "$(dirname "$PVE_HELPER")"
+  PVE_STAGE="$(as_root mktemp -d "$(dirname "$PVE_HELPER")/.pve-stage.XXXXXX")"
+  download_file "$base/pve-cache.env" "$INSTALL_TMP" "$secret"
+  [[ "$(wc -c <"$INSTALL_TMP")" -le 4096 ]] || { msg pve_manifest >&2; return 1; }
+  while IFS='=' read -r key value; do
+    case "$key" in
+      format_version) [[ -z "$format" ]] || return 1; format="$value" ;;
+      node_version) [[ -z "$version" ]] || return 1; version="$value" ;;
+      amd64_sha256) [[ -z "$amd64" ]] || return 1; amd64="$value" ;;
+      arm64_sha256) [[ -z "$arm64" ]] || return 1; arm64="$value" ;;
+      *) msg pve_manifest >&2; return 1 ;;
+    esac
+  done <"$INSTALL_TMP"
+  [[ "$format" == 1 && "$version" == "$node_version" && "$amd64" =~ ^[0-9a-f]{64}$ && "$arm64" =~ ^[0-9a-f]{64}$ ]] || {
+    msg pve_manifest >&2; return 1;
+  }
+  expected="$amd64"
+  [[ "$arch" != arm64 ]] || expected="$arm64"
+  download_file "$base/pve_cache_linux_$arch" "$INSTALL_TMP" "$secret"
+  actual="$(sha256sum "$INSTALL_TMP")"
+  [[ "${actual%% *}" == "$expected" ]] || { msg pve_checksum >&2; return 1; }
+  as_root install -m 0755 -o root -g root "$INSTALL_TMP" "$PVE_STAGE/pve-cache"
+  [[ "$(as_root "$PVE_STAGE/pve-cache" --version)" == "$node_version" ]] || { msg pve_version >&2; return 1; }
+}
+
+configure_pve() {
+  if [[ "$PVE_MODE" == keep ]]; then return 0; fi
+  if systemd_available; then
+    as_root systemctl disable --now "$PVE_TIMER" "$PVE_GUEST_TIMER" "$PVE_SERVICE" >/dev/null 2>&1 || true
+    as_root systemctl stop "$PVE_SERVICE" "$PVE_GUEST_SERVICE" >/dev/null 2>&1 || true
+  fi
+  if [[ "$PVE_ENABLED" -ne 1 ]]; then
+    as_root rm -f "$PVE_DROPIN" "/etc/systemd/system/$PVE_SERVICE" "/etc/systemd/system/$PVE_TIMER" "$PVE_HELPER" "$CACHE_DIR/virt.json"
+    as_root rm -f "/etc/systemd/system/$PVE_GUEST_SERVICE" "/etc/systemd/system/$PVE_GUEST_TIMER"
+    if systemd_available; then as_root systemctl daemon-reload; fi
+    return 0
+  fi
+  as_root install -m 0755 -o root -g root "$PVE_STAGE/pve-cache" "$PVE_HELPER"
+  as_root install -d -m 0755 -o root -g root "$(dirname "$PVE_DROPIN")"
+  as_root tee "$PVE_DROPIN" >/dev/null <<EOF
+[Service]
+Environment=ITHILTIR_NODE_VIRT_CACHE=/run/ithiltir-node/virt.json
+EOF
+  as_root rm -f "/etc/systemd/system/$PVE_TIMER" "/etc/systemd/system/$PVE_GUEST_TIMER" "/etc/systemd/system/$PVE_GUEST_SERVICE"
+  as_root tee "/etc/systemd/system/$PVE_SERVICE" >/dev/null <<EOF
+[Unit]
+Description=Collect PVE status and serve local read-only VM queries
+[Service]
+Type=simple
+User=root
+Group=${RUN_GROUP}
+UMask=0027
+ExecStart=${PVE_HELPER} --serve --group ${RUN_GROUP}
+Restart=on-failure
+RestartSec=10s
+TimeoutStopSec=15s
+KillMode=control-group
+[Install]
+WantedBy=multi-user.target
+EOF
+  as_root systemctl daemon-reload
+  if ! as_root systemctl enable --now "$PVE_SERVICE"; then
+    msg pve_failed >&2
+  fi
+}
+
 main() {
   local -a filtered=()
   while [[ $# -gt 0 ]]; do
     case "$1" in
+      --pve) PVE_MODE="enable"; shift ;;
+      --no-pve) PVE_MODE="disable"; shift ;;
       --service-manager=*)
         SERVICE_MANAGER_MODE="${1#--service-manager=}"
         shift
@@ -2011,6 +2116,13 @@ main() {
   detect_os
   validate_runtime_identity
   select_service_manager
+  if [[ "$PVE_MODE" == enable || ( "$PVE_MODE" == keep && -f "$PVE_DROPIN" ) ]]; then
+    PVE_ENABLED=1
+    [[ "$SERVICE_MANAGER" == systemd && -x /usr/bin/pvesh && -d /etc/pve ]] || {
+      msg pve_required >&2; exit 1;
+    }
+    need_cmd sha256sum || { msg pve_sha256 >&2; exit 1; }
+  fi
   ensure_process_control
   ensure_alpine_runtime
 
@@ -2062,6 +2174,7 @@ main() {
   fi
   node_version="${node_version//$'\r'/}"
   valid_node_version "$node_version" || { msg invalid_node_version "$node_version" >&2; exit 1; }
+  prepare_pve "$arch" "$secret" "$node_version"
 
   INSTALL_RELEASE="${RELEASES_DIR}/${node_version}"
   [[ ! -e "$CURRENT_DIR" || -L "$CURRENT_DIR" ]] || {
@@ -2112,6 +2225,7 @@ main() {
       ;;
   esac
 
+  configure_pve
   if [[ "$SERVICE_MANAGER" != "none" ]]; then
     service_enable
     service_start

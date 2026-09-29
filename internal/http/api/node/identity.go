@@ -3,49 +3,26 @@ package node
 import (
 	"net/http"
 
-	"dash/internal/http/httperr"
-	"dash/internal/infra"
 	"github.com/Ithildur/EiluneKit/http/response"
 	"github.com/Ithildur/EiluneKit/http/routes"
+
+	"dash/internal/infra"
 )
 
-type identityView struct {
-	InstallID string `json:"install_id"`
-	Created   bool   `json:"created"`
-}
-
 func (h *handler) identityRoute(r *routes.Blueprint) {
-	r.Post(
-		"/identity",
-		"Get node server identity",
-		h.identityHandler,
-		routes.Tags("node"),
-	)
+	r.Post("/identity", "Get node server identity", h.identityHandler, routes.Use(ingestMiddleware()...), routes.Tags("node"))
 }
-
 func (h *handler) identityHandler(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
 	defer r.Body.Close()
 	logger := infra.WithModule("node")
-
-	if _, _, err := h.authenticate(ctx, r, logger); err != nil {
+	if _, _, err := h.authenticate(r.Context(), r); err != nil {
 		h.writeError(w, r, logger, err)
 		return
 	}
-
-	identity, err := h.loadIdentity()
+	identity, err := h.ingest.Identity(r.Context())
 	if err != nil {
-		logger.Error(ctx, "load server identity failed", err)
-		h.writeError(w, r, logger, httperr.ServiceUnavailable(err))
+		h.writeError(w, r, logger, err)
 		return
 	}
 	response.WriteJSON(w, http.StatusOK, identity)
-}
-
-func (h *handler) loadIdentity() (identityView, error) {
-	id, created, err := h.serverID.GetOrCreate()
-	if err != nil {
-		return identityView{}, err
-	}
-	return identityView{InstallID: id, Created: created}, nil
 }

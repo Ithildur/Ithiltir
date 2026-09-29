@@ -24,7 +24,7 @@ import (
 	"github.com/Ithildur/EiluneKit/http/routes"
 )
 
-func newTestHandler(t *testing.T, st *store.Stores) http.Handler {
+func newTestHandler(t testing.TB, st *store.Stores) http.Handler {
 	t.Helper()
 	home := t.TempDir()
 	for _, dir := range []string{"dist", "dist/assets", "deploy"} {
@@ -68,6 +68,7 @@ func newTestHandler(t *testing.T, st *store.Stores) http.Handler {
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(srv.rpc.Close)
 	return srv.server.Handler
 }
 

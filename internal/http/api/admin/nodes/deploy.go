@@ -9,12 +9,15 @@ import (
 	"strings"
 
 	"dash/internal/http/httperr"
+	"dash/internal/nodeupdate"
+	"dash/internal/version"
 	"github.com/Ithildur/EiluneKit/http/response"
 	"github.com/Ithildur/EiluneKit/http/routes"
 )
 
 type deployView struct {
 	Scripts map[string]deployScript `json:"scripts"`
+	PVE     bool                    `json:"pve"`
 }
 
 type deployScript struct {
@@ -65,7 +68,7 @@ func (h *handler) deployHandler(w http.ResponseWriter, r *http.Request) {
 		},
 	}
 
-	resp := deployView{Scripts: scripts}
+	resp := deployView{Scripts: scripts, PVE: nodeupdate.BundledPVE(version.BundledNodeString())}
 	response.WriteJSON(w, http.StatusOK, resp)
 }
 

@@ -2,10 +2,13 @@ package api
 
 import (
 	"fmt"
-	"math"
 	"net/http"
 	"net/netip"
 	"time"
+
+	authhttp "github.com/Ithildur/EiluneKit/auth/http"
+	authjwt "github.com/Ithildur/EiluneKit/auth/jwt"
+	"github.com/Ithildur/EiluneKit/http/routes"
 
 	"dash/internal/config"
 	updater "dash/internal/dashupdate"
@@ -17,13 +20,11 @@ import (
 	statisticsapi "dash/internal/http/api/statistics"
 	versionapi "dash/internal/http/api/version"
 	"dash/internal/http/request"
-	"dash/internal/serverid"
+	"dash/internal/nodeingest"
+	"dash/internal/nodesession"
 	"dash/internal/store"
 	themefs "dash/internal/theme"
 	trafficjob "dash/internal/traffic"
-	authhttp "github.com/Ithildur/EiluneKit/auth/http"
-	authjwt "github.com/Ithildur/EiluneKit/auth/jwt"
-	"github.com/Ithildur/EiluneKit/http/routes"
 )
 
 // Dependencies holds shared dependencies for HTTP handlers.
@@ -33,6 +34,8 @@ type Dependencies struct {
 	Theme          *themefs.Store
 	TrafficRebuild *trafficjob.RebuildRunner
 	DashUpdate     *updater.Runner
+	NodeIngest     *nodeingest.Receiver
+	NodeSessions   *nodesession.Hub
 }
 
 const passwordOnlyAuthUserID = "dash-admin"
@@ -41,9 +44,7 @@ type routeSetup struct {
 	authHandler      *authhttp.Handler
 	bearer           routes.Middleware
 	optionalBearer   routes.Middleware
-	serverID         *serverid.Store
 	offlineThreshold time.Duration
-	staleAfterSec    int
 	trustedProxies   []netip.Prefix
 }
 
@@ -68,8 +69,13 @@ func prepareRoutes(cfg *config.Config, deps Dependencies) (routeSetup, error) {
 	if deps.DashUpdate == nil {
 		return routeSetup{}, fmt.Errorf("api: dash update runner is nil")
 	}
+	if deps.NodeIngest == nil {
+		return routeSetup{}, fmt.Errorf("api: node receiver is nil")
+	}
+	if deps.NodeSessions == nil {
+		return routeSetup{}, fmt.Errorf("api: node sessions are nil")
+	}
 
-	offlineThreshold, staleAfterSec := nodeThresholds(cfg)
 	trustedProxies := append([]netip.Prefix(nil), cfg.HTTP.TrustedProxyPrefixes...)
 	authHandler, err := newAuthHandler(cfg.Auth.Password, deps.Auth, trustedProxies)
 	if err != nil {
@@ -83,18 +89,12 @@ func prepareRoutes(cfg *config.Config, deps Dependencies) (routeSetup, error) {
 	if err != nil {
 		return routeSetup{}, fmt.Errorf("api: build optional bearer middleware: %w", err)
 	}
-	installIDPath, err := config.InstallIDPath()
-	if err != nil {
-		return routeSetup{}, fmt.Errorf("api: resolve install id path: %w", err)
-	}
 
 	return routeSetup{
 		authHandler:      authHandler,
 		bearer:           bearer,
 		optionalBearer:   optionalBearer,
-		serverID:         serverid.New(installIDPath),
-		offlineThreshold: offlineThreshold,
-		staleAfterSec:    staleAfterSec,
+		offlineThreshold: cfg.App.EffectiveNodeOfflineThreshold(),
 		trustedProxies:   trustedProxies,
 	}, nil
 }
@@ -103,9 +103,9 @@ func buildRoutes(cfg *config.Config, deps Dependencies, setup routeSetup) *route
 	r := routes.NewBlueprint()
 	r.Add(setup.authHandler.Routes()...)
 	r.Include("/version", versionapi.Router())
-	r.Include("/admin", adminapi.Router(deps.Stores, cfg, deps.Theme, deps.TrafficRebuild, deps.DashUpdate), routes.IncludeAuth(routes.AuthRequired), routes.IncludeMiddleware(setup.bearer))
+	r.Include("/admin", adminapi.Router(deps.Stores, cfg, deps.Theme, deps.TrafficRebuild, deps.DashUpdate, deps.NodeSessions), routes.IncludeAuth(routes.AuthRequired), routes.IncludeMiddleware(setup.bearer))
 	// Node handlers authenticate X-Node-Secret independently of bearer sessions.
-	r.Include("/node", nodeapi.Router(deps.Stores, setup.serverID, setup.staleAfterSec, setup.trustedProxies))
+	r.Include("/node", nodeapi.Router(deps.NodeIngest, setup.trustedProxies))
 	r.Include("/front", frontapi.Router(deps.Stores, setup.offlineThreshold, setup.optionalBearer))
 	r.Include("/metrics", metricsapi.Router(deps.Stores, cfg.App.EffectiveLocation(), setup.optionalBearer))
 	r.Include("/statistics", statisticsapi.Router(deps.Stores, cfg.App.EffectiveLocation(), setup.bearer, setup.optionalBearer))
@@ -137,9 +137,4 @@ func newAuthHandler(password string, auth authhttp.TokenManager, trustedProxies 
 		CookieSameSite:     http.SameSiteStrictMode,
 		TrustedProxies:     trustedProxies,
 	})
-}
-
-func nodeThresholds(cfg *config.Config) (time.Duration, int) {
-	offlineThreshold := cfg.App.EffectiveNodeOfflineThreshold()
-	return offlineThreshold, int(math.Ceil(offlineThreshold.Seconds()))
 }

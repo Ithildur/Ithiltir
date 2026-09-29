@@ -45,3 +45,36 @@ Node install commands use the structured `GET /api/admin/nodes/deploy` response.
 Linux, macOS, and Windows installers follow at most five download redirects. Every hop must keep the original host; same-scheme hops must keep the effective port, HTTP may upgrade to HTTPS, and HTTPS downgrade or cross-host redirects are rejected before `X-Node-Secret` is sent.
 
 Installer messages follow Dash `app.language`.
+
+## Optional PVE Monitoring
+
+Use `scripts/package.sh --with-pve` (PowerShell: `-WithPVE`) to bundle precompiled helpers from the selected node release. Local inputs are `linux/pve_cache_linux_amd64` and `linux/pve_cache_linux_arm64`, or flat `Ithiltir-pve-cache-linux-<arch>` assets. Both helpers share `--node-version`; packages without this option retain the ordinary node assets and installation behavior.
+
+`deploy/linux/pve-cache.env` contains `format_version=1`, `node_version`, `amd64_sha256`, and `arm64_sha256`. These fields are deliberately separate from the existing `release.env` v1 contract. New Dash updaters verify the optional manifest and both assets; older Dash updaters continue validating their original assets. The Linux PVE installer verifies the selected helper's SHA-256 and executable version before stopping the installed node.
+
+Append `--pve` to the generated Linux install command on a PVE/systemd host. This installs root-owned `/usr/local/libexec/ithiltir-node/pve-cache`, `ithiltir-node-pve-cache.service` running `pve-cache --serve`, and a node service drop-in enabling `ITHILTIR_NODE_VIRT_CACHE=/run/ithiltir-node/virt.json`. The helper queries local QEMU VMs as root; the ordinary node remains unprivileged. No compiler, PVE user or API token is required. PVE collection is not supported by the OpenRC or `none` adapters.
+
+Reinstalling without either PVE flag preserves the existing PVE installation choice. `--no-pve` disables/removes the PVE service, legacy timers, helper, drop-in and public cache. Guest lock files and cooldowns remain until reboot; never unlink live lock files. Reinstall with `--pve` to update the helper and units; node self-update does not modify root-owned assets. Existing node identity and report targets remain managed by `report install`.
+
+Collection runs 30 seconds after each completed attempt, with a shared 20-second query budget and a 90-second cache TTL. Logs: `journalctl -u ithiltir-node-pve-cache.service`. Only the local host's QEMU VMs are reported, including stopped VMs and templates. VM reporting uses a separate authenticated `/api/node/virt` endpoint; administrator reads use `/api/admin/nodes/{id}/virt`. No UI, HA configuration, LXC, or controls are included. VM history requires a gRPC node session and the helper service.
+
+Guest Agent IPs are returned in optional `ips` arrays, up to 128 unique IPv4/IPv6 addresses per VM, including private addresses and excluding loopback, link-local, unspecified, multicast and invalid addresses. PVE must enable the guest agent and the agent must be running inside the VM. Missing IPs do not fail basic collection. IP collection runs independently inside `pve-cache --serve` (manual one-shot: `--guest`): the scheduler wakes 60 seconds after completion, successful VMs wait five minutes, and failures back off for 5, 10, 20, then 30 minutes (maximum). Only running, non-template, non-paused VMs from a fresh inventory are queried. Four workers use five-second query deadlines within a 50-second slow-collection budget. Per-VM file locks are inherited by query processes; timeout kills the process group and waits for exit. A still-running query blocks any replacement for that VM. Cooldowns are saved before launch in root-only `/run/ithiltir-node/pve-guest`; this state is volatile and resets on reboot. Hot collection only reads this cache.
+
+
+## gRPC deployment
+
+Set `ITHILTIR_NODE_TRANSPORT=grpc` or `auto` in the Node service environment and restart it; `http` remains the default. The report URL and key stay unchanged. RPC uses the same URL origin and the root `/ithiltir.node.v1.Node/` service path; a custom HTTP path prefix does not change that RPC path. TLS termination must advertise HTTP/2. Example Nginx location inside an existing TLS server:
+
+```nginx
+location /ithiltir.node.v1.Node/ {
+    grpc_pass grpc://127.0.0.1:8080;
+    grpc_set_header Host $host;
+    grpc_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    grpc_read_timeout 75s;
+    grpc_send_timeout 75s;
+}
+```
+
+Use the actual Dash backend address. Keep the existing HTTP locations for APIs, deployment, themes and the SPA. No UDP or additional public port is required. For systemd Node installations, add `Environment=ITHILTIR_NODE_TRANSPORT=grpc` to a `[Service]` drop-in, run `systemctl daemon-reload`, then restart `ithiltir-node.service`. Reinstall with `--pve` to update the root helper and enable its history socket. Confirm the administrator `/virt/capabilities` endpoint returns both `connected` and `pve_history`. Node self-update does not replace the root helper.
+
+The configured report URL scheme must match the actual endpoint. If a legacy HTTPS URL relied on plaintext fallback, configure the actual trusted-network HTTP URL or a working TLS proxy before enabling gRPC/auto.

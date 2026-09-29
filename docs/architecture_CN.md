@@ -17,6 +17,22 @@ Ithiltir Dash 是单实例应用。根入口只启动一个 HTTP 进程，该进
 | Linux root 侧缓存        | systemd timer 刷新 SMART、连接数和 LVM；Alpine/OpenRC 只用 BusyBox cron 刷新 SMART 和 LVM            |
 | Web UI                   | 读取看板数据并提交管理操作                                                                           |
 
+## PVE 采集与上报
+
+PVE 监控使用同一种 node 二进制和现有节点身份。可选的 Go `pve-cache` 工具随 node 版本发布，由 Linux 安装器安装在 root 持有的 `/usr/local/libexec/ithiltir-node/pve-cache`。systemd 服务运行 `pve-cache --serve`，以 root 查询本机 `/nodes/{host}/qemu` 完整状态，并从 `/cluster/resources?type=vm` 补充 PVE 统计服务维护的 CPU 比例；只按本机名称和 QEMU VMID 匹配，不上报其他宿主机。每次结束后 30 秒再次采集，基础指标查询共用 20 秒超时。安装时不编译代码，也不配置 PVE 用户或 Token。
+
+Guest Agent IP 通过可选 `ips` 数组返回，每台 VM 最多 128 个不重复的 IPv4/IPv6 地址，包含私网地址，排除回环、链路本地、未指定、多播及非法地址。需要在 PVE 启用 Guest Agent，并在来宾内运行代理。IP 缺失不使基础采集失败。 IP 由 `pve-cache --serve` 内的独立慢任务采集（手动单次采集使用 `--guest`）：调度器在任务结束 60 秒后唤醒，成功的 VM 间隔 5 分钟再查，失败按 5、10、20、30 分钟退避（上限 30 分钟）。只查询新鲜清单中运行、非模板、未暂停的 VM。最多四路并发，单次查询超时 5 秒，慢任务总预算 50 秒。每台 VM 使用由查询进程继承的文件锁；超时终止进程组并等待退出，仍存活的查询会阻止该 VM 再次启动查询。启动前将退避状态写入仅 root 可读的 `/run/ithiltir-node/pve-guest`，该状态为易失数据，重启后重建。热采集只读此缓存。
+
+可选字段 `ips_collected_at`、`ips_ttl_seconds` 独立描述 IP 样本新鲜度。helper 使用 900 秒 IP TTL；复用时保留原采样时间，省略过期样本以及已知早于 VM 本次启动的样本。成功查询无地址时可以只有新鲜度字段而没有 `ips`。查询失败仅在原 IP 样本未过期时继续使用；读取方必须单独判断 IP 新鲜度，不能只看快照 `stale`。兼容不带这两个字段的报告，此时 IP 新鲜度未知；提供时，时间必须非零且不晚于 `collected_at`，TTL 为 1–3600。
+
+工具通过临时文件和原子 rename 写入 `/run/ithiltir-node/virt.json`，文件 root 所有、运行组可读。采集失败保留最后成功的 VM 列表和时间，并记录本次失败。该缓存是易失观测，重启后由定时任务重建。root 任务不执行普通 node 可写的 release 树中的程序。
+
+安装器通过 systemd drop-in 设置 `ITHILTIR_NODE_VIRT_CACHE`。未设置时 node 不启动 VM 推送任务；设置后每个上报目标具有独立的缓存轮询、传输超时和失败退避，沿用目标 URL 和密钥向同级 `/virt` 发送。只保留最新样本，不积累报告队列；缓存不可用报告错误，VM 推送失败不阻塞宿主采样和上报。旧 Dash 返回不支持该接口时，VM 任务退避重试，宿主上报继续。
+
+Dash 在 PostgreSQL `server_virt` 中每宿主保存一份最新 JSONB 快照，独立于宿主指标、Uptime、Redis 前台缓存和计费。采样时间单调更新；接收时间不会因重复样本而刷新。鉴权复查与写入使用节点生命周期锁，节点软删除在同一数据库事务中移除 VM 快照。管理员通过独立读取接口获取快照及新鲜度；不向游客公开，没有 UI。VM 历史通过节点查询会话按需读取 PVE RRD。
+
+helper 的安装和更新属于特权安装流程；node 自更新只更新普通 node，不替换 helper。版本化缓存 schema 保持跨 node 更新兼容。可选资产使用 `deploy/linux/pve-cache.env` 独立校验清单；`release.env` v1 保持不变，旧包可以不含 PVE 资产。支持新清单的 Dash 更新器和 PVE 安装器验证版本及 SHA-256；旧 Dash 更新器仍只验证其已知的七项资产，PVE 安装前仍会执行 helper 校验。
+
 ## HTTP 面
 
 各路由模块返回 EiluneKit Blueprint，只汇总直属子模块。HTTP 根入口组合 API、主题和各平台安装脚本路由，再通过 `routes.NewHandler` 构造唯一 handler。应用不直接向 chi 注册路由；构造结果由 `http.Server` 在服务生命周期内持有。
@@ -125,3 +141,18 @@ Ithiltir Dash 是单实例应用。根入口只启动一个 HTTP 进程，该进
 | `configs`                     | 示例配置                                 |
 | `db/migrations`               | 数据库结构变更                           |
 | `scripts`                     | 构建和打包入口                           |
+
+
+## Node 传输与 PVE 查询归属
+
+HTTP 服务根入口持有一个共享 `nodeingest.Receiver`、一个 `nodesession.Hub` 和 `noderpc` 适配器。HTTP 和 gRPC 调用相同受理方法，保留既有宿主指标、流量、在线率、告警和缓存行为。同一监听地址支持 HTTP/1、HTTP/2，以及可信 TLS 代理后的明文 HTTP/2；预留的 `grpc_port` 不作为第二监听端口。关闭时并行停止 RPC 会话、等待 HTTP 请求退出，共用 10 秒预算。到期后由 HTTP 服务强制关闭剩余连接，再等待 RPC 清理结束。
+
+Dash 每个查询请求持有该流的读写任务，并等待两者退出。写任务直接消费会话命令队列，在发送时计算查询剩余预算。单次流写入限时 5 秒，空闲期间不设 HTTP 写入期限。会话结束后，最终状态最多等待 1 秒发送，超时重置该 HTTP/2 流。会话替换、凭据撤销和流控阻塞只回收对应流，不关闭普通上报复用的连接。
+
+Node 每目标持有一个复用 gRPC 连接，用于普通 RPC 上报和独立的反向查询流，目标之间互不阻塞。默认保持 HTTP，通过 `ITHILTIR_NODE_TRANSPORT` 启用 gRPC 或自动协商。会话、待完成查询及重连退避是易失状态，不构成持久化工作队列。心跳不影响按指标上报判定的在线状态。派发查询前及长流存续期间每秒复查身份。会话替换和服务关闭取消查询流，允许重新连接；只有鉴权或授权拒绝才停止该目标的查询重连循环。
+
+Node 会话循环统一管理最多 32 个待完成查询的受理、取消和完成。查询任务只向循环返回结果，不修改共享会话状态。本机 helper 客户端以四条历史查询连接限制执行并发，等待连接同样消耗查询预算。会话退出时取消并等待全部查询及流读写任务结束，再进入重连。客户端为能力探测保留独立连接；探测失败时保留上次声明的能力，不关闭查询会话，成功探测到能力变化时重新建立会话。
+
+PVE root helper 以 `ithiltir-node-pve-cache.service` 运行 `--serve`，持有两套采集调度和 `/run/ithiltir-node/pve.sock`。socket 为 root 所有、0660 权限，校验对端 root UID 或运行主 GID。仅提供固定能力查询和经过参数校验的历史查询，不接受任意命令或 PVE 路径。安装时先停用旧 PVE 定时器，再启用常驻服务；手动单次模式保持相同 VM 锁及缓存格式。
+
+历史查询要求本地新鲜的成功 VM 清单。相同进行中请求共享一次执行，最后一个等待者离开时取消任务。Guest Agent 与历史查询共用四个执行槽及子进程继承的 VM 文件锁，进程退出后才释放 VM 锁。helper 最多受理 32 个不同的进行中历史查询，结果最多 2 MiB、4096 点；成功缓存 30 秒，失败缓存 10 秒，历史失败还对该 VM 的其他窗口施加 10 秒冷却。缓存最多 128 项、16 MiB 结果字节；正在返回的响应可独立持有受限结果。共享执行由缓存持有独立的 8 秒预算，各远端等待者的预算最多 10 秒；某个等待者超时不会取消其他等待者仍需要的执行。Dash 不增加 VM 历史表，也不增加前端适配。

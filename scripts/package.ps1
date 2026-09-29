@@ -3,6 +3,7 @@
 	[string]$Version = "",
 	[string]$NodeVersion = "",
 	[switch]$NodeLocal,
+	[switch]$WithPVE,
 	[string]$NodeLocalDir = "",
 	[switch]$UseGitTag,
 	[switch]$Release,
@@ -478,6 +479,22 @@ try {
 		Prepare-RemoteNodeDeploy -Version $nodeBuildVersion -DeployDir $nodeDeployPath
 	} else {
 		Prepare-LocalNodeDeploy -SourceDir (Resolve-RepoPath $NodeLocalDir) -DeployDir $nodeDeployPath
+	}
+	if ($WithPVE) {
+		$pveManifest = @("format_version=1", "node_version=$nodeBuildVersion")
+		foreach ($pveArch in @("amd64", "arm64")) {
+			$pveFile = "pve_cache_linux_$pveArch"
+			$pveOutput = Join-Path $nodeDeployPath "linux/$pveFile"
+			if ([string]::IsNullOrWhiteSpace($NodeLocalDir)) {
+				Download-NodeAsset -Version $nodeBuildVersion -Asset "Ithiltir-pve-cache-linux-$pveArch" -OutFile $pveOutput
+			} else {
+				$pveSource = Resolve-RepoPath $NodeLocalDir
+				Copy-LocalNodeAsset -Sources @((Join-Path $pveSource "linux/$pveFile"), (Join-Path $pveSource "Ithiltir-pve-cache-linux-$pveArch")) -OutFile $pveOutput
+			}
+			$pveManifest += "${pveArch}_sha256=$(Get-FileSHA256 -Path $pveOutput)"
+			Set-UnixExecutable -Paths @($pveOutput)
+		}
+		[System.IO.File]::WriteAllText((Join-Path $nodeDeployPath "linux/pve-cache.env"), ($pveManifest -join "`n") + "`n", [System.Text.UTF8Encoding]::new($false))
 	}
 	$nodeAssetSHA256 = @{}
 	foreach ($field in $NodeAssetManifest.Keys) {

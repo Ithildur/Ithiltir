@@ -17,6 +17,7 @@ import (
 	"strings"
 	"time"
 
+	"dash/internal/nodeupdate"
 	appversion "dash/internal/version"
 )
 
@@ -250,6 +251,9 @@ func validateReleasePackage(ctx context.Context, root, targetVersion string) (re
 		}
 	}
 	if err := validateReleaseNodeAssets(root, manifest.NodeSHA256); err != nil {
+		return releaseManifest{}, err
+	}
+	if _, err := nodeupdate.ValidatePVEAssets(filepath.Join(root, "deploy"), manifest.NodeVersion); err != nil {
 		return releaseManifest{}, err
 	}
 

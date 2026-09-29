@@ -4,30 +4,63 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"net/http"
 	"strings"
 	"time"
 
 	"dash/internal/config"
+	"dash/internal/nodeingest"
+	"dash/internal/noderpc"
+	"dash/internal/nodesession"
+	"dash/internal/serverid"
 )
 
 type HTTPServer struct {
 	server *http.Server
+	rpc    *noderpc.Server
 }
 
 func NewHTTPServer(cfg *config.Config, deps Dependencies) (*HTTPServer, error) {
 	if cfg == nil {
 		return nil, fmt.Errorf("http server config is nil")
 	}
+	if deps.Stores == nil {
+		return nil, fmt.Errorf("http server store is nil")
+	}
+	if deps.NodeIngest == nil {
+		path, err := config.InstallIDPath()
+		if err != nil {
+			return nil, err
+		}
+		st := deps.Stores
+		deps.NodeIngest = nodeingest.New(st.Node, st.Metric, st.Front, st.Alert, serverid.New(path), int(math.Ceil(cfg.App.EffectiveNodeOfflineThreshold().Seconds())))
+	}
+	if deps.NodeSessions == nil {
+		deps.NodeSessions = nodesession.New(deps.NodeIngest.Authenticate)
+	}
 	handler, err := newHandler(cfg, deps)
 	if err != nil {
 		return nil, err
 	}
+	rpc := noderpc.New(deps.NodeIngest, deps.NodeSessions, cfg.HTTP.TrustedProxyPrefixes)
+	protocols := new(http.Protocols)
+	protocols.SetHTTP1(true)
+	protocols.SetHTTP2(true)
+	protocols.SetUnencryptedHTTP2(true)
 
 	s := &HTTPServer{
+		rpc: rpc,
 		server: &http.Server{
-			Addr:              cfg.App.Listen,
-			Handler:           handler,
+			Addr: cfg.App.Listen,
+			Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if noderpc.IsRequest(r) {
+					rpc.ServeHTTP(w, r)
+					return
+				}
+				handler.ServeHTTP(w, r)
+			}),
+			Protocols:         protocols,
 			ReadHeaderTimeout: config.HTTPReadHeaderTimeout,
 			ReadTimeout:       config.HTTPReadTimeout,
 			WriteTimeout:      config.HTTPWriteTimeout,
@@ -64,34 +97,39 @@ func (s *HTTPServer) Run(ctx context.Context) error {
 	if ctx == nil {
 		return fmt.Errorf("http server context is nil")
 	}
-
-	errCh := make(chan error, 1)
+	serveDone := make(chan struct{})
+	var serveErr error
 	go func() {
-		err := s.server.ListenAndServe()
-		if err != nil && !errors.Is(err, http.ErrServerClosed) {
-			errCh <- err
-			return
+		serveErr = s.server.ListenAndServe()
+		if errors.Is(serveErr, http.ErrServerClosed) {
+			serveErr = nil
 		}
-		errCh <- nil
+		close(serveDone)
 	}()
 
 	select {
-	case err := <-errCh:
-		return err
+	case <-serveDone:
 	case <-ctx.Done():
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-		shutdownErr := s.server.Shutdown(shutdownCtx)
-		if errors.Is(shutdownErr, http.ErrServerClosed) {
-			shutdownErr = nil
-		}
-		var closeErr error
-		if shutdownErr != nil {
-			closeErr = s.server.Close()
-			if errors.Is(closeErr, http.ErrServerClosed) {
-				closeErr = nil
-			}
-		}
-		return errors.Join(<-errCh, shutdownErr, closeErr)
 	}
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	shutdownErr := s.shutdown(shutdownCtx)
+	<-serveDone
+	return errors.Join(serveErr, shutdownErr)
+}
+
+func (s *HTTPServer) shutdown(ctx context.Context) error {
+	// Drain HTTP and stop query sessions together, under the same exit budget.
+	rpcDone := make(chan struct{})
+	go func() {
+		s.rpc.Close()
+		close(rpcDone)
+	}()
+	shutdownErr := s.server.Shutdown(ctx)
+	var closeErr error
+	if shutdownErr != nil {
+		closeErr = s.server.Close()
+	}
+	<-rpcDone
+	return errors.Join(shutdownErr, closeErr)
 }

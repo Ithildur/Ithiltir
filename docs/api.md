@@ -227,8 +227,58 @@ The admin password is supplied through `monitor_dash_pwd` and must contain at le
 | `/deploy/*`                   | packaged node release assets; requires `X-Node-Secret` or a temporary `upgrade_token`                      |
 | `/`                           | SPA                                                                                                        |
 
+## Virtual machine snapshots
+
+- `POST /api/node/virt` authenticates with `X-Node-Secret`; the key determines the owning host. Its JSON body limit is 4 MiB. `/api/node/metrics` keeps its 1 MiB limit. Success returns `204` without an update manifest.
+- `GET /api/admin/nodes/{id}/virt` requires an administrator Bearer token and returns `{ "snapshot": ..., "received_at": ..., "stale": false }`. An existing node without a report returns null snapshot/receipt and `stale: true`; missing or deleted nodes return `404 not_found`.
+- `GET /api/admin/nodes/deploy` adds `pve`, a boolean indicating verified bundled PVE helpers matching the bundled node version. Append `--pve` to a Linux install command to enable collection. No UI is provided.
+
+The report and returned snapshot have the same shape:
+
+```json
+{"schema":1,"provider":"pve","host":"pve-a","collected_at":"2026-09-28T10:00:00Z","last_success_at":"2026-09-28T10:00:00Z","ttl_seconds":90,"status":"ok","vms":[{"id":100,"name":"guest","status":"running","template":false,"cpus":2,"cpu_ratio":0.25}]}
+```
+
+`status` is `ok` or `error`. Successful reports have equal collection/success timestamps and an array (`[]` means a successful empty inventory). Failed reports require `error` and may retain the last successful inventory/time; without an earlier sample, `vms` may be null. Staleness checks both successful sample age and receipt age. Retrying cached data does not refresh sample time; duplicate timestamps do not refresh receipt time. Older reports return `204` without replacing the current snapshot.
+
+VM fields are `id`, `name`, `status`, `template`, and optional `qmp_status`, `cpus`, `cpu_ratio`, `memory_bytes`, `memory_limit_bytes`, `disk_capacity_bytes`, `disk_read_bytes`, `disk_write_bytes`, `net_in_bytes`, `net_out_bytes`, `uptime_seconds`, `ips`. Missing metrics mean unknown, not zero. CPU is the PVE ratio; memory follows PVE observations; disk capacity is PVE `maxdisk`. Disk/network bytes are cumulative counters, not rates or guest filesystem usage. QEMU state preserves paused states. Stopped VMs and templates are included.
+
+Guest Agent IPs are returned in optional `ips` arrays, up to 128 unique IPv4/IPv6 addresses per VM, including private addresses and excluding loopback, link-local, unspecified, multicast and invalid addresses. PVE must enable the guest agent and the agent must be running inside the VM. Missing IPs do not fail basic collection. IP collection runs independently inside `pve-cache --serve` (manual one-shot: `--guest`): the scheduler wakes 60 seconds after completion, successful VMs wait five minutes, and failures back off for 5, 10, 20, then 30 minutes (maximum). Only running, non-template, non-paused VMs from a fresh inventory are queried. Four workers use five-second query deadlines within a 50-second slow-collection budget. Per-VM file locks are inherited by query processes; timeout kills the process group and waits for exit. A still-running query blocks any replacement for that VM. Cooldowns are saved before launch in root-only `/run/ithiltir-node/pve-guest`; this state is volatile and resets on reboot. Hot collection only reads this cache.
+
+Optional `ips_collected_at` and `ips_ttl_seconds` describe the IP sample independently of hot metrics. The helper emits a 900-second IP TTL, preserves the original timestamp on reuse, and omits expired samples and samples known to predate the VM's current boot. An empty successful query may have freshness metadata without `ips`. On query failure, the previous IP sample remains usable only until its own expiry. Clients must check IP freshness separately from snapshot `stale`. Reports without these fields remain accepted, with unknown IP freshness; when provided, the timestamp must be nonzero and no later than `collected_at`, and TTL must be 1–3600.
+
+Limits: 4096 unique VM IDs; 255-byte names/host; 64-byte state strings; 1024-byte errors; nonnegative signed 64-bit counters; TTL 1–3600 seconds; collection time no more than five minutes ahead of the server. Invalid JSON/data returns `400 invalid_virt`, oversized bodies `413 body_too_large`, invalid secrets `401 unauthorized` subject to failed-auth rate limiting, unavailable storage `503 virt_unavailable`.
+
+VM snapshots do not create nodes, refresh host uptime, or enter host history/billing. VM history is read on demand through the API below. LXC, HA configuration and VM controls are not provided.
+
 ## Contract Rules
 
 - Unknown or malformed values are rejected at the boundary rather than silently normalized into another valid request.
 - JSON requests that exceed the route body limit return `413 body_too_large`; malformed JSON usually returns `400 invalid_request`, while `POST /api/auth/login` uses the auth-specific `400 invalid_json` contract.
 - Core durable-storage and required-dependency failures are returned as errors. Documented optional boundaries retain their degraded behavior: optional bearer reads become anonymous, and an unavailable active theme uses the frontend default while exposing `missing` or `broken` state.
+
+
+## Node gRPC transport
+
+The existing HTTP endpoints remain supported. The `ithiltir.node.v1.Node` service shares Dash's existing listener using HTTP/2 over TCP; `app.grpc_port` remains unused. A TLS proxy must forward `/ithiltir.node.v1.Node/` to Dash with gRPC support. The schema source is `protocol/node.proto`; `bash scripts/generate-node-protocol.sh [node-repository]` synchronizes both repositories with pinned Go generator versions.
+
+Authenticate with `x-node-secret` metadata. `Identify(Empty)` returns `install_id`, `created`, and `protocol_version: 1`. `Metrics(Report)` returns the existing JSON response in `Reply.json`, including the update manifest; `Static(Report)` and `Virt(Report)` return `Empty` after successful processing. `Report.json` carries the existing UTF-8 JSON payload, preserving missing fields and 64-bit integers. Metrics/static remain limited to 1 MiB and VM snapshots to 4 MiB. HTTP and gRPC share validation, receipt deadlines, lifecycle locks, persistence and response construction.
+
+Authentication failures return `UNAUTHENTICATED` and are rate limited by IP; exhausted limits and oversized messages return `RESOURCE_EXHAUSTED`. Invalid JSON/report fields return `INVALID_ARGUMENT`. Acceptance failures map to `UNAVAILABLE` or `INTERNAL` according to the existing error boundary. HTTP status codes and bodies are unchanged. VM snapshot storage failures return `UNAVAILABLE` with `virt_unavailable`; HTTP retains `503 virt_unavailable`.
+
+`Connect` is a separate node-initiated bidirectional query stream. Capabilities must arrive within five seconds. Reconnection replaces the previous session for that node. Credentials are checked before queries and every second while connected. Heartbeats run every 20 seconds with a 60-second peer timeout; they do not refresh metrics or uptime. Queries have a ten-second total budget, at most 32 pending per node and results of at most 2 MiB. Disconnect fails pending work rather than replaying it.
+
+Set `ITHILTIR_NODE_TRANSPORT=http|grpc|auto` on Node; the default is `http` for installation compatibility. `grpc` uses only RPC. `auto` probes `Identify` before reports, fixes successful gRPC negotiation for that target's process lifetime, and can select HTTP on the same URL/scheme when the probe is unavailable or incompatible. Authentication/authorization failure does not select HTTP. Auto/grpc never authorize TLS-to-plaintext fallback; explicit/default HTTP retains its existing fallback behavior and `--require-https` restriction. Node disables policy retries (gRPC may transparently retry calls known not to have been processed) and never replays an uncertain metrics response over another transport; it samples again on the normal schedule. Existing VM timestamp deduplication remains effective.
+
+## PVE history queries
+
+Administrator Bearer authentication is required:
+
+| Method and path | Response |
+| --- | --- |
+| `GET /api/admin/nodes/{id}/virt/capabilities` | `{"connected":true,"pve_history":true,"version":"...","helper_version":"..."}`; disconnected sessions return false flags |
+| `GET /api/admin/nodes/{id}/virt/vms/{vmid}/history` | History fetched from the connected node's PVE RRD |
+
+Parameters: `timeframe=hour|day|week|month|year` (default `hour`), `consolidation=AVERAGE|MAX` (default `AVERAGE`). Results contain `source: "pve_rrd"`, `vm_id`, `timeframe`, `consolidation`, `collected_at`, and `points`. Each point has `timestamp`; optional fields are `cpu_ratio`, `memory_bytes`, `memory_limit_bytes`, `disk_read_bytes_per_second`, `disk_write_bytes_per_second`, `net_in_bytes_per_second` and `net_out_bytes_per_second`. Missing values remain unknown. PVE determines historical aggregation/resolution; `collected_at` is the fetch time, not the timestamp of every point.
+
+Errors: `400 invalid_query`/`invalid_id`, `401 unauthorized`, `404 not_found` (node)/`vm_not_found` (VM), `429 busy`, `501 unsupported`, `503 node_offline`/`virt_unavailable`, `504 deadline_exceeded`, `502 source_unavailable`/`invalid_result`. Queries require a fresh successful local VM inventory and a running helper service with history support. Dash does not persist VM history or include it in host traffic, uptime or billing. The existing snapshot endpoint is unchanged; there is no frontend adaptation.

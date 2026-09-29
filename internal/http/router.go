@@ -5,19 +5,22 @@ import (
 	"net/http"
 	"net/netip"
 
+	authjwt "github.com/Ithildur/EiluneKit/auth/jwt"
+	"github.com/Ithildur/EiluneKit/clientip"
+	"github.com/Ithildur/EiluneKit/http/middleware"
+	"github.com/Ithildur/EiluneKit/http/routes"
+
 	"dash/internal/config"
 	"dash/internal/dashupdate"
 	"dash/internal/http/api"
 	"dash/internal/http/deploy"
 	themeroute "dash/internal/http/theme"
 	"dash/internal/infra"
+	"dash/internal/nodeingest"
+	"dash/internal/nodesession"
 	"dash/internal/store"
 	"dash/internal/theme"
 	"dash/internal/traffic"
-	authjwt "github.com/Ithildur/EiluneKit/auth/jwt"
-	"github.com/Ithildur/EiluneKit/clientip"
-	"github.com/Ithildur/EiluneKit/http/middleware"
-	"github.com/Ithildur/EiluneKit/http/routes"
 )
 
 // Dependencies holds the application dependencies used by the HTTP server.
@@ -27,6 +30,8 @@ type Dependencies struct {
 	Theme          *theme.Store
 	TrafficRebuild *traffic.RebuildRunner
 	DashUpdate     *dashupdate.Runner
+	NodeIngest     *nodeingest.Receiver
+	NodeSessions   *nodesession.Hub
 }
 
 func newHandler(cfg *config.Config, deps Dependencies) (http.Handler, error) {
@@ -36,6 +41,8 @@ func newHandler(cfg *config.Config, deps Dependencies) (http.Handler, error) {
 		Theme:          deps.Theme,
 		TrafficRebuild: deps.TrafficRebuild,
 		DashUpdate:     deps.DashUpdate,
+		NodeIngest:     deps.NodeIngest,
+		NodeSessions:   deps.NodeSessions,
 	})
 	if err != nil {
 		return nil, err

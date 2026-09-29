@@ -545,6 +545,9 @@ func (s *Store) deleteNode(ctx context.Context, id int64) error {
 
 	// Only invalidate catalogs before commit. Deleting the runtime here would
 	// lose the last good sample if PostgreSQL later failed to commit.
+	if err := tx.Where("server_id = ?", id).Delete(&model.ServerVirt{}).Error; err != nil {
+		return err
+	}
 	if err := s.invalidateFrontNodeDeletion(ctx); err != nil {
 		return err
 	}

@@ -6,14 +6,14 @@ import (
 	"net/http"
 	"net/netip"
 
+	"github.com/Ithildur/EiluneKit/http/middleware"
+	kitlog "github.com/Ithildur/EiluneKit/logging"
+
 	"dash/internal/config"
 	"dash/internal/http/httperr"
 	"dash/internal/http/request"
 	"dash/internal/model"
-	"github.com/Ithildur/EiluneKit/http/middleware"
-	kitlog "github.com/Ithildur/EiluneKit/logging"
-
-	"gorm.io/gorm"
+	"dash/internal/nodeingest"
 )
 
 // This handler is entered only after authentication fails. Valid node requests
@@ -31,28 +31,25 @@ func failedAuthHandler(trustedProxies []netip.Prefix) http.Handler {
 	})(unauthorized)
 }
 
-func (h *handler) authenticate(ctx context.Context, r *http.Request, logger *kitlog.Helper) (string, model.Server, error) {
+func (h *handler) authenticate(ctx context.Context, r *http.Request) (string, model.Server, error) {
 	secret := r.Header.Get(request.NodeSecretHeader)
-	if secret == "" {
-		return "", model.Server{}, httperr.Unauthorized(nil)
-	}
-	server, err := h.serverBySecret(ctx, secret, logger)
+	server, err := h.ingest.Authenticate(ctx, secret)
 	return secret, server, err
 }
 
-func (h *handler) serverBySecret(ctx context.Context, secret string, logger *kitlog.Helper) (model.Server, error) {
-	server, err := h.node.GetServerBySecret(ctx, secret)
-	if err == nil {
-		return server, nil
-	}
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return model.Server{}, httperr.Unauthorized(err)
-	}
-	logger.Error(ctx, "node auth lookup failed", err)
-	return model.Server{}, httperr.ServiceUnavailable(err)
-}
-
 func (h *handler) writeError(w http.ResponseWriter, r *http.Request, logger *kitlog.Helper, err error) {
+	if failure, ok := errors.AsType[*nodeingest.Error](err); ok {
+		switch failure.Code {
+		case "unauthorized":
+			err = httperr.Unauthorized(failure.Cause)
+		case "invalid_metrics":
+			err = httperr.InvalidMetrics(failure.Cause)
+		case "invalid_static_payload":
+			err = httperr.InvalidStaticPayload(failure.Cause)
+		case "service_unavailable":
+			err = httperr.ServiceUnavailable(failure.Cause)
+		}
+	}
 	var httpErr *httperr.Error
 	if errors.As(err, &httpErr) && httpErr.Status == http.StatusUnauthorized {
 		h.failedAuth.ServeHTTP(w, r)
