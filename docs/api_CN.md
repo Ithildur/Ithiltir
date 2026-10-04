@@ -175,6 +175,7 @@ Bearer 可选端点会把缺失、格式错误、过期、已撤销或其他非�
 ## 节点运行时指标字段
 
 - `POST /api/node/metrics` 接受可选的 `metrics.disk.smart`、`metrics.thermal` 和 `metrics.pressure`。旧 Node 可以不带这些字段。
+- 每份指标报告的 `metrics.disk.base_io`、`metrics.disk.logical`、`metrics.network` 和 `metrics.disk.smart.devices` 合计最多 1024 项。所有提交项均在过滤或持久化前计入总量。超额整份拒绝，HTTP 返回 `422 invalid_metrics`，gRPC 返回 `INVALID_ARGUMENT` / `invalid_metrics`；仍受 1 MiB 报文大小限制。
 - 指标入库截止时间为服务端接收时间后 5 秒，鉴权、请求体读取和节点锁等待均消耗该预算。预算耗尽的上报返回 `503 service_unavailable`，不写入指标；接收时间排序和 Node 原始 `timestamp` 的含义不变。
 - 持久化的字节数、容量、计数器和 uptime 必须是有符号 64 位范围内的非负 JSON 整数；进程数和连接数使用有符号 32 位范围；`/api/node/static` 的上报间隔使用有符号 32 位范围，CPU 拓扑计数使用有符号 16 位范围。普通正整数的 JSON 编码不变，因此现有 Node 继续兼容。整数超出接收类型范围时返回 `400 invalid_request`；负数、非法比例或非法速率返回 `422 invalid_metrics` 或 `422 invalid_static_payload`。
 - 写入 PostgreSQL 定长标识列的文本会在持久化前校验：Node 版本 64 字符，hostname 和磁盘名称 255，磁盘 ref 320，磁盘 kind/role 与 RAID health 16，网卡名称 64，文件系统类型及逻辑盘 health/level 32。静态 OS/platform/arch 限 32 字符，platform/kernel 版本限 255。路径、挂载点和硬件描述使用不定长 TEXT。超长值返回 `422 invalid_metrics` 或 `422 invalid_static_payload`，不会静默截断。

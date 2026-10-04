@@ -126,6 +126,29 @@ func TestIntegrationNodeHTTPAndRPC(t *testing.T) {
 	if !reflect.DeepEqual(first.MetricValues, second.MetricValues) || !reflect.DeepEqual(first.MetricRuntime, second.MetricRuntime) {
 		t.Fatal("transport changed stored metrics")
 	}
+	network := make([]map[string]string, 1025)
+	for i := range network {
+		network[i] = map[string]string{"name": fmt.Sprintf("nic%d", i)}
+	}
+	empty := []any{}
+	oversized, err := json.Marshal(map[string]any{
+		"version": "1.0.0", "hostname": "node", "timestamp": time.Now().UTC(),
+		"metrics": map[string]any{
+			"system":  map[string]any{"uptime": "1h"},
+			"disk":    map[string]any{"physical": empty, "logical": empty, "filesystems": empty, "base_io": empty},
+			"raid":    map[string]any{"arrays": empty},
+			"network": network,
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if body := post("metrics", oversized, 422); !bytes.Contains(body, []byte(`"invalid_metrics"`)) {
+		t.Fatalf("HTTP device limit: %s", body)
+	}
+	if _, err := client.Metrics(ctx, &nodewire.Report{Json: oversized}); status.Code(err) != codes.InvalidArgument || status.Convert(err).Message() != "invalid_metrics" {
+		t.Fatalf("RPC device limit: %v", err)
+	}
 	for _, id := range []int64{httpNode.ID, rpcNode.ID} {
 		var count int64
 		if err := db.Table("server_metrics").Where("server_id = ?", id).Count(&count).Error; err != nil || count != 2 {

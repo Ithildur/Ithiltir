@@ -59,7 +59,7 @@ func (h *Receiver) Metrics(ctx context.Context, secret string, server model.Serv
 			break
 		}
 		lockedID := server.ID
-		err = h.node.WithMetricsIngest(lockedID, func() error {
+		err = h.node.WithMetricsIngest(ctx, lockedID, func() error {
 			current, authErr := h.Authenticate(ctx, in.secret)
 			if authErr != nil {
 				return authErr
@@ -89,6 +89,9 @@ func (h *Receiver) Metrics(ctx context.Context, secret string, server model.Serv
 	}
 	if errors.Is(err, errMetricsIdentityChanged) {
 		logger.Warn(ctx, "node identity kept changing during metrics ingest", err)
+		err = unavailable(err)
+	}
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		err = unavailable(err)
 	}
 	if err != nil {

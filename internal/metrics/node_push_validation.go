@@ -7,9 +7,18 @@ import (
 	"strings"
 )
 
+const maxReportDevices = 1024
+
 // ValidateReport checks the semantic shape of a node metrics push body.
 func ValidateReport(report NodeReport) error {
 	m := report.Metrics
+	devices := len(m.Disk.BaseIO) + len(m.Disk.Logical) + len(m.Network)
+	if m.Disk.Smart != nil {
+		devices += len(m.Disk.Smart.Devices)
+	}
+	if devices > maxReportDevices {
+		return fmt.Errorf("too many metric devices: %d (maximum %d)", devices, maxReportDevices)
+	}
 
 	if err := validateTextLength("version", report.Version, maxNodeVersionChars); err != nil {
 		return err

@@ -1,10 +1,30 @@
 package metrics
 
 import (
+	"fmt"
 	"math"
 	"strings"
 	"testing"
 )
+
+func TestValidateReportDeviceBudget(t *testing.T) {
+	report := validNumericReport()
+	report.Metrics.Disk.Smart = &DiskSmart{Status: "ok", Devices: []DiskSmartDevice{}}
+	for i := range 256 {
+		name := fmt.Sprintf("device%d", i)
+		report.Metrics.Disk.BaseIO = append(report.Metrics.Disk.BaseIO, DiskBaseIOMetrics{Kind: "disk", Name: name})
+		report.Metrics.Disk.Logical = append(report.Metrics.Disk.Logical, DiskLogicalMetrics{Kind: "disk", Name: name})
+		report.Metrics.Network = append(report.Metrics.Network, NetIOMetrics{Name: name})
+		report.Metrics.Disk.Smart.Devices = append(report.Metrics.Disk.Smart.Devices, DiskSmartDevice{Name: name, Source: "smartctl", Status: "ok"})
+	}
+	if err := ValidateReport(report); err != nil {
+		t.Fatalf("1024 devices rejected: %v", err)
+	}
+	report.Metrics.Network = append(report.Metrics.Network, NetIOMetrics{Name: "extra"})
+	if err := ValidateReport(report); err == nil {
+		t.Fatal("1025 devices accepted")
+	}
+}
 
 func TestValidateReportRejectsInvalidNumericState(t *testing.T) {
 	tests := []struct {

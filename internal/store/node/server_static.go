@@ -137,7 +137,7 @@ func (s *Store) UpdateStatic(ctx context.Context, secret string, serverID int64,
 	if serverID <= 0 {
 		return fmt.Errorf("store: invalid server id %d", serverID)
 	}
-	return s.mutations.projected(serverID, s.projection, func() error {
+	return s.mutations.projected(ctx, serverID, s.projection, func() error {
 		return s.updateStatic(ctx, secret, serverID, patch)
 	})
 }

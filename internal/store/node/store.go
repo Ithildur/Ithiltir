@@ -1,6 +1,7 @@
 package node
 
 import (
+	"context"
 	"fmt"
 	"time"
 
@@ -42,6 +43,6 @@ func (s *Store) Validate() error {
 // WithMetricsIngest serializes the full ingest path with lifecycle changes for
 // the authenticated node. Runtime samples do not count as structural
 // projection mutations.
-func (s *Store) WithMetricsIngest(id int64, fn func() error) error {
-	return s.mutations.runtime(id, fn)
+func (s *Store) WithMetricsIngest(ctx context.Context, id int64, fn func() error) error {
+	return s.mutations.runtime(ctx, id, fn)
 }

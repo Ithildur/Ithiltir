@@ -235,7 +235,7 @@ func (s *Store) UpdateNode(ctx context.Context, id int64, upd NodeUpdate) error 
 		}
 		upd.Secret = &secret
 	}
-	err := s.mutations.projected(id, s.projection, func() error {
+	err := s.mutations.projected(ctx, id, s.projection, func() error {
 		return s.patchNode(ctx, id, upd)
 	})
 	if err != nil {
@@ -508,7 +508,7 @@ func patchFields(upd NodeUpdate) map[string]any {
 }
 
 func (s *Store) DeleteNode(ctx context.Context, id int64) error {
-	return s.mutations.projected(id, s.projection, func() error {
+	return s.mutations.projected(ctx, id, s.projection, func() error {
 		return s.deleteNode(ctx, id)
 	})
 }

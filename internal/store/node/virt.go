@@ -15,7 +15,7 @@ import (
 // SaveVirt serializes authentication and persistence with node deletion and key
 // rotation. A retry of the same sample never refreshes its received timestamp.
 func (s *Store) SaveVirt(ctx context.Context, id int64, secret string, snapshot virt.Snapshot, receivedAt time.Time) error {
-	return s.WithMetricsIngest(id, func() error {
+	return s.WithMetricsIngest(ctx, id, func() error {
 		server, err := s.GetServerBySecret(ctx, secret)
 		if err != nil {
 			return err

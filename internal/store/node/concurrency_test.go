@@ -1,6 +1,8 @@
 package node
 
 import (
+	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -13,7 +15,7 @@ func TestNodeMutationsSerializeSameNodeOnly(t *testing.T) {
 	firstEntered := make(chan struct{})
 	firstDone := make(chan error, 1)
 	go func() {
-		firstDone <- st.mutations.projected(1, st.projection, func() error {
+		firstDone <- st.mutations.projected(t.Context(), 1, st.projection, func() error {
 			close(firstEntered)
 			<-release
 			return nil
@@ -24,7 +26,7 @@ func TestNodeMutationsSerializeSameNodeOnly(t *testing.T) {
 	otherEntered := make(chan struct{})
 	otherDone := make(chan error, 1)
 	go func() {
-		otherDone <- st.mutations.projected(2, st.projection, func() error {
+		otherDone <- st.mutations.projected(t.Context(), 2, st.projection, func() error {
 			close(otherEntered)
 			return nil
 		})
@@ -38,7 +40,7 @@ func TestNodeMutationsSerializeSameNodeOnly(t *testing.T) {
 	sameEntered := make(chan struct{})
 	sameDone := make(chan error, 1)
 	go func() {
-		sameDone <- st.mutations.projected(1, st.projection, func() error {
+		sameDone <- st.mutations.projected(t.Context(), 1, st.projection, func() error {
 			close(sameEntered)
 			return nil
 		})
@@ -74,7 +76,7 @@ func TestGlobalMutationExcludesNodeProjection(t *testing.T) {
 	nodeEntered := make(chan struct{})
 	nodeDone := make(chan error, 1)
 	go func() {
-		nodeDone <- st.mutations.projected(1, st.projection, func() error {
+		nodeDone <- st.mutations.projected(t.Context(), 1, st.projection, func() error {
 			close(nodeEntered)
 			<-nodeRelease
 			return nil
@@ -124,7 +126,7 @@ func TestUnknownRuntimeCannotDeadlockNodeProjection(t *testing.T) {
 	runtimeEntered := make(chan struct{})
 	runtimeDone := make(chan error, 1)
 	go func() {
-		runtimeDone <- st.WithMetricsIngest(1, func() error {
+		runtimeDone <- st.WithMetricsIngest(t.Context(), 1, func() error {
 			close(runtimeEntered)
 			return st.front.PutNodeRuntime(t.Context(), metrics.NodeView{
 				Node: metrics.NodeMeta{ID: "1"},
@@ -135,7 +137,7 @@ func TestUnknownRuntimeCannotDeadlockNodeProjection(t *testing.T) {
 
 	projectedDone := make(chan error, 1)
 	go func() {
-		projectedDone <- st.mutations.projected(1, st.projection, func() error {
+		projectedDone <- st.mutations.projected(t.Context(), 1, st.projection, func() error {
 			return nil
 		})
 	}()
@@ -154,5 +156,76 @@ func TestUnknownRuntimeCannotDeadlockNodeProjection(t *testing.T) {
 		case <-time.After(time.Second):
 			t.Fatalf("%s deadlocked", name)
 		}
+	}
+}
+
+func TestNodeMutationDeadlineReleasesWaiter(t *testing.T) {
+	for _, projected := range []bool{false, true} {
+		name := "runtime"
+		if projected {
+			name = "projection"
+		}
+		t.Run(name, func(t *testing.T) {
+			st := newTestStore(nil, nil)
+			release := make(chan struct{})
+			entered := make(chan struct{})
+			holder := make(chan error, 1)
+			go func() {
+				holder <- st.WithMetricsIngest(t.Context(), 1, func() error {
+					close(entered)
+					<-release
+					return nil
+				})
+			}()
+			<-entered
+			defer func() {
+				close(release)
+				if err := <-holder; err != nil {
+					t.Error(err)
+				}
+			}()
+
+			ctx, cancel := context.WithTimeout(t.Context(), 20*time.Millisecond)
+			defer cancel()
+			done := make(chan error, 1)
+			go func() {
+				fn := func() error { return errors.New("expired mutation ran") }
+				if projected {
+					done <- st.mutations.projected(ctx, 1, st.projection, fn)
+				} else {
+					done <- st.WithMetricsIngest(ctx, 1, fn)
+				}
+			}()
+			select {
+			case err := <-done:
+				if !errors.Is(err, context.DeadlineExceeded) {
+					t.Fatalf("waiting mutation error = %v", err)
+				}
+			case <-time.After(time.Second):
+				t.Fatal("expired waiter remained blocked behind active mutation")
+			}
+
+			// Canceling a waiter must not discard the active node's lock.
+			ctx, cancel = context.WithTimeout(t.Context(), 20*time.Millisecond)
+			defer cancel()
+			if err := st.WithMetricsIngest(ctx, 1, func() error { return nil }); !errors.Is(err, context.DeadlineExceeded) {
+				t.Fatalf("active mutation lost serialization after waiter cancellation: %v", err)
+			}
+		})
+	}
+}
+
+func TestMetricsIngestRejectsCanceledContext(t *testing.T) {
+	st := newTestStore(nil, nil)
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	if err := st.WithMetricsIngest(ctx, 1, func() error { return nil }); !errors.Is(err, context.Canceled) {
+		t.Fatalf("canceled mutation error = %v", err)
+	}
+	if err := st.WithMetricsIngest(t.Context(), 1, func() error { return nil }); err != nil {
+		t.Fatalf("subsequent mutation error = %v", err)
+	}
+	if len(st.mutations.locks) != 0 {
+		t.Fatal("finished mutations retained node locks")
 	}
 }
