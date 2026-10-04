@@ -71,6 +71,7 @@ Bearer 可选端点会把缺失、格式错误、过期、已撤销或其他非�
 
 - `POST /api/auth/login` 请求体必须包含 `password` 和 `persistence`；`persistence` 只允许 `session` 或 `persistent`。兼容字段 `username` 可以省略，Dash 的固定密码鉴权不会使用它。
 - 登录成功返回 `{ "access_token": "...", "expires_at": "<RFC3339>", "csrf_token": "..." }`，并写入 refresh/CSRF cookie。格式错误的登录 JSON 返回 `400 invalid_json`，非法 `persistence` 返回 `400 invalid_persistence`，凭据错误返回 `401 unauthorized`，登录限流返回 `429 rate_limited`。
+- Redis 和内存模式下，管理员均最多保留 255 个未过期会话。达到上限后，新登录返回 `401 unauthorized` / `invalid credentials`。已有会话仍可使用，包括数量已经超过上限的情况；刷新不额外占用会话名额。会话过期或撤销后释放名额。
 - `POST /api/auth/refresh` 使用 refresh cookie 和 `X-CSRF-Token`，轮换会话并返回与登录相同的响应字段。`POST /api/auth/logout` 使用相同鉴权，成功返回 `204` 并清除会话 cookie。
 - 默认 Redis 模式下，认证会话保存在 Redis 中，在过期或被撤销前可跨 Dash 重启和原地升级继续有效；使用 `--no-redis` 时，会话只存在于当前进程，并在 Dash 重启后失效。
 - `GET /api/auth/sessions/` 返回当前 Bearer token 用户的 `{ "sessions": [...] }`。每项包含 `id`、`expires_at`、`session_only` 和 `current`。

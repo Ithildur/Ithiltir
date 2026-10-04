@@ -3,7 +3,7 @@ module dash
 go 1.27.1
 
 require (
-	github.com/Ithildur/EiluneKit v0.4.3
+	github.com/Ithildur/EiluneKit v0.4.4
 	github.com/alicebob/miniredis/v2 v2.38.0
 	github.com/google/uuid v1.6.0
 	github.com/gotd/td v0.161.0
@@ -75,6 +75,6 @@ require (
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260831171406-18b4a7587f8a // indirect
 	gopkg.in/yaml.v2 v2.4.0 // indirect
 	gorm.io/driver/mysql v1.6.0 // indirect
-	gorm.io/driver/postgres v1.6.2 // indirect
+	gorm.io/driver/postgres v1.6.3 // indirect
 	rsc.io/qr v0.2.0 // indirect
 )

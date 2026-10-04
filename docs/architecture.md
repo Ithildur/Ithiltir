@@ -110,6 +110,8 @@ Node IP is an observation from authenticated Node requests: Dash reads the first
 
 ## Auth Boundaries
 
+Redis and memory authentication stores use EiluneKit's default limit of 255 unexpired sessions per user. Capacity rejection affects new logins only; existing sessions and refresh rotation remain usable. Session formats and the `auth:jwt:*` Redis namespace are preserved.
+
 | Area                                                  | Auth                                                                                        |
 | ----------------------------------------------------- | ------------------------------------------------------------------------------------------- |
 | `/api/auth/login`                                     | admin password                                                                              |
@@ -120,6 +122,8 @@ Node IP is an observation from authenticated Node requests: Dash reads the first
 | `/deploy/*` packaged assets                           | `X-Node-Secret` or a temporary legacy upgrade token; install script templates remain public |
 
 ## Frontend And Reverse Proxies
+
+Access logs and login/node-authentication rate limits trust forwarded client IP headers only from `http.trusted_proxies`. Header precedence follows EiluneKit defaults: `X-Forwarded-For`, `X-Real-IP`, `Forwarded`, `True-Client-IP`, then `CF-Connecting-IP`. This selection does not change the authenticated node IP observation rule, which uses the first `X-Forwarded-For` entry or the connection address.
 
 The frontend can run as a standalone dev server, but the runtime boundary stays same-origin. A dev proxy or production reverse proxy should forward `/api`, `/theme`, and `/deploy` to the backend while Dash serves the SPA at `/`. IP deployments may use HTTP; use HTTPS across untrusted networks because admin credentials and node secrets otherwise travel in plaintext. Do not point browser API requests directly at a cross-origin backend unless CORS, cookie, and CSRF policies are designed together.
 
