@@ -5,8 +5,8 @@ import (
 	"net/http"
 
 	"dash/internal/alertspec"
+	"dash/internal/config"
 	"dash/internal/http/httperr"
-	"dash/internal/infra"
 	"dash/internal/model"
 	alertstore "dash/internal/store/alert"
 	nodestore "dash/internal/store/node"
@@ -65,32 +65,32 @@ func (h *handler) listHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func loadMounts(ctx context.Context, alert *alertstore.Store, nodeStore *nodestore.Store) (listView, error) {
-	return infra.WithPGReadTimeout(ctx, func(c context.Context) (listView, error) {
-		rules, err := alert.ListRules(c)
+	dbCtx, cancel := context.WithTimeout(ctx, config.PGReadTimeout)
+	defer cancel()
+	rules, err := alert.ListRules(dbCtx)
+	if err != nil {
+		return listView{}, err
+	}
+	nodes, err := nodeStore.Nodes(dbCtx)
+	if err != nil {
+		return listView{}, err
+	}
+	mounts, err := alert.ListRuleMounts(dbCtx)
+	if err != nil {
+		return listView{}, err
+	}
+	if len(nodes) > 0 {
+		ids := make([]int64, 0, len(nodes))
+		for _, item := range nodes {
+			ids = append(ids, item.ID)
+		}
+		relations, err := nodeStore.GroupRelations(dbCtx, ids)
 		if err != nil {
 			return listView{}, err
 		}
-		nodes, err := nodeStore.Nodes(c)
-		if err != nil {
-			return listView{}, err
-		}
-		mounts, err := alert.ListRuleMounts(c)
-		if err != nil {
-			return listView{}, err
-		}
-		if len(nodes) > 0 {
-			ids := make([]int64, 0, len(nodes))
-			for _, item := range nodes {
-				ids = append(ids, item.ID)
-			}
-			relations, err := nodeStore.GroupRelations(c, ids)
-			if err != nil {
-				return listView{}, err
-			}
-			applyGroups(nodes, relations)
-		}
-		return buildMountsView(rules, nodes, mounts), nil
-	})
+		applyGroups(nodes, relations)
+	}
+	return buildMountsView(rules, nodes, mounts), nil
 }
 
 func buildMountsView(rules []alertstore.AlertRuleItem, nodes []nodestore.NodeItem, mounts []model.AlertRuleMount) listView {

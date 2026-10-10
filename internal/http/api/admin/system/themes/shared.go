@@ -9,8 +9,8 @@ import (
 	"os"
 	"time"
 
+	"dash/internal/config"
 	"dash/internal/http/httperr"
-	"dash/internal/infra"
 	themefs "dash/internal/theme"
 )
 
@@ -34,16 +34,15 @@ type packageView struct {
 }
 
 func (h *handler) loadActiveThemeState(ctx context.Context) (themefs.Active, error) {
-	return infra.WithPGReadTimeout(ctx, func(c context.Context) (themefs.Active, error) {
-		return themefs.ResolveActive(c, h.store, h.themes)
-	})
+	dbCtx, cancel := context.WithTimeout(ctx, config.PGReadTimeout)
+	defer cancel()
+	return themefs.ResolveActive(dbCtx, h.store, h.themes)
 }
 
 func (h *handler) saveActiveThemeID(ctx context.Context, id string) error {
-	_, err := infra.WithPGWriteTimeout(ctx, func(c context.Context) (struct{}, error) {
-		return struct{}{}, themefs.SaveActiveID(c, h.store, id)
-	})
-	return err
+	dbCtx, cancel := context.WithTimeout(ctx, config.PGWriteTimeout)
+	defer cancel()
+	return themefs.SaveActiveID(dbCtx, h.store, id)
 }
 
 func writeInvalidPackage(w http.ResponseWriter, err error) {

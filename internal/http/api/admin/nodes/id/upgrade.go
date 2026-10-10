@@ -8,9 +8,9 @@ import (
 	"net/url"
 	"strings"
 
+	"dash/internal/config"
 	"dash/internal/http/httperr"
 	"dash/internal/http/request"
-	"dash/internal/infra"
 	"dash/internal/nodeupdate"
 	nodestore "dash/internal/store/node"
 	appversion "dash/internal/version"
@@ -97,9 +97,9 @@ func (h *handler) legacyUpdateURL(rawURL string) (string, error) {
 }
 
 func (h *handler) loadAgentPlatform(ctx context.Context, id int64) (nodestore.AgentPlatform, error) {
-	return infra.WithPGReadTimeout(ctx, func(c context.Context) (nodestore.AgentPlatform, error) {
-		return h.store.AgentPlatform(c, id)
-	})
+	dbCtx, cancel := context.WithTimeout(ctx, config.PGReadTimeout)
+	defer cancel()
+	return h.store.AgentPlatform(dbCtx, id)
 }
 
 func canRequestAgentUpdate(current string) bool {

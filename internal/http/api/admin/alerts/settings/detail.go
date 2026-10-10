@@ -1,13 +1,11 @@
 package settings
 
 import (
-	"context"
 	"net/http"
 	"time"
 
 	"dash/internal/http/httperr"
 	"dash/internal/infra"
-	"dash/internal/model"
 	alertstore "dash/internal/store/alert"
 	"github.com/Ithildur/EiluneKit/http/response"
 	"github.com/Ithildur/EiluneKit/http/routes"
@@ -34,7 +32,7 @@ func detailRoute(r *routes.Blueprint, h *handler) {
 }
 
 func (h *handler) detailHandler(w http.ResponseWriter, r *http.Request) {
-	item, err := getSettings(r.Context(), h.store)
+	item, err := infra.WithPGReadTimeout(r.Context(), h.store.GetSettings)
 	if err != nil {
 		httperr.Write(w, http.StatusServiceUnavailable, "db_error", "failed to fetch settings")
 		return
@@ -51,11 +49,5 @@ func (h *handler) detailHandler(w http.ResponseWriter, r *http.Request) {
 		ChannelIDs: ids,
 		CreatedAt:  item.CreatedAt.Format(time.RFC3339),
 		UpdatedAt:  item.UpdatedAt.Format(time.RFC3339),
-	})
-}
-
-func getSettings(ctx context.Context, st *alertstore.Store) (*model.AlertSetting, error) {
-	return infra.WithPGReadTimeout(ctx, func(c context.Context) (*model.AlertSetting, error) {
-		return st.GetSettings(c)
 	})
 }

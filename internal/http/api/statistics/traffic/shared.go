@@ -72,7 +72,7 @@ func (h *handler) canReadTraffic(ctx context.Context, r *http.Request, serverID 
 		}
 		return true, nil
 	}
-	settings, err := loadStoredSettings(ctx, h.traffic)
+	settings, err := infra.WithPGReadTimeout(ctx, h.traffic.GetSettings)
 	if err != nil {
 		return false, err
 	}
@@ -98,37 +98,31 @@ func (h *handler) isGuestVisible(ctx context.Context, serverID int64) (bool, err
 }
 
 func loadSettings(ctx context.Context, st *trafficstore.Store, loc *time.Location) (trafficstore.Settings, error) {
-	return infra.WithPGReadTimeout(ctx, func(c context.Context) (trafficstore.Settings, error) {
-		settings, err := st.GetSettings(c)
-		if err != nil {
-			return trafficstore.Settings{}, err
-		}
-		return trafficstore.SettingsWithTimezone(settings, loc)
-	})
-}
-
-func loadStoredSettings(ctx context.Context, st *trafficstore.Store) (trafficstore.Settings, error) {
-	return infra.WithPGReadTimeout(ctx, func(c context.Context) (trafficstore.Settings, error) {
-		return st.GetSettings(c)
-	})
+	dbCtx, cancel := context.WithTimeout(ctx, config.PGReadTimeout)
+	defer cancel()
+	settings, err := st.GetSettings(dbCtx)
+	if err != nil {
+		return trafficstore.Settings{}, err
+	}
+	return trafficstore.SettingsWithTimezone(settings, loc)
 }
 
 func loadP95Enabled(ctx context.Context, st *trafficstore.Store, serverID int64) (bool, error) {
-	return infra.WithPGReadTimeout(ctx, func(c context.Context) (bool, error) {
-		return st.TrafficP95Enabled(c, serverID)
-	})
+	dbCtx, cancel := context.WithTimeout(ctx, config.PGReadTimeout)
+	defer cancel()
+	return st.TrafficP95Enabled(dbCtx, serverID)
 }
 
 func loadEffectiveSettings(ctx context.Context, st *trafficstore.Store, serverID int64, defaults trafficstore.Settings, loc *time.Location) (trafficstore.Settings, error) {
-	return infra.WithPGReadTimeout(ctx, func(c context.Context) (trafficstore.Settings, error) {
-		return st.EffectiveServerSettings(c, serverID, defaults)
-	})
+	dbCtx, cancel := context.WithTimeout(ctx, config.PGReadTimeout)
+	defer cancel()
+	return st.EffectiveServerSettings(dbCtx, serverID, defaults)
 }
 
 func patchSettings(ctx context.Context, st *trafficstore.Store, patch trafficstore.SettingsPatch) error {
-	_, err := infra.WithPGWriteTimeout(ctx, func(c context.Context) (trafficstore.Settings, error) {
-		return st.PatchSettingsAt(c, patch, time.Now())
-	})
+	dbCtx, cancel := context.WithTimeout(ctx, config.PGWriteTimeout)
+	defer cancel()
+	_, err := st.PatchSettingsAt(dbCtx, patch, time.Now())
 	return err
 }
 

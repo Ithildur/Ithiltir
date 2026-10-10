@@ -5,9 +5,9 @@ import (
 	"errors"
 	"net/http"
 
+	"dash/internal/config"
 	"dash/internal/http/httperr"
 	"dash/internal/http/request"
-	"dash/internal/infra"
 	"github.com/Ithildur/EiluneKit/http/middleware"
 	"github.com/Ithildur/EiluneKit/http/routes"
 
@@ -50,9 +50,11 @@ func (h *handler) updateHandler(w http.ResponseWriter, r *http.Request, rawID st
 		return
 	}
 
-	if _, err := infra.WithPGWriteTimeout(r.Context(), func(c context.Context) (struct{}, error) {
-		return struct{}{}, h.store.UpdateGroup(c, id, updates)
-	}); err != nil {
+	dbCtx, cancel := context.WithTimeout(r.Context(), config.PGWriteTimeout)
+	defer cancel()
+	err = h.store.UpdateGroup(dbCtx, id, updates)
+	cancel()
+	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			httperr.Write(w, http.StatusNotFound, "not_found", "group not found")
 			return

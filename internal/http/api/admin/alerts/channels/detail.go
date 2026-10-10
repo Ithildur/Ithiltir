@@ -5,9 +5,9 @@ import (
 	"errors"
 	"net/http"
 
+	"dash/internal/config"
 	"dash/internal/http/httperr"
 	"dash/internal/http/request"
-	"dash/internal/infra"
 	"dash/internal/model"
 	alertstore "dash/internal/store/alert"
 	"github.com/Ithildur/EiluneKit/http/response"
@@ -46,13 +46,13 @@ func (h *handler) detailHandler(w http.ResponseWriter, r *http.Request, rawID st
 }
 
 func loadChannelDelivery(ctx context.Context, st *alertstore.Store, id int64) (alertstore.ChannelDelivery, error) {
-	return infra.WithPGReadTimeout(ctx, func(c context.Context) (alertstore.ChannelDelivery, error) {
-		return st.GetChannelDelivery(c, id)
-	})
+	dbCtx, cancel := context.WithTimeout(ctx, config.PGReadTimeout)
+	defer cancel()
+	return st.GetChannelDelivery(dbCtx, id)
 }
 
 func loadChannel(ctx context.Context, st *alertstore.Store, id int64) (*model.NotifyChannel, error) {
-	return infra.WithPGReadTimeout(ctx, func(c context.Context) (*model.NotifyChannel, error) {
-		return st.GetChannel(c, id)
-	})
+	dbCtx, cancel := context.WithTimeout(ctx, config.PGReadTimeout)
+	defer cancel()
+	return st.GetChannel(dbCtx, id)
 }

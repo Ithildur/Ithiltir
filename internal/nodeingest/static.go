@@ -6,6 +6,7 @@ import (
 	"net/netip"
 	"strings"
 
+	"dash/internal/config"
 	"dash/internal/infra"
 	"dash/internal/metrics"
 	nodestore "dash/internal/store/node"
@@ -92,10 +93,9 @@ func requireTrimmed(v *string) error {
 }
 
 func (h *Receiver) saveStatic(ctx context.Context, secret string, serverID int64, patch nodestore.ServerStaticPatch) error {
-	_, err := infra.WithPGWriteTimeout(ctx, func(ctx context.Context) (struct{}, error) {
-		return struct{}{}, h.node.UpdateStatic(ctx, secret, serverID, patch)
-	})
-	return err
+	dbCtx, cancel := context.WithTimeout(ctx, config.PGWriteTimeout)
+	defer cancel()
+	return h.node.UpdateStatic(dbCtx, secret, serverID, patch)
 }
 
 func staticPatch(snapshot metrics.StaticMetrics, disk metrics.StaticDiskLogical, hasDisk bool, ip netip.Addr) nodestore.ServerStaticPatch {

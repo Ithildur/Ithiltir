@@ -10,6 +10,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"dash/internal/config"
 	"dash/internal/http/httperr"
 	"dash/internal/http/request"
 	"dash/internal/infra"
@@ -111,9 +112,11 @@ func (h *handler) updateHandler(w http.ResponseWriter, r *http.Request, rawID st
 		return
 	}
 
-	if _, err := infra.WithPGWriteTimeout(r.Context(), func(c context.Context) (struct{}, error) {
-		return struct{}{}, h.store.UpdateNode(c, id, upd)
-	}); err != nil {
+	dbCtx, cancel := context.WithTimeout(r.Context(), config.PGWriteTimeout)
+	defer cancel()
+	err = h.store.UpdateNode(dbCtx, id, upd)
+	cancel()
+	if err != nil {
 		if errors.Is(err, nodestore.ErrFrontCacheUpdate) {
 			infra.WithModule("admin.nodes").Warn(r.Context(), "front cache sync failed after node update", err,
 				slog.Int64("node_id", id),

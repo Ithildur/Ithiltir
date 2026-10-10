@@ -93,7 +93,7 @@ func (s *Service) tick(ctx context.Context) {
 }
 
 func (s *Service) checkAndAct(ctx context.Context) error {
-	policy, err := s.loadPolicy(ctx)
+	policy, err := infra.WithPGReadTimeout(ctx, s.system.GetDashUpdatePolicy)
 	if err != nil {
 		return err
 	}
@@ -234,12 +234,6 @@ func (s *Service) notifyLegacyFinishedAutoUpdate(ctx context.Context, paths runn
 	if err := writeAutoStateFile(autoStatePath, state); err != nil {
 		s.logger.Warn(ctx, "write legacy dash update auto state failed", err)
 	}
-}
-
-func (s *Service) loadPolicy(ctx context.Context) (systemstore.DashUpdatePolicy, error) {
-	return infra.WithPGReadTimeout(ctx, func(c context.Context) (systemstore.DashUpdatePolicy, error) {
-		return s.system.GetDashUpdatePolicy(c)
-	})
 }
 
 func (s *Service) enqueueNotification(ctx context.Context, key string, messages notify.Messages) error {

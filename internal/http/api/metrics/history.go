@@ -142,9 +142,7 @@ func (h *handler) canReadHistory(ctx context.Context, r *http.Request, serverID 
 		}
 		return true, nil
 	}
-	mode, err := infra.WithPGReadTimeout(ctx, func(c context.Context) (metricdata.HistoryGuestAccessMode, error) {
-		return h.metric.GetHistoryGuestAccessMode(c)
-	})
+	mode, err := infra.WithPGReadTimeout(ctx, h.metric.GetHistoryGuestAccessMode)
 	if err != nil {
 		return false, err
 	}

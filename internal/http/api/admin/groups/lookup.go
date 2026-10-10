@@ -1,12 +1,10 @@
 package groups
 
 import (
-	"context"
 	"net/http"
 
 	"dash/internal/http/httperr"
 	"dash/internal/infra"
-	nodestore "dash/internal/store/node"
 	"github.com/Ithildur/EiluneKit/http/response"
 	"github.com/Ithildur/EiluneKit/http/routes"
 )
@@ -20,7 +18,7 @@ func lookupRoute(r *routes.Blueprint, h *handler) {
 }
 
 func (h *handler) lookupHandler(w http.ResponseWriter, r *http.Request) {
-	groupLookup, err := loadLookup(r.Context(), h.store)
+	groupLookup, err := infra.WithPGReadTimeout(r.Context(), h.store.GroupLookup)
 	if err != nil {
 		httperr.Write(w, http.StatusServiceUnavailable, "db_error", "failed to fetch group map")
 		return
@@ -31,10 +29,4 @@ func (h *handler) lookupHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	response.WriteJSON(w, http.StatusOK, groupLookup)
-}
-
-func loadLookup(ctx context.Context, st *nodestore.Store) (map[int64]string, error) {
-	return infra.WithPGReadTimeout(ctx, func(c context.Context) (map[int64]string, error) {
-		return st.GroupLookup(c)
-	})
 }

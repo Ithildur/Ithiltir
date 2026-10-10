@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 
+	"dash/internal/config"
 	"dash/internal/http/httperr"
 	"dash/internal/http/request"
 	"dash/internal/infra"
@@ -85,14 +86,16 @@ func (h *handler) replaceHandler(w http.ResponseWriter, r *http.Request, rawID s
 		return
 	}
 
-	if _, err := infra.WithPGWriteTimeout(r.Context(), func(c context.Context) (struct{}, error) {
-		return struct{}{}, h.store.ReplaceChannel(c, id, existing.Revision, model.NotifyChannel{
-			Name:    name,
-			Type:    typ,
-			Config:  datatypes.JSON(cfg),
-			Enabled: *in.Enabled,
-		})
-	}); err != nil {
+	dbCtx, cancel := context.WithTimeout(r.Context(), config.PGWriteTimeout)
+	defer cancel()
+	err = h.store.ReplaceChannel(dbCtx, id, existing.Revision, model.NotifyChannel{
+		Name:    name,
+		Type:    typ,
+		Config:  datatypes.JSON(cfg),
+		Enabled: *in.Enabled,
+	})
+	cancel()
+	if err != nil {
 		if errors.Is(err, alertstore.ErrChannelVersionStale) {
 			httperr.Write(w, http.StatusConflict, "channel_changed", "channel changed; retry with the latest configuration")
 			return

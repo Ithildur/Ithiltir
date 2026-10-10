@@ -4,8 +4,8 @@ import (
 	"context"
 	"net/http"
 
+	"dash/internal/config"
 	"dash/internal/http/httperr"
-	"dash/internal/infra"
 	nodestore "dash/internal/store/node"
 	"github.com/Ithildur/EiluneKit/http/response"
 	"github.com/Ithildur/EiluneKit/http/routes"
@@ -38,7 +38,7 @@ func (h *handler) groupsHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *handler) loadGroups(ctx context.Context, guestVisibleOnly bool) ([]nodestore.GroupNodes, error) {
-	return infra.WithPGReadTimeout(ctx, func(c context.Context) ([]nodestore.GroupNodes, error) {
-		return h.node.GroupNodes(c, guestVisibleOnly)
-	})
+	dbCtx, cancel := context.WithTimeout(ctx, config.PGReadTimeout)
+	defer cancel()
+	return h.node.GroupNodes(dbCtx, guestVisibleOnly)
 }

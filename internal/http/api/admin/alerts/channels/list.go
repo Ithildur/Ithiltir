@@ -1,12 +1,10 @@
 package channels
 
 import (
-	"context"
 	"net/http"
 
 	"dash/internal/http/httperr"
 	"dash/internal/infra"
-	alertstore "dash/internal/store/alert"
 	"github.com/Ithildur/EiluneKit/http/response"
 	"github.com/Ithildur/EiluneKit/http/routes"
 )
@@ -26,9 +24,7 @@ func listRoute(r *routes.Blueprint, h *handler) {
 
 func (h *handler) listHandler(w http.ResponseWriter, r *http.Request) {
 
-	items, err := infra.WithPGReadTimeout(r.Context(), func(c context.Context) ([]alertstore.ChannelDelivery, error) {
-		return h.store.ListChannelDeliveries(c)
-	})
+	items, err := infra.WithPGReadTimeout(r.Context(), h.store.ListChannelDeliveries)
 	if err != nil {
 		httperr.Write(w, http.StatusServiceUnavailable, "db_error", "failed to fetch channels")
 		return

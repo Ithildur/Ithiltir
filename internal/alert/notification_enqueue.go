@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"dash/internal/infra"
+	"dash/internal/config"
 	"dash/internal/model"
 	"dash/internal/notify"
 	alertstore "dash/internal/store/alert"
@@ -62,9 +62,9 @@ func (s *Service) EnqueueDefault(
 			},
 		})
 	}
-	_, err := infra.WithPGWriteTimeout(ctx, func(c context.Context) (struct{}, error) {
-		return struct{}{}, s.store.EnqueueNotifications(c, key, event, params, time.Now().UTC())
-	})
+	dbCtx, cancelWrite := context.WithTimeout(ctx, config.PGWriteTimeout)
+	defer cancelWrite()
+	err := s.store.EnqueueNotifications(dbCtx, key, event, params, time.Now().UTC())
 	if err != nil {
 		return "", fmt.Errorf("enqueue default notification: %w", err)
 	}

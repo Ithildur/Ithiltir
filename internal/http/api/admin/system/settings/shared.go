@@ -8,7 +8,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"dash/internal/infra"
+	"dash/internal/config"
 	"dash/internal/store/metricdata"
 	systemstore "dash/internal/store/system"
 )
@@ -42,17 +42,17 @@ type settingsTx interface {
 }
 
 func loadSettings(ctx context.Context, metric *metricdata.Store, system *systemstore.Store) (settingsView, error) {
-	return infra.WithPGReadTimeout(ctx, func(c context.Context) (settingsView, error) {
-		mode, err := metric.GetHistoryGuestAccessMode(c)
-		if err != nil {
-			return settingsView{}, err
-		}
-		settings, err := system.GetSettings(c)
-		if err != nil {
-			return settingsView{}, err
-		}
-		return settingsViewFrom(mode, settings), nil
-	})
+	dbCtx, cancel := context.WithTimeout(ctx, config.PGReadTimeout)
+	defer cancel()
+	mode, err := metric.GetHistoryGuestAccessMode(dbCtx)
+	if err != nil {
+		return settingsView{}, err
+	}
+	settings, err := system.GetSettings(dbCtx)
+	if err != nil {
+		return settingsView{}, err
+	}
+	return settingsViewFrom(mode, settings), nil
 }
 
 func saveSettingsPatch(
@@ -61,17 +61,16 @@ func saveSettingsPatch(
 	mode *metricdata.HistoryGuestAccessMode,
 	patch systemstore.SettingsPatch,
 ) error {
-	_, err := infra.WithPGWriteTimeout(ctx, func(c context.Context) (struct{}, error) {
-		return struct{}{}, tx.WithSettingsTx(c, func(metric *metricdata.Store, system *systemstore.Store) error {
-			if mode != nil {
-				if err := metric.SetHistoryGuestAccessMode(c, *mode); err != nil {
-					return err
-				}
+	dbCtx, cancel := context.WithTimeout(ctx, config.PGWriteTimeout)
+	defer cancel()
+	return tx.WithSettingsTx(dbCtx, func(metric *metricdata.Store, system *systemstore.Store) error {
+		if mode != nil {
+			if err := metric.SetHistoryGuestAccessMode(dbCtx, *mode); err != nil {
+				return err
 			}
-			return system.PatchSettings(c, patch)
-		})
+		}
+		return system.PatchSettings(dbCtx, patch)
 	})
-	return err
 }
 
 func settingsViewFrom(

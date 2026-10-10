@@ -5,9 +5,9 @@ import (
 	"net/http"
 
 	"dash/internal/alertspec"
+	"dash/internal/config"
 	"dash/internal/http/httperr"
 	"dash/internal/http/request"
-	"dash/internal/infra"
 	"github.com/Ithildur/EiluneKit/http/middleware"
 	"github.com/Ithildur/EiluneKit/http/routes"
 )
@@ -51,9 +51,11 @@ func (h *handler) createHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if _, err := infra.WithPGWriteTimeout(r.Context(), func(c context.Context) (struct{}, error) {
-		return struct{}{}, h.store.CreateRule(c, rule)
-	}); err != nil {
+	dbCtx, cancel := context.WithTimeout(r.Context(), config.PGWriteTimeout)
+	defer cancel()
+	err = h.store.CreateRule(dbCtx, rule)
+	cancel()
+	if err != nil {
 		if alertspec.IsValidationError(err) {
 			httperr.Write(w, http.StatusBadRequest, "invalid_fields", err.Error())
 			return

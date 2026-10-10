@@ -1,12 +1,10 @@
 package front
 
 import (
-	"context"
 	"net/http"
 
 	"dash/internal/http/httperr"
 	"dash/internal/infra"
-	systemstore "dash/internal/store/system"
 	"github.com/Ithildur/EiluneKit/http/response"
 	"github.com/Ithildur/EiluneKit/http/routes"
 )
@@ -21,16 +19,10 @@ func (h *handler) brandRoute(r *routes.Blueprint) {
 }
 
 func (h *handler) brandHandler(w http.ResponseWriter, r *http.Request) {
-	brand, err := h.loadBrand(r.Context())
+	brand, err := infra.WithPGReadTimeout(r.Context(), h.system.GetSiteBrand)
 	if err != nil {
 		httperr.TryWrite(w, httperr.ServiceUnavailable(err))
 		return
 	}
 	response.WriteJSON(w, http.StatusOK, brand)
-}
-
-func (h *handler) loadBrand(ctx context.Context) (systemstore.SiteBrand, error) {
-	return infra.WithPGReadTimeout(ctx, func(c context.Context) (systemstore.SiteBrand, error) {
-		return h.system.GetSiteBrand(c)
-	})
 }

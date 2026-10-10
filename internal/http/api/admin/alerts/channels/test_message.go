@@ -8,9 +8,9 @@ import (
 	"strings"
 	"time"
 
+	"dash/internal/config"
 	"dash/internal/http/httperr"
 	"dash/internal/http/request"
-	"dash/internal/infra"
 	"dash/internal/model"
 	"dash/internal/notify"
 	alertstore "dash/internal/store/alert"
@@ -124,9 +124,9 @@ func (h *handler) writeTestSendError(w http.ResponseWriter, r *http.Request, ite
 }
 
 func (h *handler) recoverTestedChannel(ctx context.Context, id, revision int64) error {
-	_, err := infra.WithPGWriteTimeout(ctx, func(c context.Context) (struct{}, error) {
-		return struct{}{}, h.store.RecoverChannelNotifications(c, id, revision, time.Now().UTC())
-	})
+	dbCtx, cancel := context.WithTimeout(ctx, config.PGWriteTimeout)
+	defer cancel()
+	err := h.store.RecoverChannelNotifications(dbCtx, id, revision, time.Now().UTC())
 	if err != nil {
 		return fmt.Errorf("recover tested notification channel: %w", err)
 	}
@@ -142,14 +142,14 @@ func (h *handler) recordTestFailure(
 		return nil
 	}
 	delivery := notify.Classify(err)
-	_, storeErr := infra.WithPGWriteTimeout(ctx, func(c context.Context) (struct{}, error) {
-		return struct{}{}, h.store.RecordChannelFailure(c, alertstore.ChannelFailure{
-			ID:        channel.ID,
-			Revision:  channel.Revision,
-			Code:      delivery.Code,
-			LastError: notify.ErrorSummary(err),
-			FailedAt:  time.Now().UTC(),
-		})
+	dbCtx, cancel := context.WithTimeout(ctx, config.PGWriteTimeout)
+	defer cancel()
+	storeErr := h.store.RecordChannelFailure(dbCtx, alertstore.ChannelFailure{
+		ID:        channel.ID,
+		Revision:  channel.Revision,
+		Code:      delivery.Code,
+		LastError: notify.ErrorSummary(err),
+		FailedAt:  time.Now().UTC(),
 	})
 	if storeErr != nil {
 		return fmt.Errorf("record tested notification channel failure: %w", storeErr)

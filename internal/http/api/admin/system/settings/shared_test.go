@@ -1,7 +1,9 @@
 package settings
 
 import (
+	"context"
 	"encoding/json/v2"
+	"errors"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -10,7 +12,59 @@ import (
 	"dash/internal/store"
 	pgtest "dash/internal/testutil/postgres"
 	"github.com/Ithildur/EiluneKit/http/routes"
+	"gorm.io/gorm"
 )
+
+func TestIntegrationSettingsReadContext(t *testing.T) {
+	db := pgtest.NewDB(t)
+	st := store.New(db, nil, time.UTC, pgtest.ConfigCipher(t))
+	for name, cancelParent := range map[string]bool{"shared deadline": false, "parent cancellation": true} {
+		t.Run(name, func(t *testing.T) {
+			parent, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			var queries []context.Context
+			const callback = "test:settings_read_context"
+			if err := db.Callback().Query().Before("gorm:query").Register(callback, func(tx *gorm.DB) {
+				queries = append(queries, tx.Statement.Context)
+				if cancelParent && len(queries) == 2 {
+					cancel()
+				}
+			}); err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() {
+				if err := db.Callback().Query().Remove(callback); err != nil {
+					t.Error(err)
+				}
+			})
+
+			_, err := loadSettings(parent, st.Metric, st.System)
+			if cancelParent {
+				if !errors.Is(err, context.Canceled) {
+					t.Fatalf("loadSettings() error = %v, want parent cancellation", err)
+				}
+			} else if err != nil {
+				t.Fatal(err)
+			}
+			if len(queries) < 2 {
+				t.Fatalf("observed %d queries, want a multi-query settings read", len(queries))
+			}
+			deadline, ok := queries[0].Deadline()
+			if !ok {
+				t.Fatal("settings read has no deadline")
+			}
+			for _, query := range queries {
+				got, ok := query.Deadline()
+				if !ok || !got.Equal(deadline) {
+					t.Errorf("query deadline = %v, want shared deadline %v", got, deadline)
+				}
+				if !errors.Is(query.Err(), context.Canceled) {
+					t.Errorf("query context after loadSettings() = %v, want canceled", query.Err())
+				}
+			}
+		})
+	}
+}
 
 func TestIntegrationUptimeSettings(t *testing.T) {
 	st := store.New(pgtest.NewDB(t), nil, time.UTC, pgtest.ConfigCipher(t))

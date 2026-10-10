@@ -5,9 +5,9 @@ import (
 	"errors"
 	"net/http"
 
+	"dash/internal/config"
 	"dash/internal/http/httperr"
 	"dash/internal/http/request"
-	"dash/internal/infra"
 	"github.com/Ithildur/EiluneKit/http/middleware"
 	"github.com/Ithildur/EiluneKit/http/routes"
 
@@ -43,9 +43,11 @@ func (h *handler) enabledHandler(w http.ResponseWriter, r *http.Request, rawID s
 		return
 	}
 
-	if _, err := infra.WithPGWriteTimeout(r.Context(), func(c context.Context) (struct{}, error) {
-		return struct{}{}, h.store.SetChannelEnabled(c, id, *in.Enabled)
-	}); err != nil {
+	dbCtx, cancel := context.WithTimeout(r.Context(), config.PGWriteTimeout)
+	defer cancel()
+	err = h.store.SetChannelEnabled(dbCtx, id, *in.Enabled)
+	cancel()
+	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			httperr.Write(w, http.StatusNotFound, "not_found", "channel not found")
 			return

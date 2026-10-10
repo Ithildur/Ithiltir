@@ -1,7 +1,6 @@
 package events
 
 import (
-	"context"
 	"net/http"
 	"time"
 
@@ -35,9 +34,7 @@ func summaryRoute(r *routes.Blueprint, h *handler) {
 
 func (h *handler) summaryHandler(w http.ResponseWriter, r *http.Request) {
 
-	items, err := infra.WithPGReadTimeout(r.Context(), func(c context.Context) ([]alertstore.OpenEventSummary, error) {
-		return h.alerts.ListOpenEventSummaries(c)
-	})
+	items, err := infra.WithPGReadTimeout(r.Context(), h.alerts.ListOpenEventSummaries)
 	if err != nil {
 		httperr.Write(w, http.StatusServiceUnavailable, "db_error", "failed to fetch alert summaries")
 		return

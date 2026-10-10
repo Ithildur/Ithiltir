@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 
-	"dash/internal/infra"
+	"dash/internal/config"
 	"dash/internal/model"
 	"dash/internal/notify"
 )
@@ -69,14 +69,13 @@ func (s *Store) UpdateMTProtoSession(ctx context.Context, channelID, revision in
 	if err != nil {
 		return ErrInvalidMTProtoChannel
 	}
-	_, err = infra.WithPGWriteTimeout(ctx, func(c context.Context) (struct{}, error) {
-		return struct{}{}, s.UpdateChannelConfig(c, channelID, revision, payload)
-	})
-	return err
+	dbCtx, cancel := context.WithTimeout(ctx, config.PGWriteTimeout)
+	defer cancel()
+	return s.UpdateChannelConfig(dbCtx, channelID, revision, payload)
 }
 
 func (s *Store) loadMTProtoChannel(ctx context.Context, id int64) (*model.NotifyChannel, error) {
-	return infra.WithPGReadTimeout(ctx, func(c context.Context) (*model.NotifyChannel, error) {
-		return s.GetChannel(c, id)
-	})
+	dbCtx, cancel := context.WithTimeout(ctx, config.PGReadTimeout)
+	defer cancel()
+	return s.GetChannel(dbCtx, id)
 }

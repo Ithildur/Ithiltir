@@ -138,9 +138,9 @@ func (h *handler) fetchSnapshot(ctx context.Context, authorized bool) ([]metrics
 }
 
 func (h *handler) fetchPage(ctx context.Context, limit, offset int, authorized bool) ([]metrics.NodeView, error) {
-	return infra.WithPGReadTimeout(ctx, func(dbCtx context.Context) ([]metrics.NodeView, error) {
-		return h.front.FetchFrontNodes(dbCtx, h.staleAfterSec, limit, offset, authorized)
-	})
+	dbCtx, cancel := context.WithTimeout(ctx, config.PGReadTimeout)
+	defer cancel()
+	return h.front.FetchFrontNodes(dbCtx, h.staleAfterSec, limit, offset, authorized)
 }
 
 func parseLimit(raw string) (int, error) {

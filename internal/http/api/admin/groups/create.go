@@ -7,6 +7,7 @@ import (
 	"dash/internal/http/httperr"
 	"dash/internal/http/request"
 	"dash/internal/infra"
+	"dash/internal/model"
 	"github.com/Ithildur/EiluneKit/http/middleware"
 	"github.com/Ithildur/EiluneKit/http/routes"
 )
@@ -52,9 +53,8 @@ func (h *handler) createHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	if _, err := infra.WithPGWriteTimeout(r.Context(), func(c context.Context) (struct{}, error) {
-		_, err := h.store.CreateGroup(c, name, remark)
-		return struct{}{}, err
+	if _, err := infra.WithPGWriteTimeout(r.Context(), func(c context.Context) (model.Group, error) {
+		return h.store.CreateGroup(c, name, remark)
 	}); err != nil {
 		httperr.Write(w, http.StatusServiceUnavailable, "db_error", "failed to create group")
 		return

@@ -4,8 +4,8 @@ import (
 	"context"
 	"net/http"
 
+	"dash/internal/config"
 	"dash/internal/http/httperr"
-	"dash/internal/infra"
 	"dash/internal/store"
 	"dash/internal/store/metricdata"
 	trafficstore "dash/internal/store/traffic"
@@ -39,18 +39,18 @@ func (h *handler) accessHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func loadAccess(ctx context.Context, st *store.Stores) (accessView, error) {
-	return infra.WithPGReadTimeout(ctx, func(c context.Context) (accessView, error) {
-		historyMode, err := st.Metric.GetHistoryGuestAccessMode(c)
-		if err != nil {
-			return accessView{}, err
-		}
-		trafficSettings, err := st.Traffic.GetSettings(c)
-		if err != nil {
-			return accessView{}, err
-		}
-		return accessView{
-			HistoryGuestAccessMode: historyMode,
-			GuestAccessMode:        trafficSettings.GuestAccessMode,
-		}, nil
-	})
+	dbCtx, cancel := context.WithTimeout(ctx, config.PGReadTimeout)
+	defer cancel()
+	historyMode, err := st.Metric.GetHistoryGuestAccessMode(dbCtx)
+	if err != nil {
+		return accessView{}, err
+	}
+	trafficSettings, err := st.Traffic.GetSettings(dbCtx)
+	if err != nil {
+		return accessView{}, err
+	}
+	return accessView{
+		HistoryGuestAccessMode: historyMode,
+		GuestAccessMode:        trafficSettings.GuestAccessMode,
+	}, nil
 }

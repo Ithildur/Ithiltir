@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	"dash/internal/config"
 	"dash/internal/infra"
 	trafficstore "dash/internal/store/traffic"
 	kitlog "github.com/Ithildur/EiluneKit/logging"
@@ -101,9 +102,7 @@ func (s *Service) materialize(ctx context.Context) {
 
 func (s *Service) materializeOnce(ctx context.Context) error {
 	now := time.Now().In(s.location)
-	settings, err := infra.WithPGReadTimeout(ctx, func(c context.Context) (trafficstore.Settings, error) {
-		return s.store.GetSettings(c)
-	})
+	settings, err := infra.WithPGReadTimeout(ctx, s.store.GetSettings)
 	if err != nil {
 		return err
 	}
@@ -213,18 +212,17 @@ func (s *Service) snapshot(ctx context.Context) {
 
 func (s *Service) snapshotOnce(ctx context.Context) error {
 	now := time.Now().In(s.location)
-	_, err := infra.WithPGWriteTimeout(ctx, func(c context.Context) (struct{}, error) {
-		settings, err := s.store.GetSettings(c)
-		if err != nil {
-			return struct{}{}, err
-		}
-		settings, err = trafficstore.SettingsWithTimezone(settings, s.location)
-		if err != nil {
-			return struct{}{}, err
-		}
-		return struct{}{}, s.store.RefreshTrafficMonthlySnapshots(c, settings, s.location, now, s.trafficRetention)
-	})
-	return err
+	dbCtx, cancel := context.WithTimeout(ctx, config.PGWriteTimeout)
+	defer cancel()
+	settings, err := s.store.GetSettings(dbCtx)
+	if err != nil {
+		return err
+	}
+	settings, err = trafficstore.SettingsWithTimezone(settings, s.location)
+	if err != nil {
+		return err
+	}
+	return s.store.RefreshTrafficMonthlySnapshots(dbCtx, settings, s.location, now, s.trafficRetention)
 }
 
 func withMaterializeStepTimeout(ctx context.Context, fn func(context.Context) (bool, error)) (bool, error) {

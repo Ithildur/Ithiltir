@@ -5,9 +5,9 @@ import (
 	"errors"
 	"net/http"
 
+	"dash/internal/config"
 	"dash/internal/http/httperr"
 	"dash/internal/http/request"
-	"dash/internal/infra"
 	"github.com/Ithildur/EiluneKit/http/routes"
 
 	"gorm.io/gorm"
@@ -28,9 +28,11 @@ func (h *handler) deleteHandler(w http.ResponseWriter, r *http.Request, rawID st
 		return
 	}
 
-	if _, err := infra.WithPGWriteTimeout(r.Context(), func(c context.Context) (struct{}, error) {
-		return struct{}{}, h.store.DeleteChannel(c, id)
-	}); err != nil {
+	dbCtx, cancel := context.WithTimeout(r.Context(), config.PGWriteTimeout)
+	defer cancel()
+	err = h.store.DeleteChannel(dbCtx, id)
+	cancel()
+	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			httperr.Write(w, http.StatusNotFound, "not_found", "channel not found")
 			return

@@ -6,9 +6,9 @@ import (
 	"net/http"
 
 	"dash/internal/alertspec"
+	"dash/internal/config"
 	"dash/internal/http/httperr"
 	"dash/internal/http/request"
-	"dash/internal/infra"
 	alertstore "dash/internal/store/alert"
 	nodestore "dash/internal/store/node"
 	"github.com/Ithildur/EiluneKit/http/middleware"
@@ -115,45 +115,43 @@ func normalizeServerIDs(ids []int64) ([]int64, error) {
 }
 
 func ensureKnown(ctx context.Context, alert *alertstore.Store, node *nodestore.Store, ruleIDs, serverIDs []int64) error {
-	_, err := infra.WithPGReadTimeout(ctx, func(c context.Context) (struct{}, error) {
-		rules, err := alert.ListRules(c)
-		if err != nil {
-			return struct{}{}, err
+	dbCtx, cancel := context.WithTimeout(ctx, config.PGReadTimeout)
+	defer cancel()
+	rules, err := alert.ListRules(dbCtx)
+	if err != nil {
+		return err
+	}
+	knownRules := make(map[int64]struct{}, len(rules)+len(alertspec.BuiltinRules()))
+	for _, id := range alertspec.BuiltinRuleIDs() {
+		knownRules[id] = struct{}{}
+	}
+	for _, rule := range rules {
+		knownRules[rule.ID] = struct{}{}
+	}
+	for _, id := range ruleIDs {
+		if _, ok := knownRules[id]; !ok {
+			return errUnknownRule
 		}
-		knownRules := make(map[int64]struct{}, len(rules)+len(alertspec.BuiltinRules()))
-		for _, id := range alertspec.BuiltinRuleIDs() {
-			knownRules[id] = struct{}{}
-		}
-		for _, rule := range rules {
-			knownRules[rule.ID] = struct{}{}
-		}
-		for _, id := range ruleIDs {
-			if _, ok := knownRules[id]; !ok {
-				return struct{}{}, errUnknownRule
-			}
-		}
+	}
 
-		nodes, err := node.Nodes(c)
-		if err != nil {
-			return struct{}{}, err
+	nodes, err := node.Nodes(dbCtx)
+	if err != nil {
+		return err
+	}
+	knownServers := make(map[int64]struct{}, len(nodes))
+	for _, node := range nodes {
+		knownServers[node.ID] = struct{}{}
+	}
+	for _, id := range serverIDs {
+		if _, ok := knownServers[id]; !ok {
+			return errUnknownServer
 		}
-		knownServers := make(map[int64]struct{}, len(nodes))
-		for _, node := range nodes {
-			knownServers[node.ID] = struct{}{}
-		}
-		for _, id := range serverIDs {
-			if _, ok := knownServers[id]; !ok {
-				return struct{}{}, errUnknownServer
-			}
-		}
-		return struct{}{}, nil
-	})
-	return err
+	}
+	return nil
 }
 
 func save(ctx context.Context, st *alertstore.Store, ruleIDs, serverIDs []int64, mounted bool) error {
-	_, err := infra.WithPGWriteTimeout(ctx, func(c context.Context) (struct{}, error) {
-		return struct{}{}, st.SetRuleMounts(c, ruleIDs, serverIDs, mounted)
-	})
-	return err
+	dbCtx, cancel := context.WithTimeout(ctx, config.PGWriteTimeout)
+	defer cancel()
+	return st.SetRuleMounts(dbCtx, ruleIDs, serverIDs, mounted)
 }

@@ -1,7 +1,6 @@
 package events
 
 import (
-	"context"
 	"net/http"
 
 	"dash/internal/http/httperr"
@@ -30,9 +29,7 @@ func serversRoute(r *routes.Blueprint, h *handler) {
 
 func (h *handler) serversHandler(w http.ResponseWriter, r *http.Request) {
 
-	refs, err := infra.WithPGReadTimeout(r.Context(), func(c context.Context) ([]nodestore.ServerRef, error) {
-		return h.nodes.ServerRefs(c)
-	})
+	refs, err := infra.WithPGReadTimeout(r.Context(), h.nodes.ServerRefs)
 	if err != nil {
 		httperr.Write(w, http.StatusServiceUnavailable, "db_error", "failed to fetch alert event servers")
 		return

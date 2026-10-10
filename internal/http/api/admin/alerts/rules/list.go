@@ -1,7 +1,6 @@
 package rules
 
 import (
-	"context"
 	"net/http"
 	"time"
 
@@ -42,9 +41,7 @@ func listRoute(r *routes.Blueprint, h *handler) {
 
 func (h *handler) listHandler(w http.ResponseWriter, r *http.Request) {
 
-	items, err := infra.WithPGReadTimeout(r.Context(), func(c context.Context) ([]alertstore.AlertRuleItem, error) {
-		return h.store.ListRules(c)
-	})
+	items, err := infra.WithPGReadTimeout(r.Context(), h.store.ListRules)
 	if err != nil {
 		httperr.Write(w, http.StatusServiceUnavailable, "db_error", "failed to fetch rules")
 		return

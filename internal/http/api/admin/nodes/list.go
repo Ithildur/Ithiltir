@@ -5,8 +5,8 @@ import (
 	"net/http"
 	"strings"
 
+	"dash/internal/config"
 	"dash/internal/http/httperr"
-	"dash/internal/infra"
 	nodestore "dash/internal/store/node"
 	appversion "dash/internal/version"
 	"github.com/Ithildur/EiluneKit/http/response"
@@ -63,36 +63,36 @@ func (h *handler) listHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func loadNodes(ctx context.Context, st *nodestore.Store) ([]nodestore.NodeItem, error) {
-	return infra.WithPGReadTimeout(ctx, func(c context.Context) ([]nodestore.NodeItem, error) {
-		nodes, err := st.Nodes(c)
-		if err != nil || len(nodes) == 0 {
-			return nodes, err
-		}
+	dbCtx, cancel := context.WithTimeout(ctx, config.PGReadTimeout)
+	defer cancel()
+	nodes, err := st.Nodes(dbCtx)
+	if err != nil || len(nodes) == 0 {
+		return nodes, err
+	}
 
-		ids := make([]int64, 0, len(nodes))
-		for _, n := range nodes {
-			ids = append(ids, n.ID)
-		}
+	ids := make([]int64, 0, len(nodes))
+	for _, n := range nodes {
+		ids = append(ids, n.ID)
+	}
 
-		relations, err := st.GroupRelations(c, ids)
-		if err != nil {
-			return nil, err
-		}
+	relations, err := st.GroupRelations(dbCtx, ids)
+	if err != nil {
+		return nil, err
+	}
 
-		byNode := make(map[int64][]int64, len(nodes))
-		for _, rel := range relations {
-			byNode[rel.ServerID] = append(byNode[rel.ServerID], rel.GroupID)
+	byNode := make(map[int64][]int64, len(nodes))
+	for _, rel := range relations {
+		byNode[rel.ServerID] = append(byNode[rel.ServerID], rel.GroupID)
+	}
+	for i := range nodes {
+		gids := byNode[nodes[i].ID]
+		if gids == nil {
+			gids = make([]int64, 0)
 		}
-		for i := range nodes {
-			gids := byNode[nodes[i].ID]
-			if gids == nil {
-				gids = make([]int64, 0)
-			}
-			nodes[i].GroupIDs = gids
-		}
+		nodes[i].GroupIDs = gids
+	}
 
-		return nodes, nil
-	})
+	return nodes, nil
 }
 
 func nodeViews(nodes []nodestore.NodeItem) []nodeView {

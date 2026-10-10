@@ -1,7 +1,6 @@
 package groups
 
 import (
-	"context"
 	"net/http"
 
 	"dash/internal/http/httperr"
@@ -25,7 +24,7 @@ func listRoute(r *routes.Blueprint, h *handler) {
 }
 
 func (h *handler) listHandler(w http.ResponseWriter, r *http.Request) {
-	groups, err := loadGroups(r.Context(), h.store)
+	groups, err := infra.WithPGReadTimeout(r.Context(), h.store.GroupsWithCounts)
 	if err != nil {
 		httperr.Write(w, http.StatusServiceUnavailable, "db_error", "failed to fetch groups")
 		return
@@ -36,10 +35,4 @@ func (h *handler) listHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	response.WriteJSON(w, http.StatusOK, groups)
-}
-
-func loadGroups(ctx context.Context, st *nodestore.Store) ([]nodestore.GroupItem, error) {
-	return infra.WithPGReadTimeout(ctx, func(c context.Context) ([]nodestore.GroupItem, error) {
-		return st.GroupsWithCounts(c)
-	})
 }

@@ -5,9 +5,9 @@ import (
 	"errors"
 	"net/http"
 
+	"dash/internal/config"
 	"dash/internal/http/httperr"
 	"dash/internal/http/request"
-	"dash/internal/infra"
 	alertstore "dash/internal/store/alert"
 	"github.com/Ithildur/EiluneKit/http/middleware"
 	"github.com/Ithildur/EiluneKit/http/routes"
@@ -63,10 +63,9 @@ func (h *handler) replaceHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func saveSettings(ctx context.Context, st *alertstore.Store, enabled bool, ids []int64) error {
-	_, err := infra.WithPGWriteTimeout(ctx, func(c context.Context) (struct{}, error) {
-		return struct{}{}, st.ReplaceSettings(c, enabled, ids)
-	})
-	return err
+	dbCtx, cancel := context.WithTimeout(ctx, config.PGWriteTimeout)
+	defer cancel()
+	return st.ReplaceSettings(dbCtx, enabled, ids)
 }
 
 func normalizeIDs(ids []int64) ([]int64, error) {

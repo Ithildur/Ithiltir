@@ -128,12 +128,24 @@ func TestIntegrationDefaultNotificationDelivery(t *testing.T) {
 	}
 
 	// Fail only the first outbox write after the remote endpoint has accepted it.
-	failed := false
+	var failedCtx context.Context
 	const callback = "test:fail_notification_completion"
 	if err := db.Callback().Update().Before("gorm:update").Register(callback, func(tx *gorm.DB) {
-		if !failed && received.Load() > 0 && tx.Statement.Table == (model.AlertNotificationOutbox{}).TableName() {
-			failed = true
+		if received.Load() == 0 || tx.Statement.Table != (model.AlertNotificationOutbox{}).TableName() {
+			return
+		}
+		if failedCtx == nil {
+			failedCtx = tx.Statement.Context
 			tx.AddError(errors.New("temporary completion failure"))
+			return
+		}
+		if !errors.Is(failedCtx.Err(), context.Canceled) {
+			t.Errorf("failed attempt context = %v, want canceled before retry", failedCtx.Err())
+		}
+		before, hadDeadline := failedCtx.Deadline()
+		after, hasDeadline := tx.Statement.Context.Deadline()
+		if !hadDeadline || !hasDeadline || !after.After(before) {
+			t.Error("completion retry did not receive a fresh timeout budget")
 		}
 	}); err != nil {
 		t.Fatalf("register completion failure: %v", err)
@@ -147,7 +159,7 @@ func TestIntegrationDefaultNotificationDelivery(t *testing.T) {
 	if err != nil || !processed {
 		t.Fatalf("processNotifications() = %v, %v", processed, err)
 	}
-	if !failed {
+	if failedCtx == nil {
 		t.Fatal("completion write failure was not exercised")
 	}
 	if got := received.Load(); got != 2 {

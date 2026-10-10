@@ -5,9 +5,9 @@ import (
 	"encoding/json"
 	"net/http"
 
+	"dash/internal/config"
 	"dash/internal/http/httperr"
 	"dash/internal/http/request"
-	"dash/internal/infra"
 	"dash/internal/model"
 	"dash/internal/notify"
 	"github.com/Ithildur/EiluneKit/http/middleware"
@@ -65,14 +65,16 @@ func (h *handler) createHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if _, err := infra.WithPGWriteTimeout(r.Context(), func(c context.Context) (struct{}, error) {
-		return struct{}{}, h.store.CreateChannel(c, &model.NotifyChannel{
-			Name:    name,
-			Type:    typ,
-			Config:  datatypes.JSON(cfg),
-			Enabled: *in.Enabled,
-		})
-	}); err != nil {
+	dbCtx, cancel := context.WithTimeout(r.Context(), config.PGWriteTimeout)
+	defer cancel()
+	err = h.store.CreateChannel(dbCtx, &model.NotifyChannel{
+		Name:    name,
+		Type:    typ,
+		Config:  datatypes.JSON(cfg),
+		Enabled: *in.Enabled,
+	})
+	cancel()
+	if err != nil {
 		httperr.Write(w, http.StatusServiceUnavailable, "db_error", "failed to create channel")
 		return
 	}

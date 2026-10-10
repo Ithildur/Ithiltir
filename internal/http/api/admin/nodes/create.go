@@ -7,6 +7,7 @@ import (
 
 	"dash/internal/http/httperr"
 	"dash/internal/infra"
+	"dash/internal/model"
 	nodestore "dash/internal/store/node"
 	"github.com/Ithildur/EiluneKit/http/routes"
 )
@@ -36,9 +37,8 @@ func (h *handler) createHandler(w http.ResponseWriter, r *http.Request) {
 			break
 		}
 
-		_, err = infra.WithPGWriteTimeout(ctx, func(c context.Context) (struct{}, error) {
-			_, err := h.store.CreateNode(c, secret)
-			return struct{}{}, err
+		_, err = infra.WithPGWriteTimeout(ctx, func(c context.Context) (model.Server, error) {
+			return h.store.CreateNode(c, secret)
 		})
 		if err == nil {
 			break

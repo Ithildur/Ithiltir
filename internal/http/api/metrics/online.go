@@ -6,8 +6,8 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
-	"time"
 
+	"dash/internal/config"
 	"dash/internal/http/httperr"
 	"dash/internal/infra"
 	metricspkg "dash/internal/metrics"
@@ -65,14 +65,10 @@ func (h *handler) onlineHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	type series struct {
-		Points []metricdata.OnlinePoint
-		Step   time.Duration
-	}
-	res, err := infra.WithPGReadTimeout(r.Context(), func(ctx context.Context) (series, error) {
-		points, step, err := h.metric.FetchOnlinePoints(ctx, in.ServerID, in.Range)
-		return series{Points: points, Step: step}, err
-	})
+	dbCtx, cancel := context.WithTimeout(r.Context(), config.PGReadTimeout)
+	defer cancel()
+	points, step, err := h.metric.FetchOnlinePoints(dbCtx, in.ServerID, in.Range)
+	cancel()
 	if err != nil {
 		if errors.Is(err, metricdata.ErrServerNotFound) {
 			httperr.TryWrite(w, httperr.NotFound(err))
@@ -85,10 +81,10 @@ func (h *handler) onlineHandler(w http.ResponseWriter, r *http.Request) {
 	out := onlineView{
 		ServerID: in.ServerID,
 		Range:    string(in.Range),
-		StepSec:  int(res.Step.Seconds()),
-		Points:   make([]onlinePoint, 0, len(res.Points)),
+		StepSec:  int(step.Seconds()),
+		Points:   make([]onlinePoint, 0, len(points)),
 	}
-	for _, p := range res.Points {
+	for _, p := range points {
 		out.Points = append(out.Points, onlinePoint{
 			TS:     metricspkg.FormatTimestamp(p.TS),
 			Status: p.Status,

@@ -8,7 +8,7 @@ import (
 	"log/slog"
 	"time"
 
-	"dash/internal/infra"
+	"dash/internal/config"
 	"dash/internal/model"
 	"dash/internal/notify"
 	alertstore "dash/internal/store/alert"
@@ -224,15 +224,7 @@ func (s *Service) completeNotificationUntil(
 ) error {
 	delay := notificationPollInterval
 	for {
-		_, err := infra.WithPGWriteTimeout(ctx, func(c context.Context) (struct{}, error) {
-			return struct{}{}, s.store.CompleteNotification(
-				c,
-				item.ID,
-				item.ChannelID,
-				channelRevision,
-				sentAt,
-			)
-		})
+		err := s.completeNotificationOnce(ctx, item, channelRevision, sentAt)
 		if err == nil {
 			return nil
 		}
@@ -254,6 +246,17 @@ func (s *Service) completeNotificationUntil(
 		}
 		delay = min(delay*2, notificationStoreRetryMaxDelay)
 	}
+}
+
+func (s *Service) completeNotificationOnce(
+	ctx context.Context,
+	item *model.AlertNotificationOutbox,
+	channelRevision int64,
+	sentAt time.Time,
+) error {
+	dbCtx, cancel := context.WithTimeout(ctx, config.PGWriteTimeout)
+	defer cancel()
+	return s.store.CompleteNotification(dbCtx, item.ID, item.ChannelID, channelRevision, sentAt)
 }
 
 func notificationFailureStatus(isProbe bool, status model.OutboxStatus) model.OutboxStatus {
