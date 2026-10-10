@@ -2,7 +2,6 @@ package node
 
 import (
 	"context"
-	"fmt"
 	"time"
 
 	"dash/internal/store/frontcache"
@@ -28,16 +27,6 @@ func New(db *gorm.DB, front *frontcache.Store, projection *frontprojection.Gate,
 		projection: projection,
 		trafficLoc: trafficLoc,
 	}
-}
-
-func (s *Store) Validate() error {
-	if s == nil {
-		return fmt.Errorf("store: node store is nil")
-	}
-	if s.db == nil || s.mem == nil || s.front == nil || s.projection == nil || s.trafficLoc == nil {
-		return fmt.Errorf("store: node store is not initialized")
-	}
-	return nil
 }
 
 // WithMetricsIngest serializes the full ingest path with lifecycle changes for

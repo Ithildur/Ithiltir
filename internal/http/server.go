@@ -3,17 +3,12 @@ package httpserver
 import (
 	"context"
 	"errors"
-	"fmt"
-	"math"
 	"net/http"
 	"strings"
 	"time"
 
 	"dash/internal/config"
-	"dash/internal/nodeingest"
 	"dash/internal/noderpc"
-	"dash/internal/nodesession"
-	"dash/internal/serverid"
 )
 
 type HTTPServer struct {
@@ -22,23 +17,6 @@ type HTTPServer struct {
 }
 
 func NewHTTPServer(cfg *config.Config, deps Dependencies) (*HTTPServer, error) {
-	if cfg == nil {
-		return nil, fmt.Errorf("http server config is nil")
-	}
-	if deps.Stores == nil {
-		return nil, fmt.Errorf("http server store is nil")
-	}
-	if deps.NodeIngest == nil {
-		path, err := config.InstallIDPath()
-		if err != nil {
-			return nil, err
-		}
-		st := deps.Stores
-		deps.NodeIngest = nodeingest.New(st.Node, st.Metric, st.Front, st.Alert, serverid.New(path), int(math.Ceil(cfg.App.EffectiveNodeOfflineThreshold().Seconds())))
-	}
-	if deps.NodeSessions == nil {
-		deps.NodeSessions = nodesession.New(deps.NodeIngest.Authenticate)
-	}
 	handler, err := newHandler(cfg, deps)
 	if err != nil {
 		return nil, err
@@ -94,9 +72,6 @@ func isProductionEnv(env string) bool {
 }
 
 func (s *HTTPServer) Run(ctx context.Context) error {
-	if ctx == nil {
-		return fmt.Errorf("http server context is nil")
-	}
 	serveDone := make(chan struct{})
 	var serveErr error
 	go func() {

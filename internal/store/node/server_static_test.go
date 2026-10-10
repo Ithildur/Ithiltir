@@ -11,15 +11,8 @@ import (
 	"gorm.io/gorm"
 )
 
-func newIntegrationStore(t *testing.T) *Store {
-	t.Helper()
-
-	db := pgtest.NewDB(t)
-	return newTestStore(db, nil)
-}
-
 func TestIntegrationUpdateStaticRejectsStaleSecret(t *testing.T) {
-	st := newIntegrationStore(t)
+	st := newTestStore(pgtest.NewDB(t), nil)
 	ctx := context.Background()
 
 	srv := model.Server{
@@ -66,7 +59,7 @@ func TestIntegrationUpdateStaticRejectsStaleSecret(t *testing.T) {
 }
 
 func TestIntegrationUpdateStaticClearsSwapWithExplicitZero(t *testing.T) {
-	st := newIntegrationStore(t)
+	st := newTestStore(pgtest.NewDB(t), nil)
 	ctx := context.Background()
 
 	previous := int64(2 << 30)
@@ -96,7 +89,7 @@ func TestIntegrationUpdateStaticClearsSwapWithExplicitZero(t *testing.T) {
 }
 
 func TestIntegrationUpdateStaticKeepsDiskObservationAtomic(t *testing.T) {
-	st := newIntegrationStore(t)
+	st := newTestStore(pgtest.NewDB(t), nil)
 	ctx := context.Background()
 
 	oldTotal := int64(4 << 30)

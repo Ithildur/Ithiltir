@@ -49,20 +49,14 @@ func waitEvalRetry(ctx context.Context) bool {
 
 func (s *Service) processServer(ctx context.Context, serverID int64, snapshot *metrics.NodeView) error {
 	compiled, cacheErr := s.cache.Refresh(ctx, false)
-	if compiled == nil {
-		if cacheErr != nil {
+	if cacheErr != nil {
+		if compiled == nil {
 			return fmt.Errorf("refresh rule cache: %w", cacheErr)
 		}
-		return errors.New("alert rule cache returned no compiled rules")
-	}
-	if cacheErr != nil {
 		s.logger.Warn(ctx, "refresh rule cache failed during evaluation", cacheErr)
 	}
 
-	current, err := s.loadRuntimeState(ctx, serverID)
-	if err != nil {
-		return err
-	}
+	current := s.loadRuntimeState(serverID)
 	if snapshot == nil {
 		var err error
 		snapshot, err = s.front.FetchCurrentNode(ctx, serverID, s.staleAfterSec)
@@ -83,7 +77,7 @@ func (s *Service) processServer(ctx context.Context, serverID int64, snapshot *m
 	for _, transition := range result.CloseTransitions {
 		notifications, notifyErr := s.closeNotificationParams(ctx, transition)
 		if notifyErr != nil {
-			s.logNotificationTargetError(ctx, notifyErr, serverID, transition.StateKey, notifications)
+			s.logNotificationTargetError(ctx, notifyErr, serverID, transition.StateKey)
 			if errors.Is(notifyErr, errNotificationTargetsUnavailable) {
 				continue
 			}
@@ -111,7 +105,7 @@ func (s *Service) processServer(ctx context.Context, serverID int64, snapshot *m
 		if shouldDropRuntimeAfterClose(outcome) {
 			delete(result.Next, transition.StateKey)
 			if cooldownAfterClose(transition) && outcome.Status == alertstore.CloseStatusClosed {
-				result.Next[transition.StateKey] = newCooldownState(transition.Rule, transition.ClosedAt, time.Now().UTC())
+				result.Next[transition.StateKey] = newCooldownState(transition.Rule, transition.ClosedAt)
 			}
 		}
 	}
@@ -124,7 +118,7 @@ func (s *Service) processServer(ctx context.Context, serverID int64, snapshot *m
 		message := buildOpenMessage(transition, s.message)
 		notifications, notifyErr := s.openNotificationParams(ctx, transition)
 		if notifyErr != nil {
-			s.logNotificationTargetError(ctx, notifyErr, serverID, transition.StateKey, notifications)
+			s.logNotificationTargetError(ctx, notifyErr, serverID, transition.StateKey)
 			if errors.Is(notifyErr, errNotificationTargetsUnavailable) {
 				continue
 			}
@@ -156,10 +150,11 @@ func (s *Service) processServer(ctx context.Context, serverID int64, snapshot *m
 	}
 
 	s.flushHeartbeats(ctx, current, result.Next, closingStateKeys, serverID)
-	return saveRuntimeState(ctx, s.store, serverID, current, result.Next)
+	s.saveRuntimeState(serverID, current, result.Next)
+	return nil
 }
 
-func (s *Service) logNotificationTargetError(ctx context.Context, err error, serverID int64, stateKey string, notifications []alertstore.AlertNotificationParams) {
+func (s *Service) logNotificationTargetError(ctx context.Context, err error, serverID int64, stateKey string) {
 	if errors.Is(err, errNotificationTargetsUnavailable) {
 		s.logger.Warn(ctx, "alert notification targets unavailable; deferring transition", err, kitlog.Int64("server_id", serverID), kitlog.String("state_key", stateKey))
 		return
@@ -174,7 +169,7 @@ func (s *Service) flushHeartbeats(ctx context.Context, current, next map[string]
 		if !ok || !shouldHeartbeatFiring(previous, state, firingHeartbeatInterval, closing) {
 			continue
 		}
-		found, err := s.store.TouchOpenEvent(ctx, state.EventID, state.LastObservedAtTime(), state.CurrentValue, state.EffectiveThreshold)
+		found, err := s.store.TouchOpenEvent(ctx, state.EventID, state.LastObservedAt, state.CurrentValue, state.EffectiveThreshold)
 		if err != nil {
 			s.logger.Warn(ctx, "touch firing alert failed", err, kitlog.Int64("server_id", serverID), kitlog.String("state_key", key))
 			continue

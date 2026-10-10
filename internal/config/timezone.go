@@ -9,9 +9,6 @@ import (
 const timezoneSyntaxHint = "IANA timezone name, for example Asia/Shanghai or UTC"
 
 func compileLocation(cfg *Config) error {
-	if cfg == nil {
-		return fmt.Errorf("config: cfg is nil")
-	}
 	raw := strings.TrimSpace(cfg.App.Timezone)
 	cfg.App.Timezone = raw
 	if raw == "" {

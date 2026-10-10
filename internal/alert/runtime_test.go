@@ -186,7 +186,7 @@ func TestEvaluateServerSuppressesOpenDuringCooldown(t *testing.T) {
 	}}, base)
 	key := ruleStateKey(13, 1)
 	current := map[string]RuntimeState{
-		key: newCooldownState(compiled.ByStateKey[key], base, base),
+		key: newCooldownState(compiled.ByStateKey[key], base),
 	}
 	snapshot := testSnapshot(base.Add(time.Minute), base.Add(time.Minute), 10, 2)
 

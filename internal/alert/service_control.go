@@ -70,9 +70,6 @@ func (s *Service) processControlTasks(ctx context.Context) (bool, error) {
 }
 
 func (s *Service) controlTask(ctx context.Context, task *model.AlertControlTask) error {
-	if task == nil {
-		return fmt.Errorf("%w: nil task", errInvalidControlTask)
-	}
 	compiled, err := s.cache.Refresh(ctx, true)
 	if err != nil {
 		return err
@@ -131,15 +128,11 @@ func (s *Service) runFullReconcileTicker(ctx context.Context) error {
 		case <-ctx.Done():
 			return nil
 		case <-ticker.C:
-			if err := s.enqueueReconcile(ctx); err != nil {
+			if err := s.store.EnqueueFullReconcileTask(ctx, "full_reconcile:global"); err != nil {
 				s.logger.Warn(ctx, "enqueue periodic full reconcile failed", err)
 			}
 		}
 	}
-}
-
-func (s *Service) enqueueReconcile(ctx context.Context) error {
-	return s.store.EnqueueFullReconcileTask(ctx, "full_reconcile:global")
 }
 
 func (s *Service) closeGeneration(ctx context.Context, ruleID, generation int64, reason string) (map[int64]struct{}, error) {
@@ -205,35 +198,18 @@ func (s *Service) closeDeletedServers(ctx context.Context) (map[int64]struct{}, 
 			keys[ruleStateKey(event.RuleID, event.RuleGeneration)] = struct{}{}
 		}
 	}
-	return affected, s.dropRuntimeKeys(ctx, drops)
-}
-
-func (s *Service) dropRuntimeKeys(ctx context.Context, drops map[int64]map[string]struct{}) error {
+	s.runtimeMu.Lock()
+	defer s.runtimeMu.Unlock()
 	for serverID, keys := range drops {
-		if serverID <= 0 || len(keys) == 0 {
-			continue
+		states := s.runtime[serverID]
+		for key := range keys {
+			delete(states, key)
 		}
-		current, err := s.loadRuntimeState(ctx, serverID)
-		if err != nil {
-			return err
-		}
-		next := make(map[string]RuntimeState, len(current))
-		changed := false
-		for key, state := range current {
-			if _, drop := keys[key]; drop {
-				changed = true
-				continue
-			}
-			next[key] = state
-		}
-		if !changed {
-			continue
-		}
-		if err := saveRuntimeState(ctx, s.store, serverID, current, next); err != nil {
-			return err
+		if len(states) == 0 {
+			delete(s.runtime, serverID)
 		}
 	}
-	return nil
+	return affected, nil
 }
 
 func (s *Service) enqueueTargets(ctx context.Context, includeOpenEvents bool) error {
@@ -247,11 +223,7 @@ func (s *Service) enqueueTargets(ctx context.Context, includeOpenEvents bool) er
 		targets[id] = struct{}{}
 	}
 
-	runtimeIDs, err := s.store.ListAlertRuntimeServerIDs(ctx)
-	if err != nil {
-		return err
-	}
-	for _, id := range runtimeIDs {
+	for _, id := range s.runtimeServerIDs() {
 		if id > 0 {
 			targets[id] = struct{}{}
 		}

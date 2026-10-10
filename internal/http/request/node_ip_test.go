@@ -1,11 +1,11 @@
-package node
+package request
 
 import (
 	"net/http/httptest"
 	"testing"
 )
 
-func TestNodeClientIP(t *testing.T) {
+func TestNodeIP(t *testing.T) {
 	tests := []struct {
 		name       string
 		remoteAddr string
@@ -30,12 +30,12 @@ func TestNodeClientIP(t *testing.T) {
 				req.Header.Set("X-Forwarded-For", tt.forwarded)
 			}
 
-			ip, ok := nodeClientIP(req)
+			ip, ok := NodeIP(req)
 			if !ok {
-				t.Fatal("nodeClientIP() did not resolve an IP")
+				t.Fatal("NodeIP() did not resolve an IP")
 			}
 			if got := ip.String(); got != tt.want {
-				t.Fatalf("nodeClientIP() = %q, want %q", got, tt.want)
+				t.Fatalf("NodeIP() = %q, want %q", got, tt.want)
 			}
 		})
 	}

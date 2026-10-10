@@ -36,31 +36,14 @@ type Runtime struct {
 	rebuild *RebuildRunner
 }
 
-func NewRuntime(ctx context.Context, st *trafficstore.Store, loc *time.Location, sourceRetentionDays, trafficRetentionDays int) (*Runtime, error) {
-	if ctx == nil {
-		return nil, fmt.Errorf("traffic runtime context is nil")
-	}
-	if st == nil {
-		return nil, fmt.Errorf("traffic store is nil")
-	}
-	if loc == nil {
-		return nil, fmt.Errorf("traffic location is nil")
-	}
-	if sourceRetentionDays <= 0 {
-		return nil, fmt.Errorf("traffic source retention days must be positive")
-	}
-	if trafficRetentionDays <= 0 {
-		return nil, fmt.Errorf("traffic retention days must be positive")
-	}
-
+func NewRuntime(ctx context.Context, st *trafficstore.Store, loc *time.Location, sourceRetentionDays, trafficRetentionDays int) *Runtime {
 	gate := newWriteGate()
 	sourceRetention := trafficRetention(sourceRetentionDays)
 	trafficRetention := trafficRetention(trafficRetentionDays)
-	runtime := &Runtime{
+	return &Runtime{
 		service: newService(st, loc, sourceRetention, trafficRetention, gate),
-		rebuild: newRebuildRunner(ctx, st, gate, minDuration(sourceRetention, trafficRetention)),
+		rebuild: newRebuildRunner(ctx, st, gate, min(sourceRetention, trafficRetention)),
 	}
-	return runtime, nil
 }
 
 func (r *Runtime) RebuildRunner() *RebuildRunner {
@@ -68,9 +51,6 @@ func (r *Runtime) RebuildRunner() *RebuildRunner {
 }
 
 func (r *Runtime) Run(ctx context.Context) error {
-	if ctx == nil {
-		return fmt.Errorf("traffic runtime context is nil")
-	}
 	return r.service.Run(ctx)
 }
 
@@ -138,7 +118,7 @@ func (s *Service) materializeOnce(ctx context.Context) error {
 		errs = errors.Join(errs, fmt.Errorf("repair traffic usage: %w", err))
 	}
 	if settings.UsageMode == trafficstore.UsageBilling {
-		factsFloor := target.Add(-minDuration(s.sourceRetention, s.trafficRetention))
+		factsFloor := target.Add(-min(s.sourceRetention, s.trafficRetention))
 		if err := s.materializeFacts(ctx, target, factsFloor); err != nil {
 			errs = errors.Join(errs, fmt.Errorf("materialize traffic facts: %w", err))
 		}
@@ -245,13 +225,6 @@ func (s *Service) snapshotOnce(ctx context.Context) error {
 		return struct{}{}, s.store.RefreshTrafficMonthlySnapshots(c, settings, s.location, now, s.trafficRetention)
 	})
 	return err
-}
-
-func minDuration(a, b time.Duration) time.Duration {
-	if a < b {
-		return a
-	}
-	return b
 }
 
 func withMaterializeStepTimeout(ctx context.Context, fn func(context.Context) (bool, error)) (bool, error) {

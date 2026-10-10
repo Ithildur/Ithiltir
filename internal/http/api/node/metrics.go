@@ -12,6 +12,7 @@ import (
 
 	"dash/internal/config"
 	"dash/internal/http/httperr"
+	"dash/internal/http/request"
 	"dash/internal/infra"
 	"dash/internal/metrics"
 	"dash/internal/nodeingest"
@@ -46,7 +47,7 @@ func (h *handler) metricsHandler(w http.ResponseWriter, r *http.Request) {
 		h.writeError(w, r, logger, err)
 		return
 	}
-	ip, _ := nodeClientIP(r)
+	ip, _ := request.NodeIP(r)
 	result, err := h.ingest.Metrics(ctx, secret, server, report, receivedAt, ip)
 	if err != nil {
 		h.writeError(w, r, logger, err)

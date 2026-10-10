@@ -86,29 +86,11 @@ var messageTexts = map[string]messageText{
 	},
 }
 
-func messageConfig(configs []MessageConfig) MessageConfig {
-	cfg := MessageConfig{Language: messageLanguageZH, Location: time.Local}
-	if len(configs) > 0 {
-		cfg = configs[0]
-	}
-	cfg.Language = lang.Normalize(cfg.Language)
-	if cfg.Location == nil {
-		cfg.Location = time.Local
-	}
-	return cfg
-}
-
 func textsFor(raw string) messageText {
-	if text, ok := messageTexts[lang.Normalize(raw)]; ok {
-		return text
-	}
-	return messageTexts[messageLanguageZH]
+	return messageTexts[lang.Normalize(raw)]
 }
 
 func formatAlertTime(t time.Time, cfg MessageConfig) string {
-	if cfg.Location == nil {
-		cfg.Location = time.Local
-	}
 	return t.In(cfg.Location).Format("2006-01-02 15:04:05 MST")
 }
 

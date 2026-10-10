@@ -29,7 +29,7 @@ func HomeDir() (string, error) {
 	return discoverMutableHome("app home")
 }
 
-func ThemeRootDir() (string, error) {
+func ThemeRootDir() string {
 	home := strings.TrimSpace(os.Getenv(envDashHome))
 	if home == "" {
 		discovered, err := appdir.DiscoverHome(DefaultAppDirOptions())
@@ -40,7 +40,7 @@ func ThemeRootDir() (string, error) {
 	if home == "" {
 		home = "."
 	}
-	return filepath.Join(home, "themes"), nil
+	return filepath.Join(home, "themes")
 }
 
 func InstallIDPath() (string, error) {

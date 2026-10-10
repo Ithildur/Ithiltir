@@ -144,7 +144,7 @@ func TestIntegrationUpdateStaticRollsBackWhenRedisIsUnavailable(t *testing.T) {
 }
 
 func TestIntegrationUpdateNodeInvalidatesMetadataButKeepsRuntime(t *testing.T) {
-	st := newIntegrationStore(t)
+	st := newTestStore(pgtest.NewDB(t), nil)
 	ctx := context.Background()
 	srv := createCacheSyncServer(t, st, "old", 1)
 	seedFrontSnapshot(t, st, srv, 0.25)
@@ -199,7 +199,7 @@ func TestIntegrationUpdateStaticWithoutFrontFieldsDoesNotRequireRedis(t *testing
 }
 
 func TestIntegrationDeleteNodeRemovesFrontNodeSnapshot(t *testing.T) {
-	st := newIntegrationStore(t)
+	st := newTestStore(pgtest.NewDB(t), nil)
 	ctx := context.Background()
 	srv := createCacheSyncServer(t, st, "node", 1)
 	seedFrontSnapshot(t, st, srv, 0.25)

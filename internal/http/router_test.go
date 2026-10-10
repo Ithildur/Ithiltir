@@ -15,6 +15,9 @@ import (
 	"dash/internal/config"
 	"dash/internal/dashupdate"
 	"dash/internal/model"
+	"dash/internal/nodeingest"
+	"dash/internal/nodesession"
+	"dash/internal/serverid"
 	"dash/internal/store"
 	pgtest "dash/internal/testutil/postgres"
 	"dash/internal/theme"
@@ -56,6 +59,7 @@ func newTestHandler(t testing.TB, st *store.Stores) http.Handler {
 	if err := st.Node.SyncServerCache(t.Context(), model.Server{ID: 1, Secret: "node-secret"}); err != nil {
 		t.Fatal(err)
 	}
+	receiver := nodeingest.New(st.Node, st.Metric, st.Front, st.Alert, serverid.New(filepath.Join(home, "install-id")), 17)
 	srv, err := NewHTTPServer(&config.Config{
 		App: config.AppConfig{
 			Env: "production", PublicURLScheme: "https", PublicURLHost: "dash.example.com",
@@ -64,6 +68,7 @@ func newTestHandler(t testing.TB, st *store.Stores) http.Handler {
 	}, Dependencies{
 		Stores: st, Auth: manager, Theme: themes,
 		TrafficRebuild: &traffic.RebuildRunner{}, DashUpdate: &dashupdate.Runner{},
+		NodeIngest: receiver, NodeSessions: nodesession.New(receiver.Authenticate),
 	})
 	if err != nil {
 		t.Fatal(err)

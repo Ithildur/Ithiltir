@@ -10,10 +10,7 @@ func TestThemeRootDirUsesDashHome(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv(envDashHome, home)
 
-	got, err := ThemeRootDir()
-	if err != nil {
-		t.Fatalf("ThemeRootDir() error = %v", err)
-	}
+	got := ThemeRootDir()
 	want := filepath.Join(home, "themes")
 	if got != want {
 		t.Fatalf("ThemeRootDir() = %q, want %q", got, want)

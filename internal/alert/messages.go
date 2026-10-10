@@ -12,8 +12,7 @@ type alertMessage struct {
 	Body  string
 }
 
-func buildOpenMessage(transition OpenTransition, configs ...MessageConfig) alertMessage {
-	cfg := messageConfig(configs)
+func buildOpenMessage(transition OpenTransition, cfg MessageConfig) alertMessage {
 	text := textsFor(cfg.Language)
 	server := serverLabel(transition.Snapshot, transition.ObjectID)
 	if isOfflineRule(transition.Rule) {
@@ -47,8 +46,7 @@ func buildOpenMessage(transition OpenTransition, configs ...MessageConfig) alert
 	}
 }
 
-func buildCloseMessage(transition CloseTransition, configs ...MessageConfig) alertMessage {
-	cfg := messageConfig(configs)
+func buildCloseMessage(transition CloseTransition, cfg MessageConfig) alertMessage {
 	text := textsFor(cfg.Language)
 	server := serverLabel(transition.Snapshot, transition.ObjectID)
 	if isOfflineRule(transition.Rule) {

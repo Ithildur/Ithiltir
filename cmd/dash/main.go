@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"log/slog"
+	"math"
 	"os"
 	"os/signal"
 	"syscall"
@@ -17,7 +18,10 @@ import (
 	"dash/internal/infra"
 	"dash/internal/infra/cachekeys"
 	"dash/internal/migrate"
+	"dash/internal/nodeingest"
+	"dash/internal/nodesession"
 	"dash/internal/notify"
+	"dash/internal/serverid"
 	"dash/internal/store"
 	themefs "dash/internal/theme"
 	trafficservice "dash/internal/traffic"
@@ -173,13 +177,7 @@ func main() {
 
 	appLocation := cfg.App.EffectiveLocation()
 	st := store.New(db, redisClient, appLocation, configCipher)
-	if err := st.Validate(); err != nil {
-		infra.Fatal("init store failed", err)
-	}
-	themeRoot, err := config.ThemeRootDir()
-	if err != nil {
-		infra.Fatal("resolve theme root failed", err)
-	}
+	themeRoot := config.ThemeRootDir()
 	themeStore, err := themefs.NewStore(themeRoot)
 	if err != nil {
 		infra.Fatal("init theme store failed", err, slog.String("root", themeRoot))
@@ -211,31 +209,33 @@ func main() {
 			err,
 			slog.Bool("signing_key_set", cfg.Auth.JWTSigningKey != ""))
 	}
-	trafficRuntime, err := trafficservice.NewRuntime(
+	trafficRuntime := trafficservice.NewRuntime(
 		ctx,
 		st.Traffic,
 		appLocation,
 		cfg.Database.EffectiveRetentionDays(),
 		cfg.Database.EffectiveTrafficRetentionDays(),
 	)
-	if err != nil {
-		infra.Fatal("init traffic runtime failed", err)
-	}
 	dashUpdateRunner := dashupdate.NewRunner()
-	alertService, err := alert.NewService(st.Alert, st.Front, alert.MessageConfig{
+	alertService := alert.NewService(st.Alert, st.Front, alert.MessageConfig{
 		Language: cfg.App.EffectiveLanguage(),
 		Location: appLocation,
 	}, cfg.App.EffectiveNodeOfflineThreshold())
-	if err != nil {
-		infra.Fatal("init alert service failed", err)
-	}
 	dashUpdateService := dashupdate.NewService(st.System, alertService, dashUpdateRunner, cfg.App.EffectiveLanguage())
+	installIDPath, err := config.InstallIDPath()
+	if err != nil {
+		infra.Fatal("resolve install ID path failed", err)
+	}
+	nodeIngest := nodeingest.New(st.Node, st.Metric, st.Front, st.Alert, serverid.New(installIDPath), int(math.Ceil(cfg.App.EffectiveNodeOfflineThreshold().Seconds())))
+	nodeSessions := nodesession.New(nodeIngest.Authenticate)
 	deps := httpserver.Dependencies{
 		Stores:         st,
 		Auth:           jwtAuth,
 		Theme:          themeStore,
 		TrafficRebuild: trafficRuntime.RebuildRunner(),
 		DashUpdate:     dashUpdateRunner,
+		NodeIngest:     nodeIngest,
+		NodeSessions:   nodeSessions,
 	}
 
 	srv, err := httpserver.NewHTTPServer(cfg, deps)

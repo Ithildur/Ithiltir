@@ -2,7 +2,6 @@ package store
 
 import (
 	"context"
-	"fmt"
 	"time"
 
 	"dash/internal/notify"
@@ -31,7 +30,8 @@ type Stores struct {
 	MTLogin *mtlogin.Store
 }
 
-// New wires concrete stores. DB/Redis may be nil; call Validate at startup.
+// New wires concrete stores from application dependencies. Nil Redis selects
+// the in-memory cache.
 func New(
 	db *gorm.DB,
 	redisClient *redis.Client,
@@ -52,31 +52,6 @@ func New(
 		System:  system.New(db),
 		MTLogin: mtlogin.New(),
 	}
-}
-
-func (s *Stores) Validate() error {
-	if s == nil {
-		return fmt.Errorf("store: nil")
-	}
-	if s.db == nil {
-		return fmt.Errorf("store: DB is nil")
-	}
-	if s.Node == nil || s.Traffic == nil || s.Metric == nil || s.Front == nil || s.Alert == nil || s.System == nil || s.MTLogin == nil {
-		return fmt.Errorf("store: incomplete")
-	}
-	if err := s.Node.Validate(); err != nil {
-		return err
-	}
-	if err := s.Front.Validate(); err != nil {
-		return err
-	}
-	if err := s.Alert.Validate(); err != nil {
-		return err
-	}
-	if err := s.MTLogin.Validate(); err != nil {
-		return err
-	}
-	return nil
 }
 
 func (s *Stores) WithSettingsTx(ctx context.Context, fn func(metric *metricdata.Store, system *system.Store) error) error {

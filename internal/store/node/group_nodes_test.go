@@ -6,10 +6,11 @@ import (
 	"testing"
 
 	"dash/internal/model"
+	pgtest "dash/internal/testutil/postgres"
 )
 
 func TestIntegrationGroupNodesGuestVisibleHidesGroupsWithoutVisibleNodes(t *testing.T) {
-	st := newIntegrationStore(t)
+	st := newTestStore(pgtest.NewDB(t), nil)
 	ctx := context.Background()
 
 	visibleGroup := createGroupNodeGroup(t, st, "public")

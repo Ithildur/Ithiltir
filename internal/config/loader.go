@@ -24,38 +24,18 @@ const (
 
 // LoadRuntime loads runtime config for the selected Redis mode.
 func LoadRuntime(path string, redisEnabled bool) (*Config, error) {
-	var cfg Config
-
-	resolved, err := resolveConfigPath(path)
+	cfg, err := loadConfig(path, redisEnabled)
 	if err != nil {
 		return nil, err
 	}
-
-	if err := readConfigFile(resolved, &cfg); err != nil {
+	if err := compilePublicURL(cfg); err != nil {
 		return nil, err
 	}
-	if err := overrideFromEnv(&cfg, redisEnabled); err != nil {
-		return nil, err
-	}
-	compileLanguage(&cfg)
-	if err := compileLocation(&cfg); err != nil {
+	if err := validateRuntime(cfg, redisEnabled); err != nil {
 		return nil, err
 	}
 
-	if err := compileDurations(&cfg, redisEnabled); err != nil {
-		return nil, err
-	}
-	if err := compileHTTP(&cfg); err != nil {
-		return nil, err
-	}
-	if err := compilePublicURL(&cfg); err != nil {
-		return nil, err
-	}
-	if err := validateRuntime(&cfg, redisEnabled); err != nil {
-		return nil, err
-	}
-
-	return &cfg, nil
+	return cfg, nil
 }
 
 func resolveConfigPath(path string) (string, error) {
@@ -97,6 +77,17 @@ func readConfigFile(path string, cfg *Config) error {
 
 // LoadForMigrate loads config for migration only (database fields required).
 func LoadForMigrate(path string) (*Config, error) {
+	cfg, err := loadConfig(path, false)
+	if err != nil {
+		return nil, err
+	}
+	if err := validateMigrate(cfg); err != nil {
+		return nil, err
+	}
+	return cfg, nil
+}
+
+func loadConfig(path string, redisEnabled bool) (*Config, error) {
 	var cfg Config
 
 	resolved, err := resolveConfigPath(path)
@@ -107,21 +98,17 @@ func LoadForMigrate(path string) (*Config, error) {
 	if err := readConfigFile(resolved, &cfg); err != nil {
 		return nil, err
 	}
-	if err := overrideFromEnv(&cfg, false); err != nil {
+	if err := overrideFromEnv(&cfg, redisEnabled); err != nil {
 		return nil, err
 	}
-	compileLanguage(&cfg)
+	cfg.App.Language = cfg.App.EffectiveLanguage()
 	if err := compileLocation(&cfg); err != nil {
 		return nil, err
 	}
-	if err := compileDurations(&cfg, false); err != nil {
+	if err := compileDurations(&cfg, redisEnabled); err != nil {
 		return nil, err
 	}
 	if err := compileHTTP(&cfg); err != nil {
-		return nil, err
-	}
-
-	if err := validateMigrate(&cfg); err != nil {
 		return nil, err
 	}
 
@@ -129,9 +116,6 @@ func LoadForMigrate(path string) (*Config, error) {
 }
 
 func compileHTTP(cfg *Config) error {
-	if cfg == nil {
-		return fmt.Errorf("config: cfg is nil")
-	}
 	trusted, err := cfg.HTTP.EffectiveTrustedProxies()
 	if err != nil {
 		return fmt.Errorf("config: parse http.trusted_proxies: %w", err)
@@ -140,18 +124,7 @@ func compileHTTP(cfg *Config) error {
 	return nil
 }
 
-func compileLanguage(cfg *Config) {
-	if cfg == nil {
-		return
-	}
-	cfg.App.Language = cfg.App.EffectiveLanguage()
-}
-
 func compileDurations(cfg *Config, redisEnabled bool) error {
-	if cfg == nil {
-		return fmt.Errorf("config: cfg is nil")
-	}
-
 	nodeOfflineThreshold, rawNodeOfflineThreshold, nodeOfflineThresholdErr := parseNodeOfflineThreshold(cfg.App.NodeOfflineThreshold)
 	if nodeOfflineThresholdErr != nil {
 		return fmt.Errorf(
@@ -200,10 +173,6 @@ func compileDurations(cfg *Config, redisEnabled bool) error {
 }
 
 func compilePublicURL(cfg *Config) error {
-	if cfg == nil {
-		return fmt.Errorf("config: cfg is nil")
-	}
-
 	raw := strings.TrimSpace(cfg.App.PublicURL)
 	cfg.App.PublicURL = raw
 
@@ -371,19 +340,7 @@ func validateRuntime(cfg *Config, redisEnabled bool) error {
 	if err := validateJWTSigningKey(cfg.Auth.JWTSigningKey); err != nil {
 		return err
 	}
-	if err := validateDatabasePool(cfg.Database); err != nil {
-		return err
-	}
-	if cfg.Database.RetentionDays < 0 {
-		return fmt.Errorf("config: database.retention_days must be >= 0")
-	}
-	if cfg.Database.MetricsRawRetentionDays < 0 || cfg.Database.MetricsRawRetentionDays == 1 {
-		return fmt.Errorf("config: database.metrics_raw_retention_days must be 0 or >= 2")
-	}
-	if cfg.Database.TrafficRetentionDays < 0 {
-		return fmt.Errorf("config: database.traffic_retention_days must be >= 0")
-	}
-	return nil
+	return validateDatabase(cfg.Database)
 }
 
 func validateJWTSigningKey(key string) error {
@@ -401,22 +358,10 @@ func validateMigrate(cfg *Config) error {
 	if err := validateMissing(missing); err != nil {
 		return err
 	}
-	if err := validateDatabasePool(cfg.Database); err != nil {
-		return err
-	}
-	if cfg.Database.RetentionDays < 0 {
-		return fmt.Errorf("config: database.retention_days must be >= 0")
-	}
-	if cfg.Database.MetricsRawRetentionDays < 0 || cfg.Database.MetricsRawRetentionDays == 1 {
-		return fmt.Errorf("config: database.metrics_raw_retention_days must be 0 or >= 2")
-	}
-	if cfg.Database.TrafficRetentionDays < 0 {
-		return fmt.Errorf("config: database.traffic_retention_days must be >= 0")
-	}
-	return nil
+	return validateDatabase(cfg.Database)
 }
 
-func validateDatabasePool(cfg DatabaseConfig) error {
+func validateDatabase(cfg DatabaseConfig) error {
 	if cfg.MaxOpenConns < 0 {
 		return fmt.Errorf("config: database.max_open_conns must be >= 0")
 	}
@@ -432,6 +377,15 @@ func validateDatabasePool(cfg DatabaseConfig) error {
 	}
 	if specified && d < 0 {
 		return fmt.Errorf("config: database.conn_max_lifetime must be >= 0")
+	}
+	if cfg.RetentionDays < 0 {
+		return fmt.Errorf("config: database.retention_days must be >= 0")
+	}
+	if cfg.MetricsRawRetentionDays < 0 || cfg.MetricsRawRetentionDays == 1 {
+		return fmt.Errorf("config: database.metrics_raw_retention_days must be 0 or >= 2")
+	}
+	if cfg.TrafficRetentionDays < 0 {
+		return fmt.Errorf("config: database.traffic_retention_days must be >= 0")
 	}
 	return nil
 }

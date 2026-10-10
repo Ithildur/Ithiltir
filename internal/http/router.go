@@ -5,45 +5,22 @@ import (
 	"net/http"
 	"net/netip"
 
-	authjwt "github.com/Ithildur/EiluneKit/auth/jwt"
 	"github.com/Ithildur/EiluneKit/clientip"
 	"github.com/Ithildur/EiluneKit/http/middleware"
 	"github.com/Ithildur/EiluneKit/http/routes"
 
 	"dash/internal/config"
-	"dash/internal/dashupdate"
 	"dash/internal/http/api"
 	"dash/internal/http/deploy"
 	themeroute "dash/internal/http/theme"
 	"dash/internal/infra"
-	"dash/internal/nodeingest"
-	"dash/internal/nodesession"
-	"dash/internal/store"
-	"dash/internal/theme"
-	"dash/internal/traffic"
 )
 
 // Dependencies holds the application dependencies used by the HTTP server.
-type Dependencies struct {
-	Stores         *store.Stores
-	Auth           *authjwt.Manager
-	Theme          *theme.Store
-	TrafficRebuild *traffic.RebuildRunner
-	DashUpdate     *dashupdate.Runner
-	NodeIngest     *nodeingest.Receiver
-	NodeSessions   *nodesession.Hub
-}
+type Dependencies = api.Dependencies
 
 func newHandler(cfg *config.Config, deps Dependencies) (http.Handler, error) {
-	apiRoutes, err := api.Router(cfg, api.Dependencies{
-		Stores:         deps.Stores,
-		Auth:           deps.Auth,
-		Theme:          deps.Theme,
-		TrafficRebuild: deps.TrafficRebuild,
-		DashUpdate:     deps.DashUpdate,
-		NodeIngest:     deps.NodeIngest,
-		NodeSessions:   deps.NodeSessions,
-	})
+	apiRoutes, err := api.Router(cfg, deps)
 	if err != nil {
 		return nil, err
 	}

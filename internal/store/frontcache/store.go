@@ -3,7 +3,6 @@ package frontcache
 import (
 	"context"
 	"errors"
-	"fmt"
 	"sync"
 
 	"dash/internal/metrics"
@@ -34,13 +33,6 @@ func (s *Store) currentProjectionVersion() uint64 {
 
 func (s *Store) publishProjectionIfCurrent(version uint64, fn func() error) (bool, error) {
 	return s.projection.Publish(version, fn)
-}
-
-func (s *Store) Validate() error {
-	if s == nil || s.db == nil || s.backend == nil || s.projection == nil {
-		return fmt.Errorf("store: front cache is not initialized")
-	}
-	return nil
 }
 
 type cacheBackend interface {

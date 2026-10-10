@@ -64,13 +64,6 @@ func NewService(
 }
 
 func (s *Service) Run(ctx context.Context) error {
-	if s == nil || s.system == nil || s.notifications == nil || s.runner == nil {
-		return fmt.Errorf("dash update service is not initialized")
-	}
-	if ctx == nil {
-		return fmt.Errorf("dash update context is nil")
-	}
-
 	startup := time.NewTimer(autoStartupDelay)
 	defer startup.Stop()
 	checkTicker := time.NewTicker(autoCheckInterval)
@@ -152,7 +145,7 @@ func (s *Service) checkAndAct(ctx context.Context) error {
 	next, err := s.runner.Start(ctx, RunInput{
 		Action:                  ActionUpdate,
 		Channel:                 Channel(policy.Channel),
-		Lang:                    s.updateLang(),
+		Lang:                    lang.Normalize(s.language),
 		Origin:                  OriginAuto,
 		TargetVersion:           check.LatestVersion,
 		ExpectedCurrentVersion:  check.CurrentVersion,
@@ -425,17 +418,6 @@ func statusMessageMetadata(event string, status State) map[string]string {
 		"target_version": status.TargetVersion,
 		"failure_code":   status.FailureCode,
 	}
-}
-
-func (s *Service) updateLang() string {
-	if s.isEnglish() {
-		return "en"
-	}
-	return "zh"
-}
-
-func (s *Service) isEnglish() bool {
-	return lang.Normalize(s.language) == lang.English
 }
 
 func (s *Service) autoStatePath() (string, error) {

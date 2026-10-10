@@ -52,13 +52,6 @@ func newCycleRule(mode BillingCycleMode, day int, anchorDate string, loc *time.L
 	return cycleRule{mode: normalized, day: day, anchor: anchor, loc: loc}, nil
 }
 
-func minInt(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}
-
 func trafficBucketStart(t time.Time) time.Time {
 	return t.UTC().Truncate(trafficBucketSize)
 }
@@ -258,7 +251,7 @@ func trafficBoundaryInMonth(mode BillingCycleMode, day, year int, month time.Mon
 	case CycleCalendarMonth:
 		return time.Date(year, month, 1, 0, 0, 0, 0, loc), nil
 	case CycleClampMonthEnd:
-		return time.Date(year, month, minInt(day, daysInMonth(year, month)), 0, 0, 0, 0, loc), nil
+		return time.Date(year, month, min(day, daysInMonth(year, month)), 0, 0, 0, 0, loc), nil
 	case CycleWHMCS:
 		return time.Date(year, month, day, 0, 0, 0, 0, loc), nil
 	default:

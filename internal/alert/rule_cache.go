@@ -41,18 +41,12 @@ func (c *RuleCache) Refresh(ctx context.Context, force bool) (*CompiledRules, er
 
 	items, err := c.store.RulesForCompile(ctx)
 	if err != nil {
-		if current := c.current.Load(); current != nil {
-			return current, err
-		}
-		return nil, err
+		return c.current.Load(), err
 	}
 
 	compiled, err := CompileRules(items, time.Now().UTC())
 	if err != nil {
-		if current := c.current.Load(); current != nil {
-			return current, err
-		}
-		return nil, err
+		return c.current.Load(), err
 	}
 	c.current.Store(compiled)
 	return compiled, nil

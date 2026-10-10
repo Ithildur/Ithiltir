@@ -24,7 +24,7 @@ func TestIntegrationDefaultNotificationDelivery(t *testing.T) {
 	db := pgtest.NewDB(t)
 	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 	defer cancel()
-	store := alertstore.New(db, testNotifyConfigCipher(t))
+	store := alertstore.New(db, pgtest.ConfigCipher(t))
 	service := &Service{
 		store:  store,
 		notify: newNotifyCache(store, 0),
@@ -164,13 +164,4 @@ func TestIntegrationDefaultNotificationDelivery(t *testing.T) {
 			t.Fatalf("notification = %+v, want one completed delivery", row)
 		}
 	}
-}
-
-func testNotifyConfigCipher(t *testing.T) *notify.ConfigCipher {
-	t.Helper()
-	configCipher, err := notify.NewConfigCipher(make([]byte, notify.ConfigKeySize))
-	if err != nil {
-		t.Fatalf("NewConfigCipher() error = %v", err)
-	}
-	return configCipher
 }

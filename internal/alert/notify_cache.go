@@ -21,7 +21,6 @@ type notifyCache struct {
 	minRefresh time.Duration
 	mu         sync.Mutex
 	current    notifyTargets
-	ready      bool
 }
 
 func newNotifyCache(st *alertstore.Store, minRefresh time.Duration) *notifyCache {
@@ -35,19 +34,15 @@ func (c *notifyCache) Targets(ctx context.Context) (notifyTargets, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	if c.ready && time.Since(c.current.RefreshedAt) < c.minRefresh {
+	if c.current.Ready && time.Since(c.current.RefreshedAt) < c.minRefresh {
 		return c.current, nil
 	}
 
 	targets, err := c.load(ctx)
 	if err != nil {
-		if c.ready {
-			return c.current, err
-		}
-		return notifyTargets{}, err
+		return c.current, err
 	}
 	c.current = targets
-	c.ready = true
 	return targets, nil
 }
 

@@ -275,9 +275,6 @@ func (s *Service) sendNotification(
 	ctx context.Context,
 	item *model.AlertNotificationOutbox,
 ) (int64, *notificationFailure, error) {
-	if item == nil {
-		return 0, discardNotification("outbox_item_missing", errors.New("notification outbox item is nil")), nil
-	}
 	var payload alertstore.NotificationPayload
 	if err := json.Unmarshal(item.Payload, &payload); err != nil {
 		return 0, discardNotification("payload_invalid", fmt.Errorf("decode notification payload: %w", err)), nil
@@ -358,9 +355,6 @@ func discardNotification(code string, err error) *notificationFailure {
 }
 
 func notificationLogFields(item *model.AlertNotificationOutbox) []slog.Attr {
-	if item == nil {
-		return nil
-	}
 	fields := []slog.Attr{
 		kitlog.Int64("notification_id", item.ID),
 		kitlog.Int64("channel_id", item.ChannelID),

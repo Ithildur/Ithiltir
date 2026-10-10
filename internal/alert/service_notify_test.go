@@ -8,12 +8,13 @@ import (
 
 	"dash/internal/model"
 	alertstore "dash/internal/store/alert"
+	pgtest "dash/internal/testutil/postgres"
 
 	"gorm.io/datatypes"
 )
 
 func TestOpenNotificationParamsRenderPerChannelLanguage(t *testing.T) {
-	store := alertstore.New(nil, testNotifyConfigCipher(t))
+	store := alertstore.New(nil, pgtest.ConfigCipher(t))
 	cache := newNotifyCache(store, time.Hour)
 	cache.current = notifyTargets{
 		Enabled: true,
@@ -34,7 +35,6 @@ func TestOpenNotificationParamsRenderPerChannelLanguage(t *testing.T) {
 		RefreshedAt: time.Now(),
 		Ready:       true,
 	}
-	cache.ready = true
 	service := &Service{
 		notify:  cache,
 		message: MessageConfig{Language: messageLanguageZH, Location: time.UTC},

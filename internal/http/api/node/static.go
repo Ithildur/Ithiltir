@@ -8,6 +8,7 @@ import (
 	"github.com/Ithildur/EiluneKit/http/routes"
 
 	"dash/internal/http/httperr"
+	"dash/internal/http/request"
 	"dash/internal/infra"
 	"dash/internal/metrics"
 )
@@ -33,7 +34,7 @@ func (h *handler) staticHandler(w http.ResponseWriter, r *http.Request) {
 		h.writeError(w, r, logger, err)
 		return
 	}
-	ip, _ := nodeClientIP(r)
+	ip, _ := request.NodeIP(r)
 	if err := h.ingest.Static(r.Context(), secret, server.ID, snapshot, ip); err != nil {
 		h.writeError(w, r, logger, err)
 		return

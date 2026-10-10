@@ -14,19 +14,19 @@ const (
 	RuntimePhaseCooldown = "cooldown"
 )
 
+// RuntimeState uses UTC timestamps with second precision.
 type RuntimeState struct {
-	Phase              string  `json:"phase"`
-	RuleID             int64   `json:"rule_id"`
-	Generation         int64   `json:"generation"`
-	PendingSince       string  `json:"pending_since,omitempty"`
-	FiringSince        string  `json:"firing_since,omitempty"`
-	CooldownUntil      string  `json:"cooldown_until,omitempty"`
-	LastDBHeartbeatAt  string  `json:"last_db_heartbeat_at,omitempty"`
-	LastObservedAt     string  `json:"last_observed_at,omitempty"`
-	LastEvalAt         string  `json:"last_eval_at,omitempty"`
-	CurrentValue       float64 `json:"current_value"`
-	EffectiveThreshold float64 `json:"effective_threshold"`
-	EventID            int64   `json:"event_id,omitempty"`
+	Phase              string
+	RuleID             int64
+	Generation         int64
+	PendingSince       time.Time
+	FiringSince        time.Time
+	CooldownUntil      time.Time
+	LastDBHeartbeatAt  time.Time
+	LastObservedAt     time.Time
+	CurrentValue       float64
+	EffectiveThreshold float64
+	EventID            int64
 }
 
 type OpenTransition struct {
@@ -34,8 +34,6 @@ type OpenTransition struct {
 	Rule               CompiledRule
 	ObjectID           int64
 	TriggeredAt        time.Time
-	PendingSince       time.Time
-	ObservedAt         time.Time
 	CurrentValue       float64
 	EffectiveThreshold float64
 	Snapshot           *metrics.NodeView
@@ -61,9 +59,6 @@ type EvalResult struct {
 
 func EvaluateServer(serverID int64, snapshot *metrics.NodeView, compiled *CompiledRules, current map[string]RuntimeState, now time.Time) EvalResult {
 	now = now.UTC()
-	if current == nil {
-		current = make(map[string]RuntimeState)
-	}
 	result := EvalResult{
 		Next:             make(map[string]RuntimeState, len(current)),
 		OpenTransitions:  make([]OpenTransition, 0),
@@ -93,7 +88,7 @@ func EvaluateServer(serverID int64, snapshot *metrics.NodeView, compiled *Compil
 				EventID:     state.EventID,
 				Rule:        ruleForState(compiled, state),
 				ObjectID:    serverID,
-				OpenedAt:    state.FiringSinceTime(),
+				OpenedAt:    state.FiringSince,
 				ClosedAt:    now,
 				CloseReason: "rule_unmounted",
 			})
@@ -106,7 +101,7 @@ func EvaluateServer(serverID int64, snapshot *metrics.NodeView, compiled *Compil
 		existing, exists := current[key]
 		if exists && existing.Phase == RuntimePhaseCooldown {
 			if cooldownActive(existing, now) {
-				result.Next[key] = keepCooldownState(existing, now)
+				result.Next[key] = existing
 				continue
 			}
 			exists = false
@@ -131,62 +126,42 @@ func EvaluateServer(serverID int64, snapshot *metrics.NodeView, compiled *Compil
 			}
 			continue
 		}
-		conditionTrue := err == nil && ok && alertspec.Compare(rule.Operator, value, threshold)
-
-		switch {
-		case !conditionTrue:
+		if !alertspec.Compare(rule.Operator, value, threshold) {
 			if exists && existing.Phase == RuntimePhaseFiring {
-				result.Next[key] = keepFiringState(existing, value, threshold, observedAt, now)
+				result.Next[key] = keepFiringState(existing, value, threshold, observedAt)
 				result.CloseTransitions = append(result.CloseTransitions, CloseTransition{
 					StateKey:     key,
 					EventID:      existing.EventID,
 					Rule:         rule,
 					ObjectID:     serverID,
-					OpenedAt:     existing.FiringSinceTime(),
+					OpenedAt:     existing.FiringSince,
 					ClosedAt:     evalAt,
 					CloseReason:  "condition_cleared",
-					CurrentValue: floatPtr(value),
+					CurrentValue: new(value),
 					Snapshot:     snapshot,
 				})
 			}
 			continue
-		case !exists:
-			pendingSince := maxTime(rule.GenerationUpdatedAt, evalAt)
-			result.Next[key] = newPendingState(rule, pendingSince, evalAt, now, value, threshold)
-			if durationSatisfied(pendingSince, rule.DurationSec, evalAt) {
-				result.OpenTransitions = append(result.OpenTransitions, OpenTransition{
-					StateKey:           key,
-					Rule:               rule,
-					ObjectID:           serverID,
-					TriggeredAt:        evalAt,
-					PendingSince:       pendingSince,
-					ObservedAt:         evalAt,
-					CurrentValue:       value,
-					EffectiveThreshold: threshold,
-					Snapshot:           snapshot,
-				})
-			}
-		case existing.Phase == RuntimePhaseFiring:
-			result.Next[key] = keepFiringState(existing, value, threshold, evalAt, now)
-		default:
-			pendingSince := existing.PendingSinceTime()
-			if pendingSince.IsZero() || pendingSince.Before(rule.GenerationUpdatedAt) {
-				pendingSince = maxTime(rule.GenerationUpdatedAt, evalAt)
-			}
-			result.Next[key] = newPendingState(rule, pendingSince, evalAt, now, value, threshold)
-			if durationSatisfied(pendingSince, rule.DurationSec, evalAt) {
-				result.OpenTransitions = append(result.OpenTransitions, OpenTransition{
-					StateKey:           key,
-					Rule:               rule,
-					ObjectID:           serverID,
-					TriggeredAt:        evalAt,
-					PendingSince:       pendingSince,
-					ObservedAt:         evalAt,
-					CurrentValue:       value,
-					EffectiveThreshold: threshold,
-					Snapshot:           snapshot,
-				})
-			}
+		}
+		if exists && existing.Phase == RuntimePhaseFiring {
+			result.Next[key] = keepFiringState(existing, value, threshold, evalAt)
+			continue
+		}
+		pendingSince := existing.PendingSince
+		if !exists || pendingSince.IsZero() || pendingSince.Before(rule.GenerationUpdatedAt) {
+			pendingSince = maxTime(rule.GenerationUpdatedAt, evalAt)
+		}
+		result.Next[key] = newPendingState(rule, pendingSince, evalAt, value, threshold)
+		if durationSatisfied(pendingSince, rule.DurationSec, evalAt) {
+			result.OpenTransitions = append(result.OpenTransitions, OpenTransition{
+				StateKey:           key,
+				Rule:               rule,
+				ObjectID:           serverID,
+				TriggeredAt:        evalAt,
+				CurrentValue:       value,
+				EffectiveThreshold: threshold,
+				Snapshot:           snapshot,
+			})
 		}
 	}
 
@@ -203,7 +178,7 @@ func EvaluateServer(serverID int64, snapshot *metrics.NodeView, compiled *Compil
 			EventID:      state.EventID,
 			Rule:         ruleForState(compiled, state),
 			ObjectID:     serverID,
-			OpenedAt:     state.FiringSinceTime(),
+			OpenedAt:     state.FiringSince,
 			ClosedAt:     now,
 			CloseReason:  "rule_unmounted",
 			CurrentValue: nil,
@@ -214,91 +189,41 @@ func EvaluateServer(serverID int64, snapshot *metrics.NodeView, compiled *Compil
 	return result
 }
 
-func (s RuntimeState) PendingSinceTime() time.Time {
-	return parseRuntimeTime(s.PendingSince)
-}
-
-func (s RuntimeState) FiringSinceTime() time.Time {
-	return parseRuntimeTime(s.FiringSince)
-}
-
-func (s RuntimeState) CooldownUntilTime() time.Time {
-	return parseRuntimeTime(s.CooldownUntil)
-}
-
-func (s RuntimeState) LastDBHeartbeatAtTime() time.Time {
-	return parseRuntimeTime(s.LastDBHeartbeatAt)
-}
-
-func (s RuntimeState) LastObservedAtTime() time.Time {
-	return parseRuntimeTime(s.LastObservedAt)
-}
-
-func keepFiringState(state RuntimeState, currentValue, threshold float64, observedAt, now time.Time) RuntimeState {
-	state.Phase = RuntimePhaseFiring
-	state.LastObservedAt = formatRuntimeTime(observedAt)
-	state.LastEvalAt = formatRuntimeTime(now)
+func keepFiringState(state RuntimeState, currentValue, threshold float64, observedAt time.Time) RuntimeState {
+	state.LastObservedAt = observedAt.UTC().Truncate(time.Second)
 	state.CurrentValue = currentValue
 	state.EffectiveThreshold = threshold
 	return state
 }
 
-func keepCooldownState(state RuntimeState, now time.Time) RuntimeState {
-	state.Phase = RuntimePhaseCooldown
-	state.LastEvalAt = formatRuntimeTime(now)
-	return state
-}
-
-func newPendingState(rule CompiledRule, pendingSince, observedAt, now time.Time, currentValue, threshold float64) RuntimeState {
+func newPendingState(rule CompiledRule, pendingSince, observedAt time.Time, currentValue, threshold float64) RuntimeState {
 	return RuntimeState{
 		Phase:              RuntimePhasePending,
 		RuleID:             rule.RuleID,
 		Generation:         rule.Generation,
-		PendingSince:       formatRuntimeTime(pendingSince),
-		LastObservedAt:     formatRuntimeTime(observedAt),
-		LastEvalAt:         formatRuntimeTime(now),
+		PendingSince:       pendingSince.UTC().Truncate(time.Second),
+		LastObservedAt:     observedAt.UTC().Truncate(time.Second),
 		CurrentValue:       currentValue,
 		EffectiveThreshold: threshold,
 	}
 }
 
-func newCooldownState(rule CompiledRule, closedAt, now time.Time) RuntimeState {
+func newCooldownState(rule CompiledRule, closedAt time.Time) RuntimeState {
 	return RuntimeState{
 		Phase:         RuntimePhaseCooldown,
 		RuleID:        rule.RuleID,
 		Generation:    rule.Generation,
-		CooldownUntil: formatRuntimeTime(closedAt.Add(time.Duration(rule.CooldownMin) * time.Minute)),
-		LastEvalAt:    formatRuntimeTime(now),
-	}
-}
-
-func firingFromPending(rule CompiledRule, pending RuntimeState, eventID int64, observedAt, now time.Time, currentValue, threshold float64) RuntimeState {
-	return RuntimeState{
-		Phase:              RuntimePhaseFiring,
-		RuleID:             rule.RuleID,
-		Generation:         rule.Generation,
-		PendingSince:       pending.PendingSince,
-		FiringSince:        formatRuntimeTime(now),
-		LastDBHeartbeatAt:  formatRuntimeTime(now),
-		LastObservedAt:     formatRuntimeTime(observedAt),
-		LastEvalAt:         formatRuntimeTime(now),
-		CurrentValue:       currentValue,
-		EffectiveThreshold: threshold,
-		EventID:            eventID,
+		CooldownUntil: closedAt.Add(time.Duration(rule.CooldownMin) * time.Minute).UTC().Truncate(time.Second),
 	}
 }
 
 func applyOpenTransition(next map[string]RuntimeState, transition OpenTransition, eventID int64) {
-	pending := next[transition.StateKey]
-	next[transition.StateKey] = firingFromPending(
-		transition.Rule,
-		pending,
-		eventID,
-		transition.ObservedAt,
-		transition.TriggeredAt,
-		transition.CurrentValue,
-		transition.EffectiveThreshold,
-	)
+	state := next[transition.StateKey]
+	state.Phase = RuntimePhaseFiring
+	state.FiringSince = transition.TriggeredAt.UTC().Truncate(time.Second)
+	state.LastDBHeartbeatAt = state.FiringSince
+	state.EventID = eventID
+	next[transition.StateKey] = state
 }
 
 func snapshotObservedAt(snapshot *metrics.NodeView) (time.Time, bool) {
@@ -339,7 +264,7 @@ func snapshotOnline(snapshot *metrics.NodeView, now time.Time) (bool, bool) {
 	if !ok || receivedAt.IsZero() {
 		return false, false
 	}
-	staleAfter := time.Duration(maxInt(snapshot.Observation.StaleAfterSec, 0)) * time.Second
+	staleAfter := time.Duration(max(snapshot.Observation.StaleAfterSec, 0)) * time.Second
 	return now.Sub(receivedAt) <= staleAfter, true
 }
 
@@ -361,7 +286,7 @@ func metricValue(rule CompiledRule, snapshot *metrics.NodeView, online bool, obs
 }
 
 func cooldownActive(state RuntimeState, now time.Time) bool {
-	until := state.CooldownUntilTime()
+	until := state.CooldownUntil
 	return !until.IsZero() && now.Before(until)
 }
 
@@ -376,41 +301,11 @@ func durationSatisfied(pendingSince time.Time, durationSec int32, now time.Time)
 	return now.Sub(pendingSince) >= time.Duration(durationSec)*time.Second
 }
 
-func parseRuntimeTime(raw string) time.Time {
-	raw = strings.TrimSpace(raw)
-	if raw == "" {
-		return time.Time{}
-	}
-	parsed, err := time.Parse(time.RFC3339, raw)
-	if err != nil {
-		return time.Time{}
-	}
-	return parsed.UTC()
-}
-
-func formatRuntimeTime(t time.Time) string {
-	if t.IsZero() {
-		return ""
-	}
-	return t.UTC().Format(time.RFC3339)
-}
-
 func maxTime(a, b time.Time) time.Time {
 	if a.After(b) {
 		return a
 	}
 	return b
-}
-
-func maxInt(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
-}
-
-func floatPtr(v float64) *float64 {
-	return &v
 }
 
 func shouldHeartbeatFiring(previous, next RuntimeState, interval time.Duration, closing bool) bool {
@@ -420,13 +315,13 @@ func shouldHeartbeatFiring(previous, next RuntimeState, interval time.Duration, 
 	if previous.Phase != RuntimePhaseFiring || next.Phase != RuntimePhaseFiring || next.EventID <= 0 {
 		return false
 	}
-	observedAt := next.LastObservedAtTime()
+	observedAt := next.LastObservedAt
 	if observedAt.IsZero() {
 		return false
 	}
-	lastHeartbeat := previous.LastDBHeartbeatAtTime()
+	lastHeartbeat := previous.LastDBHeartbeatAt
 	if lastHeartbeat.IsZero() {
-		lastHeartbeat = previous.FiringSinceTime()
+		lastHeartbeat = previous.FiringSince
 	}
 	if lastHeartbeat.IsZero() {
 		return true

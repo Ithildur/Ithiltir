@@ -90,7 +90,7 @@ helper 的安装和更新属于特权安装流程；node 自更新只更新普�
 - SMART、thermal 和完整 RAID 详情属于运行时状态。SMART 缓存新鲜度、helper 可用性、设备健康结果、完整 thermal 传感器 payload 以及完整 RAID 阵列/成员 payload 保存在当前快照或热点缓存，不写入 PostgreSQL 历史指标行。确认是物理盘的 SMART 温度会归约写入 `disk_physical_metrics.temp_c`，用于按设备查询历史；虚拟盘和 RAID 设备会被忽略。同一套后端判定会生成 `disk.temperature_devices`，供前端进入硬盘温度历史。thermal 会归约写入 `cpu_temp_c` 作为主机历史；完整 thermal 详情拆成独立前台字段缓存，读取前台节点视图时再组合进 JSON。
 - TCP/UDP 连接数是持久化数值指标，会写入 `tcp_conn` 和 `udp_conn`，并作为 `conn.tcp` 和 `conn.udp` 支持历史查询。systemd Linux 主机上的完整主机/netns 连接数来自 1 秒周期的 root 侧连接数缓存，因为 Node 以低权限运行；安装脚本会在存在 `cc`、`gcc` 或 `clang` 时本地编译该 helper。OpenRC 不运行该 helper，因为 BusyBox cron 无法保持 1 秒周期。缓存缺失、过期、helper 无法编译或使用 OpenRC 时，Node 使用自带连接数统计，可能缺失容器连接数据。
 - Linux PSI pressure 指标是固定数值时序数据。PSI 的 `avg10`、`avg60`、`avg300` 和 `total` 会作为可空列保存到 `server_metrics` 和 `server_current_metrics`；缺失列表示不可用，不表示 0 压力。Dashboard 持久化会忽略采集原因/状态字符串。PSI 数据只进入历史链路，不参与告警评估。
-- 告警评估读取进程内最新上报快照或 PostgreSQL 当前投影。内置离线、RAID、SMART 健康失败和 NVMe 关键告警规则来自快照新鲜度和上报磁盘状态。
+- 告警服务持有原生进程内评估状态，时间使用 UTC，精度为秒。启动时从 PostgreSQL 开放事件重建状态，定期协调把开放事件合并到当前状态。评估读取进程内最新上报快照或 PostgreSQL 当前投影。内置离线、RAID、SMART 健康失败和 NVMe 关键告警规则来自快照新鲜度和上报磁盘状态。
 - 告警服务启动后 1 分钟内不会新开告警事件。
 - 指标提交把最新节点快照放入进程内告警脏队列；控制变更可以只放节点 ID。同一节点的重复标记合并为最新快照，执行期间再次变脏会在本轮结束后再执行一次。队列和运行态都不写 Redis；进程重启后的全量协调、PostgreSQL 开放事件和后续指标上报负责恢复评估。
 - 告警和 Dash 更新消息共用一个 PostgreSQL 通知 outbox 和一个单进程投递 worker。投递不使用运行时租约；进程异常退出留下的 `sending` 行会在下一次轮询立即恢复。Outbox 会持久化在途行是否为 blocked 渠道探针，崩溃恢复后继续使用探针退避并保持积压合并。远端发送成功后，仍存活的 worker 只重试本地完成事务，不会再次发送该行；优雅停机时会保留最长 10 秒的本地完成窗口。若进程在远端接收与本地提交之间崩溃，或停机完成窗口超时，因为远端协议没有共享幂等回执，边界仍是至少一次投递（at-least-once）。告警事件及运行时状态仍不依赖投递；首次加载告警目标失败且没有 last-good 快照时，本次告警状态转换会延后重试，不会提交一个缺少 outbox 的终态；已有 last-good 快照时继续按该快照创建 outbox。发出远端请求前发生的数据库查询或 worker 本地故障只会释放当前任务以便再次尝试，不消耗远端投递预算，也不会改变渠道健康状态。瞬时远端错误先按 5–320 秒指数退避，之后进入 `blocked`；确定性的配置错误或远端拒绝会同时阻塞该渠道兼容的待发送/重试积压，只保留一个低频探针。该 blocked 探针发生任何失败都会继续合并整条渠道积压，并按 5、15、30、60 分钟安排下一次探测，同时遵守有上限的远端 `Retry-After`；Telegram Bot 的 `429` 还会读取 JSON `parameters.retry_after`。渠道停用时，未发送行进入 `paused`；只有 payload 损坏、目标已删除或渠道类型不匹配才进入 `discarded`。保存、重新启用或真实投递成功都会唤醒兼容任务并重置重试预算。渠道配置 revision 防止旧配置的在途结果污染当前健康状态，也防止 MTProto 登录完成时覆盖并发替换的新配置。投递健康状态持久化在 `notify_channels`，活跃队列数量及重试/探针时间由 outbox 派生。历史 `failed_permanent` 会迁移为 `blocked`，远端恢复不依赖管理员打开管理界面。
@@ -150,7 +150,7 @@ Redis 和内存认证存储均使用 EiluneKit 缺省的每用户 255 个未过�
 
 ## Node 传输与 PVE 查询归属
 
-HTTP 服务根入口持有一个共享 `nodeingest.Receiver`、一个 `nodesession.Hub` 和 `noderpc` 适配器。HTTP 和 gRPC 调用相同受理方法，保留既有宿主指标、流量、在线率、告警和缓存行为。同一监听地址支持 HTTP/1、HTTP/2，以及可信 TLS 代理后的明文 HTTP/2；预留的 `grpc_port` 不作为第二监听端口。关闭时并行停止 RPC 会话、等待 HTTP 请求退出，共用 10 秒预算。到期后由 HTTP 服务强制关闭剩余连接，再等待 RPC 清理结束。
+应用根入口构造一个共享 `nodeingest.Receiver` 和一个 `nodesession.Hub`，并传给 HTTP 服务。HTTP 服务持有 `noderpc` 适配器，并在关闭时回收节点会话。HTTP 和 gRPC 调用相同受理方法，保留既有宿主指标、流量、在线率、告警和缓存行为。同一监听地址支持 HTTP/1、HTTP/2，以及可信 TLS 代理后的明文 HTTP/2；预留的 `grpc_port` 不作为第二监听端口。关闭时并行停止 RPC 会话、等待 HTTP 请求退出，共用 10 秒预算。到期后由 HTTP 服务强制关闭剩余连接，再等待 RPC 清理结束。
 
 Dash 每个查询请求持有该流的读写任务，并等待两者退出。写任务直接消费会话命令队列，在发送时计算查询剩余预算。单次流写入限时 5 秒，空闲期间不设 HTTP 写入期限。会话结束后，最终状态最多等待 1 秒发送，超时重置该 HTTP/2 流。会话替换、凭据撤销和流控阻塞只回收对应流，不关闭普通上报复用的连接。
 
