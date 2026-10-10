@@ -9,7 +9,7 @@ interface I18nState {
   setLang: (next: LangUpdate) => void;
 }
 
-export const LANG_STORAGE_KEY = 'lang';
+const LANG_STORAGE_KEY = 'lang';
 
 const readStoredLang = (): Lang | null => {
   if (typeof window === 'undefined') return null;
@@ -38,12 +38,23 @@ const readBrowserLang = (): Lang => {
   return 'zh';
 };
 
-const readInitialLang = (): Lang => readStoredLang() ?? readBrowserLang();
+const writeStoredLang = (lang: Lang): void => {
+  try {
+    window.localStorage.setItem(LANG_STORAGE_KEY, lang);
+  } catch {
+    // Language persistence is best-effort.
+  }
+};
 
-export const useI18nStore = create<I18nState>()((set) => ({
-  lang: readInitialLang(),
-  setLang: (next) =>
-    set((state) => ({
-      lang: typeof next === 'function' ? next(state.lang) : next,
-    })),
-}));
+export const useI18nStore = create<I18nState>()((set, get) => {
+  const lang = readStoredLang() ?? readBrowserLang();
+  writeStoredLang(lang);
+  return {
+    lang,
+    setLang: (next) => {
+      const nextLang = typeof next === 'function' ? next(get().lang) : next;
+      set({ lang: nextLang });
+      writeStoredLang(nextLang);
+    },
+  };
+});

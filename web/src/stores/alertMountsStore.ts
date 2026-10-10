@@ -19,17 +19,12 @@ const initialAlertMountsState = {
 
 export const useAlertMountsStore = create<AlertMountsState>()(() => initialAlertMountsState);
 
-const getAlertMountsState = (): AlertMountsState => useAlertMountsStore.getState();
-
 export const resetAlertMountsStore = (): void => {
   loadGate.invalidate();
   useAlertMountsStore.setState(initialAlertMountsState);
 };
 
 const loadGate = createSeqGate();
-
-const fetchAlertMounts = (params: { signal?: AbortSignal } = {}): Promise<AlertMounts> =>
-  adminApi.fetchAlertMounts(params);
 
 const replaceAlertMounts = (data: AlertMounts): void => {
   useAlertMountsStore.setState({ data });
@@ -40,7 +35,12 @@ const setAlertMountsLoading = (loading: boolean): void => {
 };
 
 const reloadAlertMounts = async (): Promise<void> => {
-  await reloadLatestLoad(loadGate, fetchAlertMounts, replaceAlertMounts, setAlertMountsLoading);
+  await reloadLatestLoad(
+    loadGate,
+    adminApi.fetchAlertMounts,
+    replaceAlertMounts,
+    setAlertMountsLoading,
+  );
 };
 
 export const loadAlertMounts = async (
@@ -48,7 +48,7 @@ export const loadAlertMounts = async (
 ): Promise<AlertMounts> => {
   return runLatestLoad(
     loadGate,
-    () => fetchAlertMounts(params),
+    () => adminApi.fetchAlertMounts(params),
     replaceAlertMounts,
     setAlertMountsLoading,
   );
@@ -59,7 +59,7 @@ export const setAlertMounts = async (
   serverIds: number[],
   mounted: boolean,
 ): Promise<boolean> => {
-  const state = getAlertMountsState();
+  const state = useAlertMountsStore.getState();
   if (state.saving || ruleIds.length === 0 || serverIds.length === 0) return false;
 
   useAlertMountsStore.setState({ saving: true });

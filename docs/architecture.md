@@ -123,6 +123,8 @@ Redis and memory authentication stores use EiluneKit's default limit of 255 unex
 
 ## Frontend And Reverse Proxies
 
+The frontend language store owns language selection and persistence under the `lang` localStorage key. If browser storage is unavailable, language changes remain effective for the current page session.
+
 Access logs and login/node-authentication rate limits trust forwarded client IP headers only from `http.trusted_proxies`. Header precedence follows EiluneKit defaults: `X-Forwarded-For`, `X-Real-IP`, `Forwarded`, `True-Client-IP`, then `CF-Connecting-IP`. This selection does not change the authenticated node IP observation rule, which uses the first `X-Forwarded-For` entry or the connection address.
 
 The frontend can run as a standalone dev server, but the runtime boundary stays same-origin. A dev proxy or production reverse proxy should forward `/api`, `/theme`, and `/deploy` to the backend while Dash serves the SPA at `/`. IP deployments may use HTTP; use HTTPS across untrusted networks because admin credentials and node secrets otherwise travel in plaintext. Do not point browser API requests directly at a cross-origin backend unless CORS, cookie, and CSRF policies are designed together.

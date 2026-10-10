@@ -3,13 +3,13 @@ import { createRoot } from 'react-dom/client';
 
 import App from './App';
 import './index.css';
-import { I18nRuntime } from '@runtime/I18nRuntime';
 import { AuthRuntime } from '@runtime/AuthRuntime';
 import { SiteBrandRuntime } from '@runtime/SiteBrandRuntime';
 import { ThemeRuntime } from '@runtime/ThemeRuntime';
 import { TopBannerHost } from '@runtime/TopBannerHost';
 import { SearchShortcutRuntime } from '@runtime/SearchShortcutRuntime';
-import { installBrowserRuntime } from '@runtime/bootstrap';
+import { installAuthApiSession } from '@stores/authStore';
+import { syncThemeRuntimeState } from '@stores/themeStore';
 
 const root = document.getElementById('root');
 
@@ -17,20 +17,16 @@ if (!root) {
   throw new Error('Root element not found');
 }
 
-installBrowserRuntime();
+installAuthApiSession();
+syncThemeRuntimeState();
 
-const renderApp = () => {
-  createRoot(root).render(
-    <StrictMode>
-      <I18nRuntime />
-      <TopBannerHost />
-      <SiteBrandRuntime />
-      <AuthRuntime />
-      <ThemeRuntime />
-      <SearchShortcutRuntime />
-      <App />
-    </StrictMode>,
-  );
-};
-
-renderApp();
+createRoot(root).render(
+  <StrictMode>
+    <TopBannerHost />
+    <SiteBrandRuntime />
+    <AuthRuntime />
+    <ThemeRuntime />
+    <SearchShortcutRuntime />
+    <App />
+  </StrictMode>,
+);

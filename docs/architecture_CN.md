@@ -123,6 +123,8 @@ Redis 和内存认证存储均使用 EiluneKit 缺省的每用户 255 个未过�
 
 ## 前端和反向代理
 
+前端语言 Store 负责语言选择，并通过 localStorage 的 `lang` 键保存。浏览器存储不可用时，语言切换仍对当前页面会话有效。
+
 访问日志以及登录、节点鉴权限流只信任来自 `http.trusted_proxies` 的客户端 IP 转发头。优先级沿用 EiluneKit 缺省值：`X-Forwarded-For`、`X-Real-IP`、`Forwarded`、`True-Client-IP`、`CF-Connecting-IP`。该选择不改变已认证节点的 IP 观测规则，节点 IP 仍使用 `X-Forwarded-For` 第一项或连接地址。
 
 前端可以单独启动开发服务器，但运行边界仍是同源路径。开发代理或生产反向代理应把 `/api`、`/theme`、`/deploy` 转给后端，`/` 保持为 Dash SPA。IP 部署允许使用 HTTP；经过不可信网络时应使用 HTTPS，否则管理员凭据和节点密钥会以明文传输。跨域后端地址需要同时配置 CORS、cookie 和 CSRF 策略。

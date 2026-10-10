@@ -66,10 +66,8 @@ export const useStatisticsAccessStore = create<StatisticsAccessState>()(() => ({
   load: initialStatisticsAccessLoad,
 }));
 
-const getStatisticsAccessState = (): StatisticsAccessState => useStatisticsAccessStore.getState();
-
 const startStatisticsAccessLoad = (requestId: number): void => {
-  const current = getStatisticsAccessState().load;
+  const current = useStatisticsAccessStore.getState().load;
   useStatisticsAccessStore.setState({
     load: loadingLoad(current, requestId),
   });
@@ -80,14 +78,14 @@ const setStatisticsAccess = (
   access: StatisticsAccess,
   fetchedAt: number,
 ): void => {
-  if (getStatisticsAccessState().load.requestId !== requestId) return;
+  if (useStatisticsAccessStore.getState().load.requestId !== requestId) return;
   useStatisticsAccessStore.setState({
     load: readyLoad(access, fetchedAt),
   });
 };
 
 const setStatisticsAccessError = (requestId: number, error: unknown): void => {
-  const current = getStatisticsAccessState().load;
+  const current = useStatisticsAccessStore.getState().load;
   if (current.requestId !== requestId) return;
   useStatisticsAccessStore.setState({
     load: errorLoad(current, error),
@@ -95,13 +93,13 @@ const setStatisticsAccessError = (requestId: number, error: unknown): void => {
 };
 
 const cancelStatisticsAccessLoad = (requestId: number): void => {
-  const current = getStatisticsAccessState().load;
+  const current = useStatisticsAccessStore.getState().load;
   if (current.requestId !== requestId) return;
   useStatisticsAccessStore.setState({ load: cachedLoad(current) });
 };
 
 const updateStatisticsAccessCache = (patch: Partial<StatisticsAccess>): StatisticsAccess | null => {
-  const access = getStatisticsAccessState().load.access;
+  const access = useStatisticsAccessStore.getState().load.access;
   if (!access) return null;
   const nextAccess = { ...access, ...patch };
   useStatisticsAccessStore.setState({
@@ -213,7 +211,7 @@ export const refreshStatisticsAccess = async (
 export const ensureStatisticsAccess = async (
   params: { maxAgeMs?: number; signal?: AbortSignal } = {},
 ): Promise<StatisticsAccess> => {
-  const { load } = getStatisticsAccessState();
+  const { load } = useStatisticsAccessStore.getState();
   if (load.status === 'ready') {
     const maxAgeMs = params.maxAgeMs ?? accessCacheTtlMs;
     if (Date.now() - load.fetchedAt <= maxAgeMs) {

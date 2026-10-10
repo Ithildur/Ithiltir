@@ -22,11 +22,7 @@ const ServerTimeCard: React.FC<Props> = ({ className = '', label, timeZone = 'UT
 
   const badgeLabel = useLocal ? t('admin_server_time_local') : t('admin_server_time_gmt');
 
-  const formatted = React.useMemo(
-    () =>
-      `${formatTimeInTimeZone(now, lang, effectiveTimeZone, true)} ${formatUTCOffsetInTimeZone(now, effectiveTimeZone)}`,
-    [effectiveTimeZone, lang, now],
-  );
+  const formatted = `${formatTimeInTimeZone(now, lang, effectiveTimeZone, true)} ${formatUTCOffsetInTimeZone(now, effectiveTimeZone)}`;
 
   const toggleTz = React.useCallback(() => {
     setUseLocal((prev) => !prev);

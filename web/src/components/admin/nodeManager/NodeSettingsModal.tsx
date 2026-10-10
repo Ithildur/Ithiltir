@@ -86,11 +86,8 @@ const NodeSettingsModal: React.FC<Props> = ({
   const pendingTagFocusId = React.useRef<string | null>(null);
   const copiedTimerRef = React.useRef<number | null>(null);
   const { t } = useI18n();
-  const installCommand = React.useMemo(() => {
-    const prefix = deploy?.scripts?.[activePlatform]?.command_prefix;
-    if (!prefix) return null;
-    return `${prefix}${secret}`;
-  }, [activePlatform, deploy, secret]);
+  const commandPrefix = deploy?.scripts?.[activePlatform]?.command_prefix;
+  const installCommand = commandPrefix ? `${commandPrefix}${secret}` : null;
 
   React.useEffect(() => {
     setName(node.name);

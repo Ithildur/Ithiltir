@@ -6,16 +6,12 @@ import { Translations } from './translations';
 export type TranslationKey = keyof typeof Translations.en;
 export type { Lang };
 
-const _zhMustCoverEn: Record<TranslationKey, string> = Translations.zh;
-void _zhMustCoverEn;
-
 export const translate = (
   lang: Lang,
   key: TranslationKey,
   vars?: Record<string, string | number>,
 ): string => {
-  const dict = Translations[lang];
-  const template = (dict as Record<TranslationKey, string>)[key] ?? key;
+  const template = Translations[lang][key];
   if (!vars) return template;
   return template.replace(/\{\{(\w+)\}\}/g, (match, name: string) => {
     const value = vars[name];

@@ -15,7 +15,7 @@ import { buildGroupLookup, nodeRowsFromManaged } from '@lib/adminNodeModel';
 import { fetchAppVersion } from '@lib/versionApi';
 import { pendingIds } from '@utils/pendingIds';
 import { createSeqGate, runLatestLoad } from '@utils/seqGate';
-import { getAdminGroups, loadAdminGroups } from './adminGroupsStore';
+import { loadAdminGroups, useAdminGroupsStore } from './adminGroupsStore';
 
 type NodeRowsUpdate = NodeRow[] | ((current: NodeRow[]) => NodeRow[]);
 
@@ -47,8 +47,6 @@ const initialAdminNodesState = {
 
 export const useAdminNodesStore = create<AdminNodesState>()(() => initialAdminNodesState);
 
-const getAdminNodesState = (): AdminNodesState => useAdminNodesStore.getState();
-
 export const resetAdminNodesStore = (): void => {
   nodesGate.invalidate();
   overviewGate.invalidate();
@@ -63,7 +61,7 @@ const deployGate = createSeqGate();
 const versionGate = createSeqGate();
 
 const fetchAdminNodeRows = async (
-  groupLookup: Record<number, string> = buildGroupLookup(getAdminGroups()),
+  groupLookup: Record<number, string> = buildGroupLookup(useAdminGroupsStore.getState().groups),
   params: { signal?: AbortSignal } = {},
 ): Promise<NodeRow[]> => nodeRowsFromManaged(await fetchNodes(params), groupLookup);
 
@@ -132,7 +130,7 @@ export const loadAdminNodeOverview = async (
 };
 
 export const refreshAdminNodes = async (
-  groupLookup: Record<number, string> = buildGroupLookup(getAdminGroups()),
+  groupLookup: Record<number, string> = buildGroupLookup(useAdminGroupsStore.getState().groups),
   params: { signal?: AbortSignal } = {},
 ): Promise<NodeRow[]> => {
   return runLatestLoad(nodesGate, () => fetchAdminNodeRows(groupLookup, params), replaceAdminNodes);
@@ -173,7 +171,7 @@ export const clearBundledNodeVersion = (): void => {
 };
 
 const getNode = (id: number): NodeRow | null =>
-  getAdminNodesState().nodes.find((node) => node.id === id) ?? null;
+  useAdminNodesStore.getState().nodes.find((node) => node.id === id) ?? null;
 
 const patchNode = (id: number, patch: Partial<NodeRow>): void => {
   setAdminNodes((nodes) => nodes.map((node) => (node.id === id ? { ...node, ...patch } : node)));
@@ -210,13 +208,15 @@ const setNodeUpgrading = (id: number, upgrading: boolean): void => {
 };
 
 const isSavingGuestVisible = (id: number): boolean =>
-  getAdminNodesState().savingGuestVisibleNodeIds.includes(id);
-const isSavingP95 = (id: number): boolean => getAdminNodesState().savingP95NodeIds.includes(id);
+  useAdminNodesStore.getState().savingGuestVisibleNodeIds.includes(id);
+const isSavingP95 = (id: number): boolean =>
+  useAdminNodesStore.getState().savingP95NodeIds.includes(id);
 const isSavingTrafficSettings = (id: number): boolean =>
-  getAdminNodesState().savingTrafficSettingsNodeIds.includes(id);
+  useAdminNodesStore.getState().savingTrafficSettingsNodeIds.includes(id);
 const isSavingSettings = (id: number): boolean =>
-  getAdminNodesState().savingSettingsNodeIds.includes(id);
-const isUpgradingNode = (id: number): boolean => getAdminNodesState().upgradingNodeIds.includes(id);
+  useAdminNodesStore.getState().savingSettingsNodeIds.includes(id);
+const isUpgradingNode = (id: number): boolean =>
+  useAdminNodesStore.getState().upgradingNodeIds.includes(id);
 
 export type AdminNodeSettingsInput = {
   name: string;
@@ -227,7 +227,7 @@ export type AdminNodeSettingsInput = {
 };
 
 export const addAdminNode = async (): Promise<boolean> => {
-  if (getAdminNodesState().creating) return false;
+  if (useAdminNodesStore.getState().creating) return false;
   useAdminNodesStore.setState({ creating: true });
   try {
     await createNode();
@@ -292,7 +292,8 @@ export const setAdminNodesTrafficP95 = async (
 
   const idSet = new Set(targetIds);
   const previous = new Map(
-    getAdminNodesState()
+    useAdminNodesStore
+      .getState()
       .nodes.filter((node) => idSet.has(node.id))
       .map((node) => [node.id, node.trafficP95Enabled]),
   );

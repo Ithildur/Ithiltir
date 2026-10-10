@@ -4,14 +4,11 @@ import {
   runningRebuildNodeId,
   startTrafficRebuild,
   useTrafficRebuildStore,
-  type TrafficRebuildStartOutcome,
 } from '@stores/trafficRebuildStore';
 
 interface UseTrafficRebuildOptions {
   nodeId?: number | null;
 }
-
-export type { TrafficRebuildStartOutcome };
 
 const normalizedNodeId = (id: number | null | undefined): number | null =>
   id !== null && id !== undefined && Number.isFinite(id) && id > 0 ? id : null;

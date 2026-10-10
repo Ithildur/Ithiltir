@@ -79,19 +79,13 @@ const DashboardPage: React.FC = () => {
     };
   }, [apiError, authStatus, isAuthenticated, t]);
 
-  const groupIds = React.useMemo(() => groups.map((group) => group.id), [groups]);
-
   React.useEffect(() => {
-    if (groupIds.length === 0) {
-      setSelectedGroupIds((current) => (current.length === 0 ? current : []));
-      return;
-    }
-    const validIds = new Set(groupIds);
+    const validIds = new Set(groups.map((group) => group.id));
     setSelectedGroupIds((current) => {
       const next = current.filter((id) => validIds.has(id));
       return next.length === current.length ? current : next;
     });
-  }, [groupIds]);
+  }, [groups]);
 
   const groupById = React.useMemo(
     () => new Map(groups.map((group) => [group.id, group])),

@@ -41,13 +41,11 @@ export const useTrafficRebuildStore = create<TrafficRebuildState>()(initialState
 const statusGate = createSeqGate();
 let startSeq = 0;
 
-const getState = (): TrafficRebuildState => useTrafficRebuildStore.getState();
-
 export const runningRebuildNodeId = (status: NodeTrafficRebuildStatus): number | null =>
   status.running && status.server_id > 0 ? status.server_id : null;
 
 export const isTrafficRebuildBusy = (): boolean => {
-  const state = getState();
+  const state = useTrafficRebuildStore.getState();
   return state.status.running || state.startingNodeId !== null;
 };
 
@@ -74,7 +72,7 @@ const outcomeFromStatus = (
 };
 
 const finishStart = (id: number, seq: number, status: NodeTrafficRebuildStatus): boolean => {
-  const state = getState();
+  const state = useTrafficRebuildStore.getState();
   if (startSeq !== seq || state.startingNodeId !== id) return false;
 
   // A POST response is newer than every status GET started before it.
@@ -84,7 +82,7 @@ const finishStart = (id: number, seq: number, status: NodeTrafficRebuildStatus):
 };
 
 const rollbackStart = (id: number, seq: number): boolean => {
-  const state = getState();
+  const state = useTrafficRebuildStore.getState();
   if (startSeq !== seq || state.startingNodeId !== id) return false;
   useTrafficRebuildStore.setState({ startingNodeId: null });
   return true;
@@ -129,7 +127,7 @@ export const syncTrafficRebuildStatus = async (
 };
 
 export const startTrafficRebuild = async (id: number): Promise<TrafficRebuildStartOutcome> => {
-  const current = getState();
+  const current = useTrafficRebuildStore.getState();
   if (current.status.running) return outcomeFromStatus(id, current.status);
   if (current.startingNodeId !== null) return busyOutcome;
 

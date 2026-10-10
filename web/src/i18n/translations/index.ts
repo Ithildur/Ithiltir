@@ -4,4 +4,4 @@ import { zh } from './zh';
 export const Translations = {
   en,
   zh,
-} as const;
+} as const satisfies Record<string, Record<keyof typeof en, string>>;

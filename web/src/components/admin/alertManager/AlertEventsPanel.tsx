@@ -77,7 +77,6 @@ export const AlertEventsPanel: React.FC<Props> = ({ searchParams, setSearchParam
 
   React.useEffect(() => {
     if (!alertEventFilterReady(applied)) {
-      moreController.current?.abort();
       pageBounds.current = {};
       setLoading(false);
       setLoadingMore(false);
@@ -90,7 +89,6 @@ export const AlertEventsPanel: React.FC<Props> = ({ searchParams, setSearchParam
     const controller = new AbortController();
     const bounds = alertEventRequestBounds(applied);
     pageBounds.current = bounds;
-    moreController.current?.abort();
     setLoading(true);
     setLoadingMore(false);
     setItems([]);
@@ -122,15 +120,9 @@ export const AlertEventsPanel: React.FC<Props> = ({ searchParams, setSearchParam
       });
     return () => {
       controller.abort();
+      moreController.current?.abort();
     };
   }, [apiError, applied]);
-
-  React.useEffect(
-    () => () => {
-      moreController.current?.abort();
-    },
-    [],
-  );
 
   const apply = React.useCallback(() => {
     setSearchParams(urlParamsForAlertEventFilter(searchParams, draft));

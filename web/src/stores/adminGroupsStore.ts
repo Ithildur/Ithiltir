@@ -21,19 +21,12 @@ const initialAdminGroupsState = {
 
 export const useAdminGroupsStore = create<AdminGroupsState>()(() => initialAdminGroupsState);
 
-const getAdminGroupsState = (): AdminGroupsState => useAdminGroupsStore.getState();
-
-export const getAdminGroups = (): Group[] => getAdminGroupsState().groups;
-
 export const resetAdminGroupsStore = (): void => {
   loadGate.invalidate();
   useAdminGroupsStore.setState(initialAdminGroupsState);
 };
 
 const loadGate = createSeqGate();
-
-const fetchAdminGroups = (params: { signal?: AbortSignal } = {}): Promise<Group[]> =>
-  fetchGroupList(params);
 
 const replaceAdminGroups = (groups: Group[]): void => {
   useAdminGroupsStore.setState({ groups });
@@ -44,13 +37,13 @@ const setAdminGroupsLoading = (loading: boolean): void => {
 };
 
 const reloadAdminGroups = async (): Promise<void> => {
-  await reloadLatestLoad(loadGate, fetchAdminGroups, replaceAdminGroups, setAdminGroupsLoading);
+  await reloadLatestLoad(loadGate, fetchGroupList, replaceAdminGroups, setAdminGroupsLoading);
 };
 
 export const loadAdminGroups = async (params: { signal?: AbortSignal } = {}): Promise<Group[]> => {
   return runLatestLoad(
     loadGate,
-    () => fetchAdminGroups(params),
+    () => fetchGroupList(params),
     replaceAdminGroups,
     setAdminGroupsLoading,
   );
@@ -60,7 +53,7 @@ export const saveAdminGroup = async (
   id: number | null,
   input: AdminGroupInput,
 ): Promise<boolean> => {
-  if (getAdminGroupsState().saving) return false;
+  if (useAdminGroupsStore.getState().saving) return false;
   useAdminGroupsStore.setState({ saving: true });
   try {
     if (id === null) {
@@ -76,7 +69,7 @@ export const saveAdminGroup = async (
 };
 
 export const removeAdminGroup = async (id: number): Promise<boolean> => {
-  if (getAdminGroupsState().deleting) return false;
+  if (useAdminGroupsStore.getState().deleting) return false;
   useAdminGroupsStore.setState({ deleting: true });
   try {
     await deleteGroup(id);

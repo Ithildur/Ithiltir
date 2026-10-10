@@ -59,8 +59,6 @@ type CoverageStats = {
   coverageRatio: number;
 };
 
-export const localeFor = (lang: string) => (lang === 'zh' ? 'zh-CN' : 'en-US');
-
 const formatCycleLabel = (start: string, locale: string, timezone: string): string => {
   const date = new Date(start);
   if (Number.isNaN(date.getTime())) return '-';

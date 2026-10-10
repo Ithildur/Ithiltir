@@ -22,9 +22,9 @@ import {
   parseNodeTrafficCycleMode,
   parseNodeTrafficDirectionMode,
   type NodeTrafficDraft,
-  type NodeTrafficPatch,
 } from '@lib/trafficSettingsModel';
 import type { NodeRow } from '@app-types/admin';
+import type { NodeTrafficPatch } from '@app-types/api';
 import { useI18n } from '@i18n';
 
 interface Props {

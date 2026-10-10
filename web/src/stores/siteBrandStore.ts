@@ -12,8 +12,6 @@ export const useSiteBrandStore = create<SiteBrandState>()(() => ({
   brand: defaultSiteBrand,
 }));
 
-const getSiteBrandState = (): SiteBrandState => useSiteBrandStore.getState();
-
 const brandGate = createSeqGate();
 
 const applyBrand = (brand: Partial<SiteBrand>): SiteBrand => {
@@ -24,11 +22,11 @@ const applyBrand = (brand: Partial<SiteBrand>): SiteBrand => {
 
 export const patchBrand = (updates: Partial<SiteBrand>): SiteBrand => {
   brandGate.invalidate();
-  return applyBrand({ ...getSiteBrandState().brand, ...updates });
+  return applyBrand({ ...useSiteBrandStore.getState().brand, ...updates });
 };
 
 export const refreshBrand = async (params?: { signal?: AbortSignal }): Promise<SiteBrand> => {
   const seq = brandGate.next();
   const brand = await fetchSiteBrand(params);
-  return brandGate.isCurrent(seq) ? applyBrand(brand) : getSiteBrandState().brand;
+  return brandGate.isCurrent(seq) ? applyBrand(brand) : useSiteBrandStore.getState().brand;
 };

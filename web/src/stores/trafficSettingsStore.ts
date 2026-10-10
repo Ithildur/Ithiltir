@@ -29,8 +29,6 @@ export const useTrafficSettingsStore = create<TrafficSettingsState>()(
   () => initialTrafficSettingsState,
 );
 
-const getTrafficSettingsState = (): TrafficSettingsState => useTrafficSettingsStore.getState();
-
 export const resetTrafficSettingsStore = (): void => {
   settingsGate.invalidate();
   useTrafficSettingsStore.setState(initialTrafficSettingsState);
@@ -54,7 +52,7 @@ const setTrafficSettingsLoading = (loading: boolean): void => {
 };
 
 const isSaving = (kind: TrafficSettingsSaveKind): boolean => {
-  const state = getTrafficSettingsState();
+  const state = useTrafficSettingsStore.getState();
   switch (kind) {
     case 'usageMode':
       return state.savingUsageMode;

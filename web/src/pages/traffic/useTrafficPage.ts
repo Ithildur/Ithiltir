@@ -15,7 +15,6 @@ import {
   buildTrafficHeroStats,
   coverageStatsFrom,
   dailyPointFrom,
-  localeFor,
   monthlyPointFrom,
   type TrafficChartMode,
 } from './pageModel';
@@ -28,7 +27,7 @@ export const useTrafficPage = () => {
   const { serverId } = useParams();
   const numericServerId = serverId ? Number(serverId) : Number.NaN;
   const isValidServerId = Number.isFinite(numericServerId) && numericServerId > 0;
-  const locale = localeFor(lang);
+  const locale = lang === 'zh' ? 'zh-CN' : 'en-US';
   const {
     ifaces,
     iface,

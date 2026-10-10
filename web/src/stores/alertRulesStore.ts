@@ -24,8 +24,6 @@ const sortRules = (items: AlertRule[]): AlertRule[] => items.slice().sort((a, b)
 
 export const useAlertRulesStore = create<AlertRulesState>()(() => initialAlertRulesState);
 
-const getAlertRulesState = (): AlertRulesState => useAlertRulesStore.getState();
-
 export const resetAlertRulesStore = (): void => {
   loadGate.invalidate();
   useAlertRulesStore.setState(initialAlertRulesState);
@@ -72,7 +70,7 @@ const setAlertRuleRenaming = (id: number, renaming: boolean): void => {
 };
 
 export const toggleAlertRuleEnabled = async (id: number, enabled: boolean): Promise<boolean> => {
-  if (getAlertRulesState().togglingIds.includes(id)) return false;
+  if (useAlertRulesStore.getState().togglingIds.includes(id)) return false;
   setAlertRuleToggling(id, true);
   try {
     await adminApi.updateAlertRule(id, { enabled });
@@ -84,7 +82,7 @@ export const toggleAlertRuleEnabled = async (id: number, enabled: boolean): Prom
 };
 
 export const renameAlertRule = async (id: number, name: string): Promise<boolean> => {
-  if (getAlertRulesState().renamingIds.includes(id)) return false;
+  if (useAlertRulesStore.getState().renamingIds.includes(id)) return false;
   setAlertRuleRenaming(id, true);
   try {
     await adminApi.updateAlertRule(id, { name });
@@ -99,7 +97,7 @@ export const saveAlertRule = async (
   id: number | null,
   input: adminApi.CreateAlertRuleInput,
 ): Promise<boolean> => {
-  if (getAlertRulesState().saving) return false;
+  if (useAlertRulesStore.getState().saving) return false;
   useAlertRulesStore.setState({ saving: true });
   try {
     if (id === null) {

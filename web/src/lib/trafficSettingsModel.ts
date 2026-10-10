@@ -7,8 +7,6 @@ import type {
 import type { NodeTrafficPatch } from '@app-types/api';
 import type { TranslationKey } from '@i18n';
 
-export type { NodeTrafficPatch } from '@app-types/api';
-
 export interface NodeTrafficDraft {
   cycleMode: TrafficCycleMode;
   billingStartDay: number;

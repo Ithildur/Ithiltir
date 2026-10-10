@@ -2,7 +2,7 @@ import React from 'react';
 import { pushTopBanner } from '@runtime/topBannerRuntime';
 import { useApiErrorHandler } from '@hooks/useApiErrorHandler';
 import { useI18n } from '@i18n';
-import type { TrafficRebuildStartOutcome } from './useTrafficRebuild';
+import type { TrafficRebuildStartOutcome } from '@stores/trafficRebuildStore';
 
 export const useTrafficRebuildBanner = () => {
   const apiError = useApiErrorHandler();

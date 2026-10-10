@@ -9,30 +9,30 @@ interface OpenAlertSummaryState {
   loaded: boolean;
 }
 
+const emptySummary: OpenAlertSummaryState = { summaryByServer: new Map(), loaded: false };
+
 export const useOpenAlertSummary = (enabled = true): OpenAlertSummaryState => {
   const apiError = useApiErrorHandler();
-  const [items, setItems] = React.useState<AlertEventSummary[]>([]);
-  const [loaded, setLoaded] = React.useState(false);
+  const [summary, setSummary] = React.useState(emptySummary);
 
   React.useEffect(() => {
     if (!enabled) {
-      setItems([]);
-      setLoaded(false);
+      setSummary(emptySummary);
       return;
     }
     const controller = new AbortController();
-    setItems([]);
-    setLoaded(false);
+    setSummary(emptySummary);
     fetchAlertEventSummary({ signal: controller.signal })
       .then((res) => {
         if (controller.signal.aborted) return;
-        setItems(res.items);
-        setLoaded(true);
+        setSummary({
+          summaryByServer: new Map(res.items.map((item) => [item.server_id, item])),
+          loaded: true,
+        });
       })
       .catch((error) => {
         if (isCanceledRequestError(error)) return;
-        setItems([]);
-        setLoaded(false);
+        setSummary(emptySummary);
         apiError(error, { key: 'admin_alerts_summary_fetch_failed' });
       });
     return () => {
@@ -40,9 +40,5 @@ export const useOpenAlertSummary = (enabled = true): OpenAlertSummaryState => {
     };
   }, [apiError, enabled]);
 
-  const summaryByServer = React.useMemo(() => {
-    return new Map(items.map((item) => [item.server_id, item]));
-  }, [items]);
-
-  return { summaryByServer, loaded };
+  return summary;
 };

@@ -25,8 +25,6 @@ const sortChannels = (items: AlertChannel[]): AlertChannel[] =>
 
 export const useAlertChannelsStore = create<AlertChannelsState>()(() => initialAlertChannelsState);
 
-const getAlertChannelsState = (): AlertChannelsState => useAlertChannelsStore.getState();
-
 export const resetAlertChannelsStore = (): void => {
   loadGate.invalidate();
   useAlertChannelsStore.setState(initialAlertChannelsState);
@@ -107,7 +105,7 @@ const setAlertChannelToggling = (id: number, toggling: boolean): void => {
 };
 
 export const updateAlertChannelEnabled = async (id: number, enabled: boolean): Promise<boolean> => {
-  if (getAlertChannelsState().togglingIds.includes(id)) return false;
+  if (useAlertChannelsStore.getState().togglingIds.includes(id)) return false;
   setAlertChannelToggling(id, true);
   try {
     await adminApi.updateAlertChannelEnabled(id, { enabled });
@@ -120,7 +118,7 @@ export const updateAlertChannelEnabled = async (id: number, enabled: boolean): P
 };
 
 export const testAlertChannel = async (id: number): Promise<boolean> => {
-  if (getAlertChannelsState().testingIds.includes(id)) return false;
+  if (useAlertChannelsStore.getState().testingIds.includes(id)) return false;
   setAlertChannelTesting(id, true);
   try {
     try {
@@ -140,7 +138,7 @@ export const saveAlertChannel = async (
   id: number | null,
   input: adminApi.AlertChannelInput,
 ): Promise<'busy' | 'synced' | 'stale'> => {
-  if (getAlertChannelsState().saving) return 'busy';
+  if (useAlertChannelsStore.getState().saving) return 'busy';
   useAlertChannelsStore.setState({ saving: true });
   try {
     if (id === null) {

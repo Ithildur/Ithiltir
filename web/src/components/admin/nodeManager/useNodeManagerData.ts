@@ -23,7 +23,6 @@ export const useNodeManagerData = (
   groups: Group[];
   deploy: NodeDeploy | null;
   trafficSettings: TrafficSettings;
-  trafficSettingsLoading: boolean;
   trafficSettingsLoaded: boolean;
   bundledNodeVersion: string;
   isLoading: boolean;
@@ -34,7 +33,6 @@ export const useNodeManagerData = (
   const groups = useAdminGroupsStore((state) => state.groups);
   const deploy = useAdminNodesStore((state) => state.deploy);
   const trafficSettings = useTrafficSettingsStore((state) => state.settings);
-  const trafficSettingsLoading = useTrafficSettingsStore((state) => state.loading);
   const trafficSettingsLoaded = useTrafficSettingsStore((state) => state.loaded);
   const bundledNodeVersion = useAdminNodesStore((state) => state.bundledNodeVersion);
   const isLoading = useAdminNodesStore((state) => state.loading);
@@ -117,7 +115,6 @@ export const useNodeManagerData = (
     groups,
     deploy,
     trafficSettings,
-    trafficSettingsLoading,
     trafficSettingsLoaded,
     bundledNodeVersion,
     isLoading,

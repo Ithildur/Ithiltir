@@ -29,8 +29,6 @@ export const syncThemeRuntimeState = (): void => {
   });
 };
 
-const getThemeState = (): ThemeState => useThemeStore.getState();
-
 const themeGate = createSeqGate();
 
 const applyThemeManifest = (manifest: ThemeManifest): void => {
@@ -43,7 +41,7 @@ const runThemeRequest = async (
 ): Promise<ThemeManifest> => {
   const seq = themeGate.next();
   const manifest = await load(signal);
-  if (!themeGate.isCurrent(seq)) return getThemeState().themeManifest;
+  if (!themeGate.isCurrent(seq)) return useThemeStore.getState().themeManifest;
   applyThemeManifest(manifest);
   return manifest;
 };
