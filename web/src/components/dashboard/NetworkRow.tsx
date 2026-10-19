@@ -25,20 +25,14 @@ const NetworkRowFull: React.FC<NetworkRowFullProps> = ({ label, up, down, isTota
     </div>
     <div className="flex items-center gap-3">
       <div className="flex items-center gap-1.5 min-w-17.5 justify-end">
-        <ArrowDown
-          size={12}
-          className={isTotal ? 'text-(--theme-fg-info)' : 'text-(--theme-fg-success-muted)'}
-        />
+        <ArrowDown size={12} className="text-(--theme-fg-success-muted)" />
         <span className="text-xs font-mono text-(--theme-fg-default) dark:text-(--theme-fg-default)">
           {down}
         </span>
       </div>
       <div className="w-px h-3 bg-(--theme-border-default) dark:bg-(--theme-border-default)/70" />
       <div className="flex items-center gap-1.5 min-w-17.5 justify-end">
-        <ArrowUp
-          size={12}
-          className={isTotal ? 'text-(--theme-fg-interactive)' : 'text-(--theme-fg-warning-muted)'}
-        />
+        <ArrowUp size={12} className="text-(--theme-fg-warning-muted)" />
         <span className="text-xs font-mono text-(--theme-fg-default) dark:text-(--theme-fg-default)">
           {up}
         </span>
