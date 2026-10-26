@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -64,6 +66,74 @@ func TestChannelDeliveryStatus(t *testing.T) {
 				t.Fatalf("Status() = %q, want %q", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestIntegrationNotificationBatchBoundaries(t *testing.T) {
+	db := pgtest.NewDB(t)
+	st := newTestStore(t, db)
+	channel, event := createNotificationFixture(t, db, "batch-boundaries")
+	channel.Type = model.NotifyTypeTelegram
+	channel.Config = datatypes.JSON(`{"mode":"bot","bot_token":"123:test","chat_id":"42"}`)
+	if err := st.ReplaceChannel(t.Context(), channel.ID, channel.Revision, channel); err != nil {
+		t.Fatal(err)
+	}
+	channel = loadNotifyChannel(t, db, channel.ID)
+	now := notificationTestTime()
+	var rows []model.AlertNotificationOutbox
+	for i := range 5 {
+		row := createNotificationOutbox(t, db, event.ID, channel, model.OutboxStatusPending, now)
+		payload, err := json.Marshal(NotificationPayload{
+			Title: fmt.Sprintf("告警 %d", i), Body: strings.Repeat("中", 1500),
+			Metadata: map[string]string{"transition": "opened"},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := db.Model(&row).Update("payload", datatypes.JSON(payload)).Error; err != nil {
+			t.Fatal(err)
+		}
+		rows = append(rows, row)
+	}
+	// The next window's row must not join the current digest.
+	if err := db.Model(&rows[2]).Update("next_attempt_at", now.Add(time.Second)).Error; err != nil {
+		t.Fatal(err)
+	}
+	// A different channel must remain independent.
+	otherChannel := channel
+	otherChannel.Name = "other-batch"
+	if err := st.CreateChannel(t.Context(), &otherChannel); err != nil {
+		t.Fatal(err)
+	}
+	other := createNotificationOutbox(t, db, event.ID, otherChannel, model.OutboxStatusPending, now)
+	for _, wantIDs := range [][]int64{{rows[0].ID, rows[1].ID}, {rows[3].ID, rows[4].ID}, {other.ID}} {
+		batch, err := st.TakeNotificationBatch(t.Context(), now)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(batch) != len(wantIDs) {
+			t.Fatalf("batch size = %d, want %d", len(batch), len(wantIDs))
+		}
+		for i, row := range batch {
+			if row.ID != wantIDs[i] || row.Status != model.OutboxStatusSending {
+				t.Fatalf("batch[%d] = %+v, want sending row %d", i, row, wantIDs[i])
+			}
+			revision := channel.Revision
+			if row.ChannelID == otherChannel.ID {
+				revision = otherChannel.Revision
+			}
+			if err := st.CompleteNotification(t.Context(), row.ID, row.ChannelID, revision, now); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	batch, err := st.TakeNotificationBatch(t.Context(), now)
+	if err != nil || len(batch) != 0 {
+		t.Fatalf("current window = %v, %v, want empty", batch, err)
+	}
+	batch, err = st.TakeNotificationBatch(t.Context(), now.Add(time.Second))
+	if err != nil || len(batch) != 1 || batch[0].ID != rows[2].ID {
+		t.Fatalf("next window = %v, %v", batch, err)
 	}
 }
 

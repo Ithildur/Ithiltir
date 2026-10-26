@@ -2,14 +2,17 @@ package alert
 
 import (
 	"context"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"slices"
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf16"
 
 	"dash/internal/model"
+	"dash/internal/notify"
 
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -189,6 +192,14 @@ func notificationDedupeKey(key string, channelID int64) string {
 	return fmt.Sprintf("%s:%d", key, channelID)
 }
 
+const notificationPredecessorReady = `transition <> 'closed' OR NOT EXISTS (
+	SELECT 1 FROM alert_notification_outbox AS opened
+	WHERE opened.event_id = alert_notification_outbox.event_id
+	AND opened.channel_id = alert_notification_outbox.channel_id
+	AND opened.transition = 'opened'
+	AND opened.status IN ('pending', 'sending', 'retry', 'blocked', 'paused')
+)`
+
 func (s *Store) TakeNextNotification(ctx context.Context, now time.Time) (*model.AlertNotificationOutbox, error) {
 	var item model.AlertNotificationOutbox
 	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
@@ -201,6 +212,7 @@ func (s *Store) TakeNextNotification(ctx context.Context, now time.Time) (*model
 					model.OutboxStatusBlocked,
 				}, now,
 				model.OutboxStatusSending).
+			Where(notificationPredecessorReady).
 			Order("CASE WHEN status = 'sending' THEN 0 ELSE 1 END, next_attempt_at ASC, id ASC").
 			Limit(1).
 			Take(&item).Error
@@ -233,6 +245,68 @@ func (s *Store) TakeNextNotification(ctx context.Context, now time.Time) (*model
 		return nil, nil
 	}
 	return &item, nil
+}
+
+// TakeNotificationBatch claims only due alerts for one channel and transition.
+// Probes and machine-consumed webhooks retain their single-message contract.
+func (s *Store) TakeNotificationBatch(ctx context.Context, now time.Time) ([]model.AlertNotificationOutbox, error) {
+	var items []model.AlertNotificationOutbox
+	err := s.WithTx(ctx, func(tx *Store) error {
+		first, err := tx.TakeNextNotification(ctx, now)
+		if err != nil || first == nil {
+			return err
+		}
+		items = append(items, *first)
+		if first.IsProbe || first.EventID == nil ||
+			(first.Transition != "opened" && first.Transition != "closed") ||
+			(first.ChannelType != model.NotifyTypeTelegram && first.ChannelType != model.NotifyTypeEmail) {
+			return nil
+		}
+		var payload NotificationPayload
+		if err := json.Unmarshal(first.Payload, &payload); err != nil {
+			return nil // Let the sender discard this row without affecting other alerts.
+		}
+		messages := []notify.Message{{Title: payload.Title, Body: payload.Body, Metadata: payload.Metadata}}
+		var candidates []model.AlertNotificationOutbox
+		if err := tx.db.WithContext(ctx).
+			Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("channel_id = ? AND channel_type = ? AND transition = ? AND id <> ? AND event_id IS NOT NULL",
+				first.ChannelID, first.ChannelType, first.Transition, first.ID).
+			Where("attempt_count = ? AND is_probe = false", first.AttemptCount).
+			Where("status IN ? AND next_attempt_at <= ?", []model.OutboxStatus{
+				model.OutboxStatusPending, model.OutboxStatusRetry, model.OutboxStatusSending,
+			}, now).
+			Where(notificationPredecessorReady).
+			Order("id ASC").Limit(99).Find(&candidates).Error; err != nil {
+			return err
+		}
+		ids := make([]int64, 0, len(candidates))
+		for _, candidate := range candidates {
+			var payload NotificationPayload
+			if err := json.Unmarshal(candidate.Payload, &payload); err != nil {
+				break
+			}
+			messages = append(messages, notify.Message{Title: payload.Title, Body: payload.Body, Metadata: payload.Metadata})
+			// Include separators and formatting, counting supplementary characters
+			// as two units. Oversized single rows retain their existing behavior.
+			if first.ChannelType == model.NotifyTypeTelegram &&
+				len(utf16.Encode([]rune(notify.JoinMessages(first.ChannelType, messages).Text()))) > 4096 {
+				break
+			}
+			candidate.Status = model.OutboxStatusSending
+			candidate.LeasedUntil = &now
+			items = append(items, candidate)
+			ids = append(ids, candidate.ID)
+		}
+		if len(ids) == 0 {
+			return nil
+		}
+		return tx.db.WithContext(ctx).Model(&model.AlertNotificationOutbox{}).
+			Where("id IN ?", ids).UpdateColumns(map[string]any{
+			"status": model.OutboxStatusSending, "leased_until": now, "next_attempt_at": now,
+		}).Error
+	})
+	return items, err
 }
 
 func (s *Store) CompleteNotification(

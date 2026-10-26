@@ -19,7 +19,6 @@ import (
 )
 
 const (
-	alertThreadDomain     = "ithiltir.local"
 	alertOpenTransition   = "opened"
 	alertClosedTransition = "closed"
 )
@@ -120,25 +119,22 @@ func composeEmail(from string, to []string, msg Message) []byte {
 		"From: " + from,
 		"To: " + strings.Join(to, ", "),
 		"Subject: " + encodeSubject(subject),
-	}
-	headers = append(headers, emailThreadHeaders(msg)...)
-	headers = append(headers,
 		"MIME-Version: 1.0",
 		fmt.Sprintf(`Content-Type: multipart/alternative; boundary="%s"`, boundary),
 		"",
-		"--"+boundary,
+		"--" + boundary,
 		"Content-Type: text/plain; charset=UTF-8",
 		"Content-Transfer-Encoding: 8bit",
 		"",
 		normalizeEmailBody(body),
-		"--"+boundary,
+		"--" + boundary,
 		"Content-Type: text/html; charset=UTF-8",
 		"Content-Transfer-Encoding: 8bit",
 		"",
 		renderHTML(subject, body, msg.Metadata),
-		"--"+boundary+"--",
+		"--" + boundary + "--",
 		"",
-	)
+	}
 	return []byte(strings.Join(headers, "\r\n"))
 }
 
@@ -154,34 +150,6 @@ func encodeSubject(subject string) string {
 func emailBoundary(msg Message) string {
 	sum := sha1.Sum([]byte(msg.Title + "\n" + msg.Body + "\n" + msg.Metadata["dedupe_key"]))
 	return "ithiltir-" + hex.EncodeToString(sum[:12])
-}
-
-func emailThreadHeaders(msg Message) []string {
-	if len(msg.Metadata) == 0 {
-		return nil
-	}
-	eventID := cleanIDToken(msg.Metadata["event_id"])
-	channelID := cleanIDToken(msg.Metadata["channel_id"])
-	transition := cleanIDToken(msg.Metadata["transition"])
-	if eventID == "" || channelID == "" || transition == "" {
-		return nil
-	}
-
-	headers := []string{
-		"Message-ID: " + alertMessageID(eventID, channelID, transition),
-	}
-	if transition == alertClosedTransition {
-		opened := alertMessageID(eventID, channelID, alertOpenTransition)
-		headers = append(headers,
-			"In-Reply-To: "+opened,
-			"References: "+opened,
-		)
-	}
-	return headers
-}
-
-func alertMessageID(eventID, channelID, transition string) string {
-	return fmt.Sprintf("<ithiltir-alert-%s-%s-%s@%s>", eventID, channelID, transition, alertThreadDomain)
 }
 
 func renderHTML(title, body string, metadata map[string]string) string {
@@ -258,24 +226,6 @@ func emailTransitionLabel(transition string, metadata map[string]string) string 
 
 func cleanHeaderValue(raw string) string {
 	return strings.NewReplacer("\r", " ", "\n", " ").Replace(raw)
-}
-
-func cleanIDToken(raw string) string {
-	raw = strings.TrimSpace(raw)
-	var b strings.Builder
-	for _, r := range raw {
-		switch {
-		case r >= 'a' && r <= 'z':
-			b.WriteRune(r)
-		case r >= 'A' && r <= 'Z':
-			b.WriteRune(r)
-		case r >= '0' && r <= '9':
-			b.WriteRune(r)
-		case r == '-' || r == '_':
-			b.WriteRune(r)
-		}
-	}
-	return b.String()
 }
 
 func normalizeEmailBody(raw string) string {

@@ -18,6 +18,7 @@ import (
 )
 
 const (
+	notificationBatchInterval           = 3 * time.Second
 	alertNotifySendTimeout              = 15 * time.Second
 	notificationStoreRetryMaxDelay      = 30 * time.Second
 	notificationCompleteShutdownTimeout = 10 * time.Second
@@ -98,118 +99,133 @@ func emailNotificationMetadata(metadata map[string]string, language string) map[
 }
 
 func (s *Service) runNotificationLoop(ctx context.Context) error {
-	ticker := time.NewTicker(notificationPollInterval)
+	ticker := time.NewTicker(notificationBatchInterval)
 	defer ticker.Stop()
 
 	for {
-		processed, err := s.processNotifications(ctx)
-		if err != nil {
-			s.logger.Warn(ctx, "process alert notifications failed", err)
-			ticker.Reset(notificationPollInterval)
-		} else if processed {
-			continue
-		}
 		select {
 		case <-ctx.Done():
 			return nil
 		case <-ticker.C:
+			if err := s.processNotifications(ctx); err != nil {
+				s.logger.Warn(ctx, "process alert notifications failed", err)
+			}
 		}
 	}
 }
 
-func (s *Service) processNotifications(ctx context.Context) (bool, error) {
-	processed := false
+func (s *Service) processNotifications(ctx context.Context) error {
+	now := time.Now().UTC()
 	for {
-		now := time.Now().UTC()
-		item, err := s.store.TakeNextNotification(ctx, now)
+		items, err := s.store.TakeNotificationBatch(ctx, now)
 		if err != nil {
-			return processed, err
+			return err
 		}
-		if item == nil {
-			return processed, nil
+		if len(items) == 0 {
+			return nil
 		}
-		processed = true
 
-		channelRevision, failure, err := s.sendNotification(ctx, item)
+		channelRevision, failure, err := s.sendNotification(ctx, items)
 		if err != nil {
 			nextAttemptAt := time.Now().UTC().Add(notificationPollInterval)
-			requeueErr := s.store.RequeueNotification(ctx, item.ID, item.ChannelID, nextAttemptAt)
+			requeueErr := s.store.WithTx(ctx, func(tx *alertstore.Store) error {
+				for _, item := range items {
+					if err := tx.RequeueNotification(ctx, item.ID, item.ChannelID, nextAttemptAt); err != nil {
+						return err
+					}
+				}
+				return nil
+			})
 			if requeueErr != nil {
-				err = errors.Join(err, fmt.Errorf("requeue alert notification %d: %w", item.ID, requeueErr))
+				err = errors.Join(err, fmt.Errorf("requeue alert notification batch %d: %w", items[0].ID, requeueErr))
 			}
-			return processed, err
+			return err
 		}
 		if failure == nil {
-			if err := s.completeNotification(ctx, item, channelRevision, time.Now().UTC()); err != nil {
-				return processed, err
+			if err := s.completeNotification(ctx, items, channelRevision, time.Now().UTC()); err != nil {
+				return err
 			}
 			continue
 		}
 		if ctx.Err() != nil {
-			return processed, ctx.Err()
+			return ctx.Err()
 		}
 
 		failedAt := time.Now().UTC()
-		stored := alertstore.NotificationFailure{
-			ID:              item.ID,
-			ChannelID:       item.ChannelID,
-			ChannelRevision: failure.channelRevision,
-			Code:            failure.code,
-			LastError:       notify.ErrorSummary(failure.err),
-			FailedAt:        failedAt,
-		}
-		failure.status = notificationFailureStatus(item.IsProbe, failure.status)
-		fields := append(
-			notificationLogFields(item),
-			kitlog.String("failure_code", failure.code),
-			kitlog.String("next_status", string(failure.status)),
-		)
-
-		switch failure.status {
-		case model.OutboxStatusRetry:
-			delay := max(notificationRetryDelay(item.AttemptCount+1), failure.retryAfter)
-			stored.NextAttemptAt = failedAt.Add(delay)
-			if err := s.store.RetryNotification(ctx, stored); err != nil {
-				return processed, fmt.Errorf("schedule alert notification %d retry: %w", item.ID, err)
+		if err := s.store.WithTx(ctx, func(tx *alertstore.Store) error {
+			for i := range items {
+				if err := s.failNotification(ctx, tx, &items[i], *failure, failedAt); err != nil {
+					return err
+				}
 			}
-			s.logger.Warn(ctx, "alert notification retry scheduled", failure.err, fields...)
-		case model.OutboxStatusBlocked:
-			delay := max(notificationBlockedDelay(item.ProbeCount), failure.retryAfter)
-			stored.NextAttemptAt = failedAt.Add(delay)
-			if err := s.store.BlockNotification(ctx, stored); err != nil {
-				return processed, fmt.Errorf("block alert notification %d: %w", item.ID, err)
-			}
-			s.logger.Warn(ctx, "alert notification blocked", failure.err, fields...)
-		case model.OutboxStatusPaused:
-			if err := s.store.PauseNotification(ctx, stored); err != nil {
-				return processed, fmt.Errorf("pause alert notification %d: %w", item.ID, err)
-			}
-			s.logger.Warn(ctx, "alert notification paused", failure.err, fields...)
-		case model.OutboxStatusDiscarded:
-			if err := s.store.DiscardNotification(ctx, stored); err != nil {
-				return processed, fmt.Errorf("discard alert notification %d: %w", item.ID, err)
-			}
-			s.logger.Warn(ctx, "alert notification discarded", failure.err, fields...)
-		default:
-			return processed, fmt.Errorf("unsupported notification failure status %q", failure.status)
+			return nil
+		}); err != nil {
+			return err
 		}
 	}
 }
 
+func (s *Service) failNotification(ctx context.Context, tx *alertstore.Store, item *model.AlertNotificationOutbox, failure notificationFailure, failedAt time.Time) error {
+	stored := alertstore.NotificationFailure{
+		ID:              item.ID,
+		ChannelID:       item.ChannelID,
+		ChannelRevision: failure.channelRevision,
+		Code:            failure.code,
+		LastError:       notify.ErrorSummary(failure.err),
+		FailedAt:        failedAt,
+	}
+	failure.status = notificationFailureStatus(item.IsProbe, failure.status)
+	fields := append(
+		notificationLogFields(item),
+		kitlog.String("failure_code", failure.code),
+		kitlog.String("next_status", string(failure.status)),
+	)
+
+	switch failure.status {
+	case model.OutboxStatusRetry:
+		delay := max(notificationRetryDelay(item.AttemptCount+1), failure.retryAfter)
+		stored.NextAttemptAt = failedAt.Add(delay)
+		if err := tx.RetryNotification(ctx, stored); err != nil {
+			return fmt.Errorf("schedule alert notification %d retry: %w", item.ID, err)
+		}
+		s.logger.Warn(ctx, "alert notification retry scheduled", failure.err, fields...)
+	case model.OutboxStatusBlocked:
+		delay := max(notificationBlockedDelay(item.ProbeCount), failure.retryAfter)
+		stored.NextAttemptAt = failedAt.Add(delay)
+		if err := tx.BlockNotification(ctx, stored); err != nil {
+			return fmt.Errorf("block alert notification %d: %w", item.ID, err)
+		}
+		s.logger.Warn(ctx, "alert notification blocked", failure.err, fields...)
+	case model.OutboxStatusPaused:
+		if err := tx.PauseNotification(ctx, stored); err != nil {
+			return fmt.Errorf("pause alert notification %d: %w", item.ID, err)
+		}
+		s.logger.Warn(ctx, "alert notification paused", failure.err, fields...)
+	case model.OutboxStatusDiscarded:
+		if err := tx.DiscardNotification(ctx, stored); err != nil {
+			return fmt.Errorf("discard alert notification %d: %w", item.ID, err)
+		}
+		s.logger.Warn(ctx, "alert notification discarded", failure.err, fields...)
+	default:
+		return fmt.Errorf("unsupported notification failure status %q", failure.status)
+	}
+	return nil
+}
+
 func (s *Service) completeNotification(
 	ctx context.Context,
-	item *model.AlertNotificationOutbox,
+	items []model.AlertNotificationOutbox,
 	channelRevision int64,
 	sentAt time.Time,
 ) error {
-	err := s.completeNotificationUntil(ctx, item, channelRevision, sentAt)
+	err := s.completeNotificationUntil(ctx, items, channelRevision, sentAt)
 	if err == nil || ctx.Err() == nil {
 		return err
 	}
 
 	shutdownCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), notificationCompleteShutdownTimeout)
 	defer cancel()
-	shutdownErr := s.completeNotificationUntil(shutdownCtx, item, channelRevision, sentAt)
+	shutdownErr := s.completeNotificationUntil(shutdownCtx, items, channelRevision, sentAt)
 	if shutdownErr == nil {
 		return nil
 	}
@@ -218,13 +234,14 @@ func (s *Service) completeNotification(
 
 func (s *Service) completeNotificationUntil(
 	ctx context.Context,
-	item *model.AlertNotificationOutbox,
+	items []model.AlertNotificationOutbox,
 	channelRevision int64,
 	sentAt time.Time,
 ) error {
 	delay := notificationPollInterval
+	item := &items[0]
 	for {
-		err := s.completeNotificationOnce(ctx, item, channelRevision, sentAt)
+		err := s.completeNotificationOnce(ctx, items, channelRevision, sentAt)
 		if err == nil {
 			return nil
 		}
@@ -250,13 +267,20 @@ func (s *Service) completeNotificationUntil(
 
 func (s *Service) completeNotificationOnce(
 	ctx context.Context,
-	item *model.AlertNotificationOutbox,
+	items []model.AlertNotificationOutbox,
 	channelRevision int64,
 	sentAt time.Time,
 ) error {
 	dbCtx, cancel := context.WithTimeout(ctx, config.PGWriteTimeout)
 	defer cancel()
-	return s.store.CompleteNotification(dbCtx, item.ID, item.ChannelID, channelRevision, sentAt)
+	return s.store.WithTx(dbCtx, func(tx *alertstore.Store) error {
+		for _, item := range items {
+			if err := tx.CompleteNotification(dbCtx, item.ID, item.ChannelID, channelRevision, sentAt); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 }
 
 func notificationFailureStatus(isProbe bool, status model.OutboxStatus) model.OutboxStatus {
@@ -276,11 +300,16 @@ type notificationFailure struct {
 
 func (s *Service) sendNotification(
 	ctx context.Context,
-	item *model.AlertNotificationOutbox,
+	items []model.AlertNotificationOutbox,
 ) (int64, *notificationFailure, error) {
-	var payload alertstore.NotificationPayload
-	if err := json.Unmarshal(item.Payload, &payload); err != nil {
-		return 0, discardNotification("payload_invalid", fmt.Errorf("decode notification payload: %w", err)), nil
+	item := &items[0]
+	messages := make([]notify.Message, 0, len(items))
+	for _, row := range items {
+		var payload alertstore.NotificationPayload
+		if err := json.Unmarshal(row.Payload, &payload); err != nil {
+			return 0, discardNotification("payload_invalid", fmt.Errorf("decode notification payload: %w", err)), nil
+		}
+		messages = append(messages, notify.Message{Title: payload.Title, Body: payload.Body, Metadata: payload.Metadata})
 	}
 	channel, err := s.store.GetChannel(ctx, item.ChannelID)
 	if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -314,10 +343,9 @@ func (s *Service) sendNotification(
 		return 0, failure, nil
 	}
 
-	msg := notify.Message{
-		Title:    payload.Title,
-		Body:     payload.Body,
-		Metadata: payload.Metadata,
+	msg := messages[0]
+	if item.EventID != nil && (item.ChannelType == model.NotifyTypeTelegram || item.ChannelType == model.NotifyTypeEmail) {
+		msg = notify.JoinMessages(item.ChannelType, messages)
 	}
 	sendCtx, cancel := context.WithTimeout(ctx, alertNotifySendTimeout)
 	err = notify.Send(sendCtx, channel, msg)

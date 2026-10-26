@@ -155,9 +155,8 @@ func TestIntegrationDefaultNotificationDelivery(t *testing.T) {
 			t.Errorf("remove completion failure: %v", err)
 		}
 	})
-	processed, err := service.processNotifications(ctx)
-	if err != nil || !processed {
-		t.Fatalf("processNotifications() = %v, %v", processed, err)
+	if err := service.processNotifications(ctx); err != nil {
+		t.Fatalf("processNotifications() error = %v", err)
 	}
 	if failedCtx == nil {
 		t.Fatal("completion write failure was not exercised")
