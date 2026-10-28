@@ -201,10 +201,10 @@ func loadTrafficUsageRows(tx *gorm.DB, start, end time.Time, serverIDs []int64) 
 	WITH active_servers AS (
 		SELECT
 			s.id,
-			COALESCE(NULLIF(s.traffic_cycle_mode, ''), 'calendar_month') AS traffic_cycle_mode,
-			COALESCE(s.traffic_billing_start_day, 1) AS traffic_billing_start_day,
-			COALESCE(s.traffic_billing_anchor_date, '') AS traffic_billing_anchor_date,
-			COALESCE(s.traffic_billing_timezone, '') AS traffic_billing_timezone
+			s.traffic_cycle_mode,
+			s.traffic_billing_start_day,
+			s.traffic_billing_anchor_date,
+			s.traffic_billing_timezone
 		FROM servers s
 		WHERE %s
 	),
@@ -539,17 +539,9 @@ func mergeTrafficUsageReset(usage map[trafficUsageKey]*trafficUsageAccumulator, 
 }
 
 func serverCycleSettingsFromRow(row trafficUsageNICRow) ServerCycleSettings {
-	mode := ServerCycleMode(row.ServerCycleMode)
-	day := row.BillingStartDay
-	if mode == "" {
-		mode = ServerCycleMode(CycleCalendarMonth)
-	}
-	if day == 0 {
-		day = 1
-	}
 	return ServerCycleSettings{
-		Mode:              mode,
-		BillingStartDay:   day,
+		Mode:              ServerCycleMode(row.ServerCycleMode),
+		BillingStartDay:   row.BillingStartDay,
 		BillingAnchorDate: row.BillingAnchorDate,
 		BillingTimezone:   row.BillingTimezone,
 	}

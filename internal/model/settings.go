@@ -46,16 +46,12 @@ type MetricSetting struct {
 func (MetricSetting) TableName() string { return "metric_settings" }
 
 type TrafficSetting struct {
-	ID                int16     `gorm:"column:id;primaryKey;autoIncrement:false"`
-	GuestAccessMode   string    `gorm:"column:guest_access_mode;size:16;not null;default:'disabled'"` // by_node 时仍受 Server.IsGuestVisible 限制。
-	UsageMode         string    `gorm:"column:usage_mode;size:16;not null;default:'lite'"`
-	CycleMode         string    `gorm:"column:cycle_mode;size:32;not null;default:'calendar_month'"`
-	BillingStartDay   int16     `gorm:"column:billing_start_day;not null;default:1"`
-	BillingAnchorDate string    `gorm:"column:billing_anchor_date;size:10;not null;default:''"` // WHMCS 兼容模式下固定账期锚点，优先于 billing_start_day。
-	BillingTimezone   string    `gorm:"column:billing_timezone;size:64;not null;default:''"`    // 空值表示使用应用时区。
-	DirectionMode     string    `gorm:"column:direction_mode;size:16;not null;default:'out'"`   // 计费展示方向，不改变原始入/出流量存储。
-	CreatedAt         time.Time `gorm:"column:created_at;autoCreateTime"`
-	UpdatedAt         time.Time `gorm:"column:updated_at;autoUpdateTime"`
+	ID              int16     `gorm:"column:id;primaryKey;autoIncrement:false"`
+	GuestAccessMode string    `gorm:"column:guest_access_mode;size:16;not null;default:'disabled'"` // by_node 时仍受 Server.IsGuestVisible 限制。
+	UsageMode       string    `gorm:"column:usage_mode;size:16;not null;default:'lite'"`
+	DirectionMode   string    `gorm:"column:direction_mode;size:16;not null;default:'out'"` // 计费展示方向，不改变原始入/出流量存储。
+	CreatedAt       time.Time `gorm:"column:created_at;autoCreateTime"`
+	UpdatedAt       time.Time `gorm:"column:updated_at;autoUpdateTime"`
 }
 
 func (TrafficSetting) TableName() string { return "traffic_settings" }

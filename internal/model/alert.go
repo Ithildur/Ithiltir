@@ -98,7 +98,6 @@ type AlertNotificationOutbox struct {
 	NextAttemptAt time.Time      `gorm:"column:next_attempt_at;not null"`
 	FailureCode   *string        `gorm:"column:failure_code;size:64"`
 	LastError     *string        `gorm:"column:last_error"`
-	LeasedUntil   *time.Time     `gorm:"column:leased_until"` // 历史 schema 兼容字段；当前单实例 worker 不使用租约。
 	CreatedAt     time.Time      `gorm:"column:created_at;autoCreateTime"`
 	SentAt        *time.Time     `gorm:"column:sent_at"`
 }
@@ -114,7 +113,6 @@ type AlertControlTask struct {
 	Status       TaskStatus     `gorm:"column:status;size:16;not null"`
 	AttemptCount int32          `gorm:"column:attempt_count;not null"`
 	AvailableAt  time.Time      `gorm:"column:available_at;not null"`
-	LeasedUntil  *time.Time     `gorm:"column:leased_until"` // 历史 schema 兼容字段；当前单实例 worker 不按租约截止时间取件。
 	LastError    *string        `gorm:"column:last_error"`
 	CreatedAt    time.Time      `gorm:"column:created_at;autoCreateTime"`
 	UpdatedAt    time.Time      `gorm:"column:updated_at;autoUpdateTime"`

@@ -5,7 +5,6 @@ import (
 	"errors"
 	"strings"
 
-	"github.com/jackc/pgx/v5/pgconn"
 	"gorm.io/datatypes"
 )
 
@@ -63,12 +62,4 @@ func cloneStringMap(src map[string]string) map[string]string {
 		dst[k] = v
 	}
 	return dst
-}
-
-func isUniqueConstraintError(err error, constraint string) bool {
-	var pgErr *pgconn.PgError
-	if !errors.As(err, &pgErr) {
-		return false
-	}
-	return pgErr.Code == "23505" && (constraint == "" || pgErr.ConstraintName == constraint)
 }

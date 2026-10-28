@@ -328,26 +328,20 @@ func SettingsWithTimezone(settings Settings, fallback *time.Location) (Settings,
 
 func trafficSettingFromSettings(settings Settings) model.TrafficSetting {
 	return model.TrafficSetting{
-		ID:                trafficSettingsID,
-		GuestAccessMode:   string(settings.GuestAccessMode),
-		UsageMode:         string(settings.UsageMode),
-		CycleMode:         string(settings.CycleMode),
-		BillingStartDay:   int16(settings.BillingStartDay),
-		BillingAnchorDate: settings.BillingAnchorDate,
-		BillingTimezone:   settings.BillingTimezone,
-		DirectionMode:     string(settings.DirectionMode),
+		ID:              trafficSettingsID,
+		GuestAccessMode: string(settings.GuestAccessMode),
+		UsageMode:       string(settings.UsageMode),
+		DirectionMode:   string(settings.DirectionMode),
 	}
 }
 
 func settingsFromTrafficSetting(item model.TrafficSetting) Settings {
 	return Settings{
-		GuestAccessMode:   GuestAccessMode(item.GuestAccessMode),
-		UsageMode:         UsageMode(item.UsageMode),
-		CycleMode:         BillingCycleMode(item.CycleMode),
-		BillingStartDay:   int(item.BillingStartDay),
-		BillingAnchorDate: item.BillingAnchorDate,
-		BillingTimezone:   item.BillingTimezone,
-		DirectionMode:     DirectionMode(item.DirectionMode),
+		GuestAccessMode: GuestAccessMode(item.GuestAccessMode),
+		UsageMode:       UsageMode(item.UsageMode),
+		CycleMode:       CycleCalendarMonth,
+		BillingStartDay: 1,
+		DirectionMode:   DirectionMode(item.DirectionMode),
 	}
 }
 
@@ -386,13 +380,9 @@ func saveTrafficSetting(db *gorm.DB, item model.TrafficSetting) error {
 		Model(&model.TrafficSetting{}).
 		Where("id = ?", trafficSettingsID).
 		Updates(map[string]any{
-			"guest_access_mode":   item.GuestAccessMode,
-			"usage_mode":          item.UsageMode,
-			"cycle_mode":          item.CycleMode,
-			"billing_start_day":   item.BillingStartDay,
-			"billing_anchor_date": item.BillingAnchorDate,
-			"billing_timezone":    item.BillingTimezone,
-			"direction_mode":      item.DirectionMode,
+			"guest_access_mode": item.GuestAccessMode,
+			"usage_mode":        item.UsageMode,
+			"direction_mode":    item.DirectionMode,
 		})
 	if result.Error != nil {
 		return fmt.Errorf("save traffic settings: %w", result.Error)

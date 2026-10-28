@@ -10,6 +10,7 @@ import (
 
 	"dash/db/migrations"
 	"dash/internal/migrate"
+	trafficstore "dash/internal/store/traffic"
 	pgtest "dash/internal/testutil/postgres"
 
 	kitmigration "github.com/Ithildur/EiluneKit/postgres/migration"
@@ -158,20 +159,12 @@ func TestIntegrationTrafficCycleMigrationPreservesEffectiveNodeCycles(t *testing
 		t.Fatalf("explicit cycle = %#v, want unchanged WHMCS cycle", explicit)
 	}
 
-	var global struct {
-		Mode     string `gorm:"column:cycle_mode"`
-		Day      int    `gorm:"column:billing_start_day"`
-		Anchor   string `gorm:"column:billing_anchor_date"`
-		Timezone string `gorm:"column:billing_timezone"`
+	global, err := trafficstore.New(db).GetSettings(ctx)
+	if err != nil {
+		t.Fatalf("load migrated global settings: %v", err)
 	}
-	if err := db.Raw(`
-		SELECT cycle_mode, billing_start_day, billing_anchor_date, billing_timezone
-		FROM traffic_settings
-		WHERE id = 1
-	`).Scan(&global).Error; err != nil {
-		t.Fatalf("load migrated global cycle: %v", err)
-	}
-	if global.Mode != "calendar_month" || global.Day != 1 || global.Anchor != "" || global.Timezone != "" {
+	if global.CycleMode != trafficstore.CycleCalendarMonth || global.BillingStartDay != 1 ||
+		global.BillingAnchorDate != "" || global.BillingTimezone != "" {
 		t.Fatalf("global compatibility cycle = %#v, want fixed calendar month", global)
 	}
 
@@ -632,6 +625,15 @@ func TestIntegrationVMSettingsMigration(t *testing.T) {
 		VALUES ('existing-pve', 'existing-pve', 'existing-pve-secret') RETURNING id`).Scan(&serverID).Error; err != nil {
 		t.Fatal(err)
 	}
+	if err := db.Exec(`
+		INSERT INTO alert_settings (scope, enabled, channel_ids) VALUES ('global', FALSE, '[]');
+		UPDATE traffic_settings SET usage_mode = 'billing', direction_mode = 'both' WHERE id = 1;
+		UPDATE servers SET traffic_cycle_mode = 'clamp_to_month_end', traffic_billing_start_day = 20 WHERE id = ?;
+		INSERT INTO alert_control_tasks (task_type, dedupe_key, status)
+		VALUES ('full_reconcile', 'upgrade-task', 'pending'), ('full_reconcile', 'upgrade-task', 'failed');
+	`, serverID).Error; err != nil {
+		t.Fatal(err)
+	}
 	if _, err := kitmigration.Run(t.Context(), migrationConfig(t, db, keyPath)); err != nil {
 		t.Fatal(err)
 	}
@@ -654,6 +656,26 @@ func TestIntegrationVMSettingsMigration(t *testing.T) {
 	}
 	if settings.PVEGuestVisible {
 		t.Fatal("upgrade enabled guest access to VMs")
+	}
+	var enabled bool
+	if err := db.Table("alert_settings").Select("enabled").Where("scope = 'global'").Scan(&enabled).Error; err != nil || enabled {
+		t.Fatalf("upgrade reset alert configuration: enabled=%v, error=%v", enabled, err)
+	}
+	global, err := trafficstore.New(db).GetSettings(t.Context())
+	if err != nil || global.UsageMode != trafficstore.UsageBilling || global.DirectionMode != trafficstore.DirectionBoth ||
+		global.CycleMode != trafficstore.CycleCalendarMonth || global.BillingStartDay != 1 {
+		t.Fatalf("upgrade changed global settings or compatibility response: %+v, %v", global, err)
+	}
+	var cycle struct {
+		Mode string
+		Day  int
+	}
+	if err := db.Table("servers").Select("traffic_cycle_mode AS mode, traffic_billing_start_day AS day").Where("id = ?", serverID).Take(&cycle).Error; err != nil || cycle.Mode != "clamp_to_month_end" || cycle.Day != 20 {
+		t.Fatalf("upgrade changed node cycle: %+v, %v", cycle, err)
+	}
+	var tasks int64
+	if err := db.Table("alert_control_tasks").Where("dedupe_key = 'upgrade-task'").Count(&tasks).Error; err != nil || tasks != 2 {
+		t.Fatalf("upgrade changed task history: count=%d, error=%v", tasks, err)
 	}
 }
 

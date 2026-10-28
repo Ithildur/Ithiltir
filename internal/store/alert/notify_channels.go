@@ -46,8 +46,7 @@ func (d ChannelDelivery) Status() ChannelDeliveryStatus {
 
 type notifyChannelRow struct {
 	model.NotifyChannel `gorm:"embedded"`
-	LegacyConfig        datatypes.JSON `gorm:"column:config;not null"`
-	ConfigSealed        []byte         `gorm:"column:config_sealed"`
+	ConfigSealed        []byte `gorm:"column:config_sealed"`
 }
 
 func (notifyChannelRow) TableName() string {
@@ -154,7 +153,6 @@ func (s *Store) CreateChannel(ctx context.Context, item *model.NotifyChannel) er
 		}
 		row := notifyChannelRow{
 			NotifyChannel: *item,
-			LegacyConfig:  datatypes.JSON([]byte(`{}`)),
 			ConfigSealed:  sealed,
 		}
 		row.ID = id
@@ -194,7 +192,6 @@ func (s *Store) ReplaceChannel(ctx context.Context, id, revision int64, next mod
 			Updates(map[string]any{
 				"name":                 next.Name,
 				"type":                 next.Type,
-				"config":               datatypes.JSON([]byte(`{}`)),
 				"config_sealed":        sealed,
 				"enabled":              next.Enabled,
 				"revision":             gorm.Expr("revision + 1"),
@@ -245,7 +242,6 @@ func (s *Store) UpdateChannelConfig(ctx context.Context, id, revision int64, con
 			Model(&notifyChannelRow{}).
 			Where("id = ? AND is_deleted = ?", id, false).
 			Updates(map[string]any{
-				"config":               datatypes.JSON([]byte(`{}`)),
 				"config_sealed":        sealed,
 				"revision":             gorm.Expr("revision + 1"),
 				"last_success_at":      nil,
@@ -508,7 +504,6 @@ func (s *Store) pauseChannelNotifications(ctx context.Context, id int64) error {
 		UpdateColumns(map[string]any{
 			"status":       model.OutboxStatusPaused,
 			"is_probe":     false,
-			"leased_until": nil,
 			"failure_code": "channel_disabled",
 			"last_error":   nil,
 			"probe_count":  0,
@@ -541,7 +536,6 @@ func wakeChannelNotifications(
 			"is_probe":        false,
 			"attempt_count":   0,
 			"next_attempt_at": now,
-			"leased_until":    nil,
 			"failure_code":    nil,
 			"last_error":      nil,
 			"probe_count":     0,
@@ -560,7 +554,6 @@ func (s *Store) discardChannelNotifications(ctx context.Context, id int64, code,
 		UpdateColumns(map[string]any{
 			"status":       model.OutboxStatusDiscarded,
 			"is_probe":     false,
-			"leased_until": nil,
 			"failure_code": code,
 			"last_error":   emptyToNil(message),
 			"probe_count":  0,

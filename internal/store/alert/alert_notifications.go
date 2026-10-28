@@ -19,14 +19,11 @@ import (
 )
 
 func insertAlertNotifications(tx *gorm.DB, eventID int64, params []AlertNotificationParams, now time.Time) error {
-	if eventID <= 0 || len(params) == 0 {
+	if len(params) == 0 {
 		return nil
 	}
 	items := make([]notificationParams, 0, len(params))
 	for _, param := range params {
-		if param.ChannelID <= 0 || param.Transition == "" || param.ChannelType == "" {
-			continue
-		}
 		dedupeKey := alertNotificationDedupeKey(eventID, param.Transition, param.ChannelID)
 		payload := param.Payload
 		payload.Metadata = cloneStringMap(payload.Metadata)
@@ -69,7 +66,7 @@ func insertNotifications(tx *gorm.DB, params []notificationParams, now time.Time
 	rows := make([]model.AlertNotificationOutbox, 0, len(params))
 	for _, param := range params {
 		if param.ChannelID <= 0 || param.ChannelType == "" || param.Transition == "" || param.DedupeKey == "" {
-			continue
+			return fmt.Errorf("enqueue notification: channel, type, transition and dedupe key are required")
 		}
 		raw, err := marshalJSON(param.Payload)
 		if err != nil {
@@ -91,9 +88,6 @@ func insertNotifications(tx *gorm.DB, params []notificationParams, now time.Time
 			Status:        status,
 			NextAttemptAt: nextAttemptAt,
 		})
-	}
-	if len(rows) == 0 {
-		return nil
 	}
 	return tx.
 		Clauses(clause.OnConflict{
@@ -228,14 +222,12 @@ func (s *Store) TakeNextNotification(ctx context.Context, now time.Time) (*model
 			UpdateColumns(map[string]any{
 				"status":          model.OutboxStatusSending,
 				"is_probe":        isProbe,
-				"leased_until":    now,
 				"next_attempt_at": now,
 			}).Error; err != nil {
 			return err
 		}
 		item.Status = model.OutboxStatusSending
 		item.IsProbe = isProbe
-		item.LeasedUntil = &now
 		return nil
 	})
 	if err != nil {
@@ -294,7 +286,6 @@ func (s *Store) TakeNotificationBatch(ctx context.Context, now time.Time) ([]mod
 				break
 			}
 			candidate.Status = model.OutboxStatusSending
-			candidate.LeasedUntil = &now
 			items = append(items, candidate)
 			ids = append(ids, candidate.ID)
 		}
@@ -303,7 +294,7 @@ func (s *Store) TakeNotificationBatch(ctx context.Context, now time.Time) ([]mod
 		}
 		return tx.db.WithContext(ctx).Model(&model.AlertNotificationOutbox{}).
 			Where("id IN ?", ids).UpdateColumns(map[string]any{
-			"status": model.OutboxStatusSending, "leased_until": now, "next_attempt_at": now,
+			"status": model.OutboxStatusSending, "next_attempt_at": now,
 		}).Error
 	})
 	return items, err
@@ -376,7 +367,6 @@ func (s *Store) PauseNotification(ctx context.Context, failure NotificationFailu
 		case channel.IsDeleted:
 			return updateSendingNotification(tx, failure.ID, failure.ChannelID, map[string]any{
 				"status":       model.OutboxStatusDiscarded,
-				"leased_until": nil,
 				"failure_code": "channel_deleted",
 				"last_error":   "notification channel deleted",
 				"probe_count":  0,
@@ -433,7 +423,6 @@ func (s *Store) recordNotificationFailure(
 		case channel.IsDeleted:
 			return updateSendingNotification(tx, failure.ID, failure.ChannelID, map[string]any{
 				"status":       model.OutboxStatusDiscarded,
-				"leased_until": nil,
 				"failure_code": "channel_deleted",
 				"last_error":   "notification channel deleted",
 				"probe_count":  0,
@@ -441,7 +430,6 @@ func (s *Store) recordNotificationFailure(
 		case !channel.Enabled:
 			return updateSendingNotification(tx, failure.ID, failure.ChannelID, map[string]any{
 				"status":       model.OutboxStatusPaused,
-				"leased_until": nil,
 				"failure_code": "channel_disabled",
 				"last_error":   nil,
 				"probe_count":  0,
@@ -468,7 +456,6 @@ func (s *Store) recordNotificationFailure(
 					"status":          model.OutboxStatusBlocked,
 					"is_probe":        false,
 					"next_attempt_at": failure.NextAttemptAt,
-					"leased_until":    nil,
 					"failure_code":    emptyToNil(failure.Code),
 					"last_error":      emptyToNil(failure.LastError),
 					"probe_count":     0,
@@ -497,7 +484,6 @@ func (s *Store) recordNotificationFailure(
 func notificationFailureUpdates(failure NotificationFailure, status model.OutboxStatus) map[string]any {
 	updates := map[string]any{
 		"status":       status,
-		"leased_until": nil,
 		"failure_code": emptyToNil(failure.Code),
 		"last_error":   emptyToNil(failure.LastError),
 	}
@@ -531,7 +517,6 @@ func markNotificationSent(tx *gorm.DB, id, channelID int64, sentAt time.Time) (b
 	err := updateSendingNotification(tx, id, channelID, map[string]any{
 		"status":        model.OutboxStatusSent,
 		"sent_at":       sentAt,
-		"leased_until":  nil,
 		"attempt_count": gorm.Expr("attempt_count + 1"),
 		"probe_count":   0,
 		"failure_code":  nil,
@@ -569,7 +554,6 @@ func releaseSendingNotification(tx *gorm.DB, id, channelID int64, now time.Time)
 	return updateSendingNotification(tx, id, channelID, map[string]any{
 		"status":          gorm.Expr("CASE WHEN is_probe THEN ? ELSE ? END", model.OutboxStatusBlocked, model.OutboxStatusRetry),
 		"next_attempt_at": now,
-		"leased_until":    nil,
 		"failure_code":    gorm.Expr("CASE WHEN is_probe THEN failure_code ELSE NULL END"),
 		"last_error":      gorm.Expr("CASE WHEN is_probe THEN last_error ELSE NULL END"),
 		"probe_count":     gorm.Expr("CASE WHEN is_probe THEN probe_count ELSE 0 END"),
@@ -583,7 +567,6 @@ func retrySendingNotification(tx *gorm.DB, id, channelID int64, now time.Time) e
 	return updateSendingNotification(tx, id, channelID, map[string]any{
 		"status":          model.OutboxStatusRetry,
 		"next_attempt_at": now,
-		"leased_until":    nil,
 		"failure_code":    nil,
 		"last_error":      nil,
 		"probe_count":     0,

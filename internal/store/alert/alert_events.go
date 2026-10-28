@@ -271,21 +271,26 @@ func (s *Store) WriteOpenTransition(ctx context.Context, params AlertOpenEventPa
 	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		insertedID, err := s.insertOpenEvent(tx, params)
 		if err != nil {
-			if isUniqueConstraintError(err, "uniq_alert_event_open") {
-				var event model.AlertEvent
-				if err := tx.
-					Where("rule_id = ? AND rule_generation = ? AND object_type = ? AND object_id = ? AND status = ?",
-						params.RuleID, params.RuleGeneration, params.ObjectType, params.ObjectID, model.AlertStatusOpen).
-					Take(&event).Error; err != nil {
-					return err
-				}
-				result = AlertOpenEventResult{EventID: event.ID, Created: false}
-				return nil
-			}
 			return err
 		}
 		if insertedID == 0 {
-			return ErrAlertRuleVersionStale
+			var event model.AlertEvent
+			query := tx.Where("rule_id = ? AND rule_generation = ? AND object_type = ? AND object_id = ? AND status = ?",
+				params.RuleID, params.RuleGeneration, params.ObjectType, params.ObjectID, model.AlertStatusOpen)
+			if !params.Builtin {
+				query = query.Where(`EXISTS (
+					SELECT 1 FROM alert_rules
+					WHERE id = ? AND generation = ? AND enabled AND NOT is_deleted
+				)`, params.RuleID, params.RuleGeneration)
+			}
+			if err := query.Take(&event).Error; err != nil {
+				if errors.Is(err, gorm.ErrRecordNotFound) {
+					return ErrAlertRuleVersionStale
+				}
+				return err
+			}
+			result = AlertOpenEventResult{EventID: event.ID, Created: false}
+			return nil
 		}
 		if err := insertAlertNotifications(tx, insertedID, params.Notifications, time.Now().UTC()); err != nil {
 			return err
@@ -332,6 +337,8 @@ func (s *Store) insertOpenEvent(tx *gorm.DB, params AlertOpenEventParams) (int64
 				?,
 				?
 			)
+			ON CONFLICT (rule_id, rule_generation, object_type, object_id)
+			    WHERE status = 'open' DO NOTHING
 			RETURNING id
 			`,
 			params.RuleID,
@@ -383,6 +390,8 @@ func (s *Store) insertOpenEvent(tx *gorm.DB, params AlertOpenEventParams) (int64
 			AND ar.generation = ?
 			AND ar.enabled = TRUE
 			AND ar.is_deleted = FALSE
+		ON CONFLICT (rule_id, rule_generation, object_type, object_id)
+		    WHERE status = 'open' DO NOTHING
 		RETURNING id
 		`,
 		string(params.RuleSnapshot),

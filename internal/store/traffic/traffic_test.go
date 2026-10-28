@@ -273,8 +273,8 @@ func TestBuildTrafficMonthUsageRowsUsesPairSpanningWindow(t *testing.T) {
 	start := time.Date(2026, time.April, 1, 0, 30, 0, 0, time.UTC)
 	end := start.Add(time.Hour)
 	rows := []trafficUsageNICRow{
-		{ServerID: 7, Iface: "eth0", CollectedAt: start.Add(-30 * time.Minute), BytesRecv: 0, BytesSent: 0},
-		{ServerID: 7, Iface: "eth0", CollectedAt: end.Add(30 * time.Minute), BytesRecv: 7200, BytesSent: 14400},
+		{ServerID: 7, Iface: "eth0", ServerCycleMode: string(CycleCalendarMonth), BillingStartDay: 1, CollectedAt: start.Add(-30 * time.Minute), BytesRecv: 0, BytesSent: 0},
+		{ServerID: 7, Iface: "eth0", ServerCycleMode: string(CycleCalendarMonth), BillingStartDay: 1, CollectedAt: end.Add(30 * time.Minute), BytesRecv: 7200, BytesSent: 14400},
 	}
 
 	items := mustBuildTrafficMonthUsageRows(t, rows, defaultSettings(), time.UTC, start, end, map[trafficUsageKey]time.Time{})
@@ -298,8 +298,8 @@ func TestBuildTrafficMonthUsageRowsDoesNotRoundEachSegment(t *testing.T) {
 	start := time.Date(2026, time.March, 31, 23, 59, 59, 0, time.UTC)
 	end := start.Add(2 * time.Second)
 	rows := []trafficUsageNICRow{
-		{ServerID: 7, Iface: "eth0", CollectedAt: start, BytesRecv: 0, BytesSent: 0},
-		{ServerID: 7, Iface: "eth0", CollectedAt: end, BytesRecv: 1, BytesSent: 1},
+		{ServerID: 7, Iface: "eth0", ServerCycleMode: string(CycleCalendarMonth), BillingStartDay: 1, CollectedAt: start, BytesRecv: 0, BytesSent: 0},
+		{ServerID: 7, Iface: "eth0", ServerCycleMode: string(CycleCalendarMonth), BillingStartDay: 1, CollectedAt: end, BytesRecv: 1, BytesSent: 1},
 	}
 
 	items := mustBuildTrafficMonthUsageRows(t, rows, defaultSettings(), time.UTC, start, end, map[trafficUsageKey]time.Time{})
@@ -641,10 +641,10 @@ func TestBuildTrafficMonthUsageRowsKeepsIfaceRowsSeparate(t *testing.T) {
 	settings.CycleMode = CycleCalendarMonth
 	settings.BillingStartDay = 1
 	rows := []trafficUsageNICRow{
-		{ServerID: 7, Iface: "eth0", CollectedAt: start.Add(time.Second), BytesRecv: 0, BytesSent: 0},
-		{ServerID: 7, Iface: "eth0", CollectedAt: start.Add(6 * time.Second), BytesRecv: 300, BytesSent: 600},
-		{ServerID: 7, Iface: "eth1", CollectedAt: start.Add(2 * time.Second), BytesRecv: 0, BytesSent: 0},
-		{ServerID: 7, Iface: "eth1", CollectedAt: start.Add(7 * time.Second), BytesRecv: 900, BytesSent: 1200},
+		{ServerID: 7, Iface: "eth0", ServerCycleMode: string(CycleCalendarMonth), BillingStartDay: 1, CollectedAt: start.Add(time.Second), BytesRecv: 0, BytesSent: 0},
+		{ServerID: 7, Iface: "eth0", ServerCycleMode: string(CycleCalendarMonth), BillingStartDay: 1, CollectedAt: start.Add(6 * time.Second), BytesRecv: 300, BytesSent: 600},
+		{ServerID: 7, Iface: "eth1", ServerCycleMode: string(CycleCalendarMonth), BillingStartDay: 1, CollectedAt: start.Add(2 * time.Second), BytesRecv: 0, BytesSent: 0},
+		{ServerID: 7, Iface: "eth1", ServerCycleMode: string(CycleCalendarMonth), BillingStartDay: 1, CollectedAt: start.Add(7 * time.Second), BytesRecv: 900, BytesSent: 1200},
 	}
 
 	items := mustBuildTrafficMonthUsageRows(t, rows, settings, time.UTC, start, start.Add(5*time.Minute), map[trafficUsageKey]time.Time{})
@@ -678,8 +678,8 @@ func TestBuildTrafficMonthUsageRowsKeepsGapBytesOutOfPeak(t *testing.T) {
 	settings.CycleMode = CycleCalendarMonth
 	settings.BillingStartDay = 1
 	rows := []trafficUsageNICRow{
-		{ServerID: 7, Iface: "eth0", CollectedAt: start, BytesRecv: 0, BytesSent: 0},
-		{ServerID: 7, Iface: "eth0", CollectedAt: end, BytesRecv: 600, BytesSent: 1200},
+		{ServerID: 7, Iface: "eth0", ServerCycleMode: string(CycleCalendarMonth), BillingStartDay: 1, CollectedAt: start, BytesRecv: 0, BytesSent: 0},
+		{ServerID: 7, Iface: "eth0", ServerCycleMode: string(CycleCalendarMonth), BillingStartDay: 1, CollectedAt: end, BytesRecv: 600, BytesSent: 1200},
 	}
 
 	items := mustBuildTrafficMonthUsageRows(t, rows, settings, time.UTC, start, end, map[trafficUsageKey]time.Time{})
@@ -707,8 +707,8 @@ func TestBuildTrafficMonthUsageRowsUsesGivenLocation(t *testing.T) {
 	settings.CycleMode = CycleCalendarMonth
 	settings.BillingStartDay = 1
 	rows := []trafficUsageNICRow{
-		{ServerID: 7, Iface: "eth0", CollectedAt: start, BytesRecv: 0, BytesSent: 0},
-		{ServerID: 7, Iface: "eth0", CollectedAt: end, BytesRecv: 120, BytesSent: 240},
+		{ServerID: 7, Iface: "eth0", ServerCycleMode: string(CycleCalendarMonth), BillingStartDay: 1, CollectedAt: start, BytesRecv: 0, BytesSent: 0},
+		{ServerID: 7, Iface: "eth0", ServerCycleMode: string(CycleCalendarMonth), BillingStartDay: 1, CollectedAt: end, BytesRecv: 120, BytesSent: 240},
 	}
 
 	items := mustBuildTrafficMonthUsageRows(t, rows, settings, loc, start, end, map[trafficUsageKey]time.Time{})

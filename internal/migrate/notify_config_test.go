@@ -40,18 +40,17 @@ func TestIntegrationNotifyConfigMigrationRemovesPlaintextAndDoesNotReplaceLostKe
 	}
 
 	var row struct {
-		Config       string `gorm:"column:config"`
 		ConfigSealed []byte `gorm:"column:config_sealed"`
 	}
 	if err := db.Raw(`
-		SELECT config::text AS config, config_sealed
+		SELECT config_sealed
 		FROM notify_channels
 		WHERE id = ?
 	`, id).Scan(&row).Error; err != nil {
 		t.Fatalf("load encrypted notification config: %v", err)
 	}
-	if row.Config != "{}" || len(row.ConfigSealed) == 0 {
-		t.Fatalf("stored config = %q sealed_bytes=%d, want empty legacy config and ciphertext", row.Config, len(row.ConfigSealed))
+	if len(row.ConfigSealed) == 0 {
+		t.Fatal("stored notification ciphertext is empty")
 	}
 	plain, err := configCipher.Open(id, model.NotifyTypeWebhook, row.ConfigSealed)
 	if err != nil {
@@ -64,12 +63,18 @@ func TestIntegrationNotifyConfigMigrationRemovesPlaintextAndDoesNotReplaceLostKe
 	if decoded["secret"] != "stored-secret" {
 		t.Fatalf("decrypted secret = %q, want stored-secret", decoded["secret"])
 	}
-	if err := db.Exec(`
-		UPDATE notify_channels
-		SET config = '{"secret":"plaintext-regression"}'::jsonb
-		WHERE id = ?
-	`, id).Error; err == nil {
-		t.Fatal("plaintext notification config update succeeded after migration")
+	var legacyColumnExists bool
+	if err := db.Raw(`
+		SELECT EXISTS (
+			SELECT 1 FROM information_schema.columns
+			WHERE table_schema = current_schema()
+			  AND table_name = 'notify_channels' AND column_name = 'config'
+		)
+	`).Scan(&legacyColumnExists).Error; err != nil {
+		t.Fatalf("inspect notification config storage: %v", err)
+	}
+	if legacyColumnExists {
+		t.Fatal("legacy plaintext config column remains after migration")
 	}
 
 	if err := os.Remove(keyPath); err != nil {

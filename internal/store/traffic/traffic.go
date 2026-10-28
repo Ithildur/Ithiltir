@@ -606,10 +606,10 @@ func (s *Store) trafficMonthlyCandidates(ctx context.Context, global, target Set
 		Select(`DISTINCT
 			t.server_id,
 			t.iface,
-			COALESCE(NULLIF(s.traffic_cycle_mode, ''), 'calendar_month') AS traffic_cycle_mode,
-			COALESCE(s.traffic_billing_start_day, 1) AS traffic_billing_start_day,
-			COALESCE(s.traffic_billing_anchor_date, '') AS traffic_billing_anchor_date,
-			COALESCE(s.traffic_billing_timezone, '') AS traffic_billing_timezone`).
+			s.traffic_cycle_mode,
+			s.traffic_billing_start_day,
+			s.traffic_billing_anchor_date,
+			s.traffic_billing_timezone`).
 		Joins("JOIN servers AS s ON s.id = t.server_id AND s.is_deleted = FALSE").
 		Where("t.bucket >= ? AND t.bucket < ?", cycle.Start, cycle.End).
 		Order("t.server_id ASC, t.iface ASC").
