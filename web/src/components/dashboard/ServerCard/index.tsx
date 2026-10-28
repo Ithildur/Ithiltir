@@ -8,9 +8,10 @@ interface Props {
   view: ServerViewModel;
   canOpenHistory: boolean;
   canOpenTraffic: boolean;
+  canOpenPVE: boolean;
 }
 
-const ServerCard: React.FC<Props> = ({ view, canOpenHistory, canOpenTraffic }) => {
+const ServerCard: React.FC<Props> = ({ view, canOpenHistory, canOpenTraffic, canOpenPVE }) => {
   return (
     <div className="[content-visibility:auto] [contain-intrinsic-block-size:428px]">
       <FlipCard
@@ -20,6 +21,7 @@ const ServerCard: React.FC<Props> = ({ view, canOpenHistory, canOpenTraffic }) =
             view={view}
             canOpenHistory={canOpenHistory}
             canOpenTraffic={canOpenTraffic}
+            canOpenPVE={canOpenPVE}
           />
         }
         back={<ServerCardBack view={view} />}

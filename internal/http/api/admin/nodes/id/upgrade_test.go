@@ -13,7 +13,7 @@ import (
 
 func TestLegacyUpdateURLAddsDeployGrant(t *testing.T) {
 	projection := frontprojection.New()
-	h := &handler{store: nodestore.New(nil, frontcache.New(nil, nil, projection), projection, time.Local)}
+	h := &handler{store: nodestore.New(nil, nil, frontcache.New(nil, nil, projection), projection, time.Local)}
 	got, err := h.legacyUpdateURL("https://dash.example.com/deploy/linux/node_linux_amd64?mirror=local")
 	if err != nil {
 		t.Fatalf("legacyUpdateURL() error = %v", err)

@@ -82,24 +82,34 @@ const MetricHistoryChart: React.FC<Props> = ({
         return splits.map((value) => xLabel(value, true));
       }
       const maxLabels = normalizedMaxLabels ?? 10;
+      const withTime = xSpanDays < 2;
       if (splits.length <= maxLabels) {
-        return splits.map((value) => xLabel(value, false));
+        return splits.map((value) => xLabel(value, withTime));
       }
       const stride = Math.ceil(splits.length / maxLabels);
-      return splits.map((value, idx) => (idx % stride === 0 ? xLabel(value, false) : ''));
+      return splits.map((value, idx) => (idx % stride === 0 ? xLabel(value, withTime) : ''));
     },
-    [normalizedMaxLabels, shouldCoarsenXAxis],
+    [normalizedMaxLabels, shouldCoarsenXAxis, xSpanDays],
   );
 
   const stats = React.useMemo(() => chartValueStats(aligned), [aligned]);
 
-  const unitScale = React.useMemo(() => resolveUnitScale(unit, stats.maxAbs), [unit, stats.maxAbs]);
+  const hasThresholds = aligned?.length === 3;
+  const thresholdMax = React.useMemo(
+    () => sorted.reduce((max, point) => Math.max(max, point.threshold ?? 0), 0),
+    [sorted],
+  );
+
+  const unitScale = React.useMemo(
+    () => resolveUnitScale(unit, Math.max(stats.maxAbs, thresholdMax)),
+    [unit, stats.maxAbs, thresholdMax],
+  );
 
   const yAxisMax = React.useMemo(() => {
-    const scaledMax = Math.max(0, stats.max) / unitScale.divisor;
+    const scaledMax = Math.max(0, stats.max, thresholdMax) / unitScale.divisor;
     const niceScaledMax = niceMax(scaledMax);
     return niceScaledMax * unitScale.divisor;
-  }, [unitScale.divisor, stats.max]);
+  }, [unitScale.divisor, stats.max, thresholdMax]);
 
   const latestValue = React.useMemo(() => latestMetricValue(sorted), [sorted]);
 
@@ -202,7 +212,11 @@ const MetricHistoryChart: React.FC<Props> = ({
       const timestamp = xPoint * 1000;
       dateNode.textContent = formatTooltipDate(timestamp);
       timeNode.textContent = formatTooltipTime(timestamp);
-      valueNode.textContent = formatTooltipValue(yPoint);
+      const threshold = current[2]?.[idx];
+      valueNode.textContent =
+        threshold == null
+          ? formatTooltipValue(yPoint)
+          : `${formatTooltipValue(yPoint)} · ${t('pve_threshold_value', { value: formatTooltipValue(threshold) })}`;
 
       const xPos = plot.cursor.left;
       const yPos = plot.cursor.top;
@@ -267,7 +281,7 @@ const MetricHistoryChart: React.FC<Props> = ({
       tooltip.style.visibility = 'visible';
       tooltip.setAttribute('aria-hidden', 'false');
     },
-    [formatTooltipDate, formatTooltipTime, formatTooltipValue, hideTooltip],
+    [formatTooltipDate, formatTooltipTime, formatTooltipValue, hideTooltip, t],
   );
 
   const resetZoom = React.useCallback(() => {
@@ -286,6 +300,7 @@ const MetricHistoryChart: React.FC<Props> = ({
     const tickColor = themeColor('--theme-border-default');
     const lineColor = themeColor('--theme-fg-accent');
     const fillColor = themeColor('--theme-chart-fill');
+    const thresholdColor = themeColor('--theme-fg-warning-strong');
     const yAxisSize = isInline ? 44 : 56;
     const padding: uPlot.Padding = isInline ? [8, 10, 8, 10] : [10, 12, 20, 12];
     const showXAxisAxis = !isInline || showXAxis;
@@ -338,8 +353,33 @@ const MetricHistoryChart: React.FC<Props> = ({
           stroke: lineColor,
           width: isInline ? 1.5 : 2,
           fill: isInline ? 'transparent' : fillColor,
-          points: { show: false },
+          points: {
+            show: hasThresholds,
+            size: 5,
+            stroke: thresholdColor,
+            fill: thresholdColor,
+            filter: (plot) => {
+              const marked: number[] = [];
+              const limits = plot.data[2];
+              plot.data[1].forEach((value, index) => {
+                const limit = limits?.[index];
+                if (value != null && limit != null && value > limit) marked.push(index);
+              });
+              return marked;
+            },
+          },
         },
+        ...(hasThresholds
+          ? [
+              {
+                label: t('pve_threshold'),
+                stroke: thresholdColor,
+                width: 1,
+                dash: [4, 4],
+                points: { show: false },
+              },
+            ]
+          : []),
       ],
     };
   }, [
@@ -354,6 +394,8 @@ const MetricHistoryChart: React.FC<Props> = ({
     updateSelect,
     xAxisValues,
     yAxisMax,
+    hasThresholds,
+    t,
   ]);
 
   React.useEffect(() => {

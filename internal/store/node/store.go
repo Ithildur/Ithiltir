@@ -6,11 +6,13 @@ import (
 
 	"dash/internal/store/frontcache"
 	"dash/internal/store/frontprojection"
+	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
 )
 
 type Store struct {
 	db         *gorm.DB
+	redis      *redis.Client
 	mem        *memState
 	front      *frontcache.Store
 	projection *frontprojection.Gate
@@ -18,10 +20,11 @@ type Store struct {
 	trafficLoc *time.Location
 }
 
-func New(db *gorm.DB, front *frontcache.Store, projection *frontprojection.Gate, trafficLoc *time.Location) *Store {
+func New(db *gorm.DB, client *redis.Client, front *frontcache.Store, projection *frontprojection.Gate, trafficLoc *time.Location) *Store {
 	mem := newMemory()
 	return &Store{
 		db:         db,
+		redis:      client,
 		mem:        mem,
 		front:      front,
 		projection: projection,

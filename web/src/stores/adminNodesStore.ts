@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { NodeDeploy, NodeTrafficPatch } from '@app-types/api';
+import type { NodeDeploy, NodeTrafficPatch, NodeVMSettings } from '@app-types/api';
 import type { NodeRow } from '@app-types/admin';
 import {
   createNode,
@@ -347,6 +347,14 @@ export const removeAdminNode = async (id: number): Promise<boolean> => {
   invalidateAdminNodeRowsLoad();
   setAdminNodes((nodes) => nodes.filter((node) => node.id !== id));
   return true;
+};
+
+export const saveAdminNodeVMSettings = async (
+  id: number,
+  settings: NodeVMSettings,
+): Promise<void> => {
+  await updateNode(id, settings);
+  await syncAdminNodes();
 };
 
 export const requestAdminNodeUpgrade = async (id: number): Promise<boolean> => {

@@ -24,6 +24,7 @@ type SystemSetting struct {
 	DashUpdateChannel  string    `gorm:"column:dash_update_channel;size:16;not null;default:'release'"` // release 或 prerelease。
 	DashUpdateMode     string    `gorm:"column:dash_update_mode;size:16;not null;default:'manual'"`     // manual、notify 或 auto。
 	UptimeGuestVisible bool      `gorm:"column:uptime_guest_visible;not null;default:true"`
+	PVEGuestVisible    bool      `gorm:"column:pve_guest_visible;not null;default:false"`
 	UptimeWarningSLA   float64   `gorm:"column:uptime_warning_sla;not null;default:99"`
 	UptimeErrorSLA     float64   `gorm:"column:uptime_error_sla;not null;default:95"`
 	LogoURL            string    `gorm:"column:logo_url;type:text;not null"`

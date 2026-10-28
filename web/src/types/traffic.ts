@@ -9,6 +9,7 @@ type TrafficP95Status =
   'available' | 'disabled' | 'lite_mode' | 'insufficient_samples' | 'snapshot_without_p95';
 
 export interface StatisticsAccess {
+  pve_guest_visible: boolean;
   history_guest_access_mode: 'disabled' | 'by_node';
   traffic_guest_access_mode: TrafficGuestAccessMode;
 }

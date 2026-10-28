@@ -35,11 +35,11 @@ Use `ARCH=arm64` on AArch64 systems. On supported Debian/Ubuntu systems, the ins
 
 After installation, open the configured `app.public_url`; append `/login` for the admin console. Create a node there and follow the generated install command.
 
-Optional PVE VM monitoring requires helpers bundled with `scripts/package.sh --with-pve`; append `--pve` to the Linux Node installation command on the PVE host. It provides separate reporting and administrator read APIs, without a UI. See [Node deployment](deploy/node/README.md#optional-pve-monitoring) for installation, updates and disabling collection.
+Optional PVE VM monitoring requires helpers bundled with `scripts/package.sh --with-pve`; append `--pve` to the Linux Node installation command on the PVE host. Click the host card's PVE system icon to view its VM list, details and historical metrics. Guest access is disabled by default and can be enabled in system settings for guest-visible hosts. History requires the Node gRPC query connection. See [Node deployment](deploy/node/README.md#optional-pve-monitoring) for installation, updates and disabling collection.
 
 ## Run From Source
 
-Source development requires Go 1.27.1+, Bun 1.3.11, PostgreSQL 16+ with a matching TimescaleDB build, and Redis unless Dash is started with `--no-redis`.
+Source development requires Go 1.27.3+, Bun 1.3.11, PostgreSQL 16+ with a matching TimescaleDB build, and Redis unless Dash is started with `--no-redis`.
 
 ```bash
 cp configs/config.example.yaml config.local.yaml

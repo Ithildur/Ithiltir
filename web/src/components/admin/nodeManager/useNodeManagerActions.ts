@@ -1,5 +1,10 @@
 import React from 'react';
-import type { NodeDeploy, NodeDeployPlatform, NodeTrafficPatch } from '@app-types/api';
+import type {
+  NodeDeploy,
+  NodeDeployPlatform,
+  NodeTrafficPatch,
+  NodeVMSettings,
+} from '@app-types/api';
 import type { NodeRow } from '@app-types/admin';
 import { useApiErrorHandler } from '@hooks/useApiErrorHandler';
 import type { ConfirmRequest } from '@hooks/useConfirmDialog';
@@ -12,6 +17,7 @@ import {
   requestAdminNodeUpgrade,
   saveAdminNodeSettings,
   saveAdminNodeTrafficSettings,
+  saveAdminNodeVMSettings,
   setAdminNodeGuestVisible,
   setAdminNodesTrafficP95,
   setAdminNodeTrafficP95,
@@ -192,6 +198,18 @@ export const useNodeManagerActions = ({
     [apiError, requestConfirm, t, token],
   );
 
+  const saveVMSettings = async (nodeId: number, settings: NodeVMSettings): Promise<boolean> => {
+    if (!token) return false;
+    try {
+      await saveAdminNodeVMSettings(nodeId, settings);
+      pushTopBanner(t('admin_node_settings_updated'), { tone: 'info' });
+      return true;
+    } catch (error) {
+      apiError(error, t('admin_save_node_settings_failed'));
+      return false;
+    }
+  };
+
   const confirmUpgrade = React.useCallback(
     async (node: NodeRow) => {
       if (!token || !bundledNodeVersion) return;
@@ -261,6 +279,7 @@ export const useNodeManagerActions = ({
   );
 
   return {
+    saveVMSettings,
     addNode,
     confirmAndDelete,
     confirmUpgrade,

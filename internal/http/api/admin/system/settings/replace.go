@@ -69,6 +69,7 @@ func (h *handler) replaceHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	patch := systemstore.SettingsPatch{
+		PVEGuestVisible:    in.PVEGuestVisible,
 		SiteBrandPatch:     fullSiteBrandPatch(brand),
 		DashUpdateChannel:  &channel,
 		DashUpdateMode:     &updateMode,

@@ -3,6 +3,7 @@ import type uPlot from 'uplot';
 export type MetricPoint = {
   timestamp: number;
   value: number | null;
+  threshold?: number | null;
 };
 
 type ChartValueStats = {
@@ -65,15 +66,22 @@ export const alignMetricPoints = (points: MetricPoint[]): uPlot.AlignedData | nu
   if (points.length === 0) return null;
   const xs: number[] = [];
   const ys: Array<number | null> = [];
+  const thresholds: Array<number | null> = [];
 
   points.forEach((point) => {
     if (!Number.isFinite(point.timestamp)) return;
     // uPlot time scale expects seconds, input is milliseconds.
     xs.push(Math.floor(point.timestamp / 1000));
     ys.push(typeof point.value === 'number' && Number.isFinite(point.value) ? point.value : null);
+    thresholds.push(
+      typeof point.threshold === 'number' && Number.isFinite(point.threshold)
+        ? point.threshold
+        : null,
+    );
   });
 
-  return xs.length > 0 ? [xs, ys] : null;
+  if (xs.length === 0) return null;
+  return thresholds.some((value) => value != null) ? [xs, ys, thresholds] : [xs, ys];
 };
 
 export const chartSpanDays = (aligned: uPlot.AlignedData | null) => {

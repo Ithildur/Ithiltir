@@ -59,6 +59,7 @@ export type DashUpdateChannel = 'release' | 'prerelease';
 export type DashUpdateMode = 'manual' | 'notify' | 'auto';
 
 export interface SystemSettings extends SiteBrand {
+  pve_guest_visible: boolean;
   uptime_guest_visible: boolean;
   uptime_warning_sla: number;
   uptime_error_sla: number;
@@ -68,6 +69,10 @@ export interface SystemSettings extends SiteBrand {
 }
 
 export interface NodeRow {
+  pve: boolean;
+  vmCPUThreshold: number;
+  vmMemoryThreshold: number;
+  vmMemoryEnabled: boolean;
   id: number;
   name: string;
   hostname: string;

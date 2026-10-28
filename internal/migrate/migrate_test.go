@@ -625,6 +625,38 @@ func TestIntegrationNodeOnlineMigration(t *testing.T) {
 	})
 }
 
+func TestIntegrationVMSettingsMigration(t *testing.T) {
+	db, keyPath := pgtest.NewDBAt(t, 14)
+	var serverID int64
+	if err := db.Raw(`INSERT INTO servers (name, hostname, secret)
+		VALUES ('existing-pve', 'existing-pve', 'existing-pve-secret') RETURNING id`).Scan(&serverID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if _, err := kitmigration.Run(t.Context(), migrationConfig(t, db, keyPath)); err != nil {
+		t.Fatal(err)
+	}
+	var node struct {
+		Name          string
+		Secret        string
+		CPU           int
+		Memory        int
+		MemoryEnabled bool
+	}
+	if err := db.Table("servers").Select("name, secret, vm_cpu_threshold AS cpu, vm_memory_threshold AS memory, vm_memory_enabled AS memory_enabled").Where("id = ?", serverID).Take(&node).Error; err != nil {
+		t.Fatal(err)
+	}
+	if node.Name != "existing-pve" || node.Secret != "existing-pve-secret" || node.CPU != 80 || node.Memory != 90 || node.MemoryEnabled {
+		t.Fatalf("existing node changed or received incorrect VM defaults: %+v", node)
+	}
+	var settings struct{ PVEGuestVisible bool }
+	if err := db.Table("system_settings").Select("pve_guest_visible").Where("id = 1").Take(&settings).Error; err != nil {
+		t.Fatal(err)
+	}
+	if settings.PVEGuestVisible {
+		t.Fatal("upgrade enabled guest access to VMs")
+	}
+}
+
 func TestIntegrationSchemaVersionGuard(t *testing.T) {
 	ctx := context.Background()
 	db := pgtest.NewDB(t)

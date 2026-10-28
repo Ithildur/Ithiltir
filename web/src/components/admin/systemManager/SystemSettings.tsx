@@ -29,7 +29,7 @@ import type {
 import type { SiteBrand } from '@app-types/site';
 import { pushTopBanner } from '@runtime/topBannerRuntime';
 import { patchBrand, refreshBrand } from '@stores/siteBrandStore';
-import { cacheHistoryGuestAccess } from '@stores/statisticsAccessStore';
+import { cacheHistoryGuestAccess, cachePVEGuestAccess } from '@stores/statisticsAccessStore';
 import { useI18n } from '@i18n';
 import * as adminApi from '@lib/adminApi';
 import { defaultSiteBrand, displayLogoURL, normalizeSiteBrand } from '@lib/siteBrandModel';
@@ -111,6 +111,7 @@ const SystemSettings: React.FC = () => {
   const [loadingSettings, setLoadingSettings] = React.useState(false);
   const [savingBrand, setSavingBrand] = React.useState(false);
   const [savingHistoryMode, setSavingHistoryMode] = React.useState(false);
+  const [savingPVEAccess, setSavingPVEAccess] = React.useState(false);
   const [savingDashUpdateChannel, setSavingDashUpdateChannel] = React.useState(false);
   const [savingDashUpdateMode, setSavingDashUpdateMode] = React.useState(false);
   const [brandDraft, setBrandDraft] = React.useState<SiteBrand | null>(null);
@@ -200,6 +201,22 @@ const SystemSettings: React.FC = () => {
     },
     [apiError, savingHistoryMode, settings, t],
   );
+
+  const updatePVEAccess = async () => {
+    if (!settings || savingPVEAccess) return;
+    const visible = !settings.pve_guest_visible;
+    setSavingPVEAccess(true);
+    try {
+      await adminApi.updateSystemSettings({ pve_guest_visible: visible });
+      setSettings((current) => (current ? { ...current, pve_guest_visible: visible } : current));
+      cachePVEGuestAccess(visible);
+      pushTopBanner(t('admin_system_settings_saved'), { tone: 'info' });
+    } catch (error) {
+      apiError(error, t('admin_system_settings_save_failed'));
+    } finally {
+      setSavingPVEAccess(false);
+    }
+  };
 
   const saveBrandSettings = React.useCallback(async () => {
     if (!settings || !brandDraft || savingBrand) return;
@@ -421,6 +438,19 @@ const SystemSettings: React.FC = () => {
           </SettingPanel>
 
           <TrafficSettings />
+          <SettingPanel>
+            <SettingRow
+              title={t('admin_system_pve_guest_visible')}
+              description={t('admin_system_pve_guest_visible_desc')}
+            >
+              <IOSSwitch
+                checked={settings?.pve_guest_visible ?? false}
+                disabled={!settings || loadingSettings || savingPVEAccess}
+                ariaLabel={t('admin_system_pve_guest_visible')}
+                onChange={() => void updatePVEAccess()}
+              />
+            </SettingRow>
+          </SettingPanel>
           <UptimeSettings
             settings={settings}
             loading={loadingSettings}

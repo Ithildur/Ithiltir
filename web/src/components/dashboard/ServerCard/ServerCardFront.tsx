@@ -7,7 +7,7 @@ import MemoryStick from 'lucide-react/dist/esm/icons/memory-stick';
 import Network from 'lucide-react/dist/esm/icons/network';
 import RefreshCw from 'lucide-react/dist/esm/icons/refresh-cw';
 import TrendingUp from 'lucide-react/dist/esm/icons/trending-up';
-import { useNavigate } from 'react-router';
+import { Link, useNavigate } from 'react-router';
 import { useI18n } from '@i18n';
 import Button from '@components/ui/Button';
 import { Tooltip } from '@components/ui/Tooltip';
@@ -15,16 +15,17 @@ import { formatBytes } from '@pages/dashboard/viewModel';
 import type { ServerViewModel } from '@pages/dashboard/viewModel';
 import MiniGauge from '@components/dashboard/MiniGauge';
 import { NetworkRowFull } from '@components/dashboard/NetworkRow';
-import { SystemLogo } from '@components/system/SystemLogo';
+import { isPVESystem, SystemLogo } from '@components/system/SystemLogo';
 import UptimeRow from './UptimeRow';
 
 interface Props {
   view: ServerViewModel;
   canOpenHistory: boolean;
   canOpenTraffic: boolean;
+  canOpenPVE: boolean;
 }
 
-const ServerCardFront: React.FC<Props> = ({ view, canOpenHistory, canOpenTraffic }) => {
+const ServerCardFront: React.FC<Props> = ({ view, canOpenHistory, canOpenTraffic, canOpenPVE }) => {
   const { t } = useI18n();
   const isAlive = view.isAlive;
   const navigate = useNavigate();
@@ -136,12 +137,26 @@ ${t('mem_total')}: ${toMB(view.memory.total)} MB`;
     >
       <div className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-4">
         <div className="flex min-w-0 items-center gap-3">
-          <div
-            className="p-2 flex shrink-0 items-center justify-center"
-            title={`${view.system.platform || view.system.os || ''}`.trim()}
-          >
-            <SystemLogo system={view.system} size={24} />
-          </div>
+          {canOpenPVE && isPVESystem(view.system) ? (
+            <Link
+              to={`/pve/${view.id}`}
+              className="ui-focus-ring flex shrink-0 items-center justify-center rounded-md p-2 hover:bg-(--theme-bg-muted)"
+              title={t('pve_open')}
+              aria-label={t('pve_open')}
+              onClick={stopPropagation}
+              onMouseDown={stopPropagation}
+              onKeyDown={stopPropagation}
+            >
+              <SystemLogo system={view.system} size={24} />
+            </Link>
+          ) : (
+            <div
+              className="p-2 flex shrink-0 items-center justify-center"
+              title={`${view.system.platform || view.system.os || ''}`.trim()}
+            >
+              <SystemLogo system={view.system} size={24} />
+            </div>
+          )}
           <div className="min-w-0 flex-1 overflow-hidden">
             <h3
               className="truncate font-bold leading-tight text-(--theme-fg-default) dark:text-(--theme-fg-strong)"

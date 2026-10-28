@@ -19,6 +19,12 @@ export interface Group {
 }
 
 export interface ManagedNode {
+  vm_cpu_threshold: number;
+  vm_memory_threshold: number;
+  vm_memory_enabled: boolean;
+  os?: string | null;
+  platform?: string | null;
+  kernel_version?: string | null;
   id: number;
   name: string;
   hostname?: string | null;
@@ -38,6 +44,9 @@ export interface ManagedNode {
 }
 
 export interface UpdateNodeInput {
+  vm_cpu_threshold?: number;
+  vm_memory_threshold?: number;
+  vm_memory_enabled?: boolean;
   name?: string;
   is_guest_visible?: boolean;
   traffic_p95_enabled?: boolean;
@@ -59,6 +68,11 @@ export type NodeTrafficPatch = Pick<
   | 'traffic_billing_anchor_date'
   | 'traffic_billing_timezone'
   | 'traffic_direction_mode'
+>;
+
+export type NodeVMSettings = Pick<
+  ManagedNode,
+  'vm_cpu_threshold' | 'vm_memory_threshold' | 'vm_memory_enabled'
 >;
 
 export interface NodeVersion {

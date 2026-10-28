@@ -1,11 +1,10 @@
 package vmid
 
 import (
-	"github.com/Ithildur/EiluneKit/http/routes"
-
-	"dash/internal/http/api/admin/nodes/id/virt/vms/id/history"
+	"dash/internal/http/api/virt/id/vms/id/history"
 	"dash/internal/nodesession"
 	nodestore "dash/internal/store/node"
+	"github.com/Ithildur/EiluneKit/http/routes"
 )
 
 func Router(node *nodestore.Store, sessions *nodesession.Hub) *routes.Blueprint {

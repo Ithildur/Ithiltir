@@ -2,7 +2,12 @@ import React from 'react';
 import Checkbox from '@components/ui/Checkbox';
 import type { NodeRow } from '@app-types/admin';
 import { useI18n } from '@i18n';
-import { NodeP95Switch, TrafficRebuildButton, TrafficSettingsButton } from './NodeAdvancedActions';
+import {
+  NodeP95Switch,
+  TrafficRebuildButton,
+  TrafficSettingsButton,
+  VMSettingsButton,
+} from './NodeAdvancedActions';
 
 interface Props {
   nodes: NodeRow[];
@@ -18,6 +23,7 @@ interface Props {
   onToggleP95Node: (id: number) => void;
   onToggleTrafficP95: (node: NodeRow) => void;
   onOpenTrafficSettings: (node: NodeRow) => void;
+  onOpenVMSettings: (node: NodeRow) => void;
   onRebuildTraffic: (node: NodeRow) => void;
 }
 
@@ -35,6 +41,7 @@ const NodeAdvancedTable: React.FC<Props> = ({
   onToggleP95Node,
   onToggleTrafficP95,
   onOpenTrafficSettings,
+  onOpenVMSettings,
   onRebuildTraffic,
 }) => {
   const { t } = useI18n();
@@ -55,6 +62,7 @@ const NodeAdvancedTable: React.FC<Props> = ({
           </th>
           <th className="px-3 py-2.5 min-w-72">{t('admin_nodes_column_node')}</th>
           <th className="px-3 py-2.5 w-44">{t('admin_nodes_column_traffic_settings')}</th>
+          <th className="px-3 py-2.5 w-36">{t('admin_node_vm_settings')}</th>
           <th className="px-3 py-2.5 w-20">{t('admin_nodes_column_traffic_p95')}</th>
           <th className="px-3 py-2.5 w-16">{t('admin_nodes_column_traffic_rebuild')}</th>
         </tr>
@@ -63,7 +71,7 @@ const NodeAdvancedTable: React.FC<Props> = ({
         {nodes.length === 0 ? (
           <tr>
             <td
-              colSpan={5}
+              colSpan={6}
               className="px-4 py-12 text-center text-(--theme-fg-muted) dark:text-(--theme-fg-action-muted)"
             >
               {t('no_data')}
@@ -102,6 +110,9 @@ const NodeAdvancedTable: React.FC<Props> = ({
                     disabled={savingTrafficSettingsNodeIds.has(node.id)}
                     onOpen={onOpenTrafficSettings}
                   />
+                </td>
+                <td className="px-3 py-2 text-xs w-36">
+                  <VMSettingsButton node={node} onOpen={onOpenVMSettings} />
                 </td>
                 <td className="px-3 py-2 text-xs w-20">
                   <NodeP95Switch

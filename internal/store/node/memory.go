@@ -15,6 +15,9 @@ type memState struct {
 
 	deployGrantMu sync.RWMutex
 	deployGrants  map[string]deployGrantState
+
+	virtMu sync.RWMutex
+	virt   map[int64]virtEntry
 }
 
 type authEntry struct {
@@ -37,5 +40,6 @@ func newMemory() *memState {
 		authByID:     make(map[int64]authEntry),
 		updates:      make(map[int64]agentUpdateState),
 		deployGrants: make(map[string]deployGrantState),
+		virt:         make(map[int64]virtEntry),
 	}
 }

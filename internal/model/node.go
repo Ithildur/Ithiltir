@@ -20,6 +20,9 @@ func (Group) TableName() string { return "groups" }
 
 // Server represents table servers.
 type Server struct {
+	VMMemoryEnabled          bool           `gorm:"column:vm_memory_enabled;not null;default:false"`
+	VMCPUThreshold           int            `gorm:"column:vm_cpu_threshold;not null;default:80"`
+	VMMemoryThreshold        int            `gorm:"column:vm_memory_threshold;not null;default:90"`
 	ID                       int64          `gorm:"column:id;primaryKey;autoIncrement"`
 	Name                     string         `gorm:"column:name;size:255;not null"`
 	Hostname                 string         `gorm:"column:hostname;size:255;not null"`

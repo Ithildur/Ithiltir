@@ -20,6 +20,12 @@ type versionView struct {
 }
 
 type nodeView struct {
+	VMMemoryEnabled          bool        `json:"vm_memory_enabled"`
+	VMCPUThreshold           int         `json:"vm_cpu_threshold"`
+	VMMemoryThreshold        int         `json:"vm_memory_threshold"`
+	OS                       *string     `json:"os,omitzero"`
+	Platform                 *string     `json:"platform,omitzero"`
+	KernelVersion            *string     `json:"kernel_version,omitzero"`
 	ID                       int64       `json:"id"`
 	Name                     string      `json:"name"`
 	Hostname                 string      `json:"hostname"`
@@ -106,6 +112,12 @@ func nodeViews(nodes []nodestore.NodeItem) []nodeView {
 			version = strings.TrimSpace(*n.AgentVersion)
 		}
 		view := nodeView{
+			VMMemoryEnabled:          n.VMMemoryEnabled,
+			VMCPUThreshold:           n.VMCPUThreshold,
+			VMMemoryThreshold:        n.VMMemoryThreshold,
+			OS:                       n.OS,
+			Platform:                 n.Platform,
+			KernelVersion:            n.KernelVersion,
 			ID:                       n.ID,
 			Name:                     n.Name,
 			Hostname:                 n.Hostname,

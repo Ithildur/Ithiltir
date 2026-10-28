@@ -122,6 +122,9 @@ export const cacheTrafficGuestAccess = (
     traffic_guest_access_mode: mode,
   });
 
+export const cachePVEGuestAccess = (visible: boolean): StatisticsAccess | null =>
+  updateStatisticsAccessCache({ pve_guest_visible: visible });
+
 export const resetStatisticsAccessStore = (): void => {
   inFlight?.controller.abort();
   inFlight = null;

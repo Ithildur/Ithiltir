@@ -20,7 +20,7 @@ func (h *Receiver) Virt(ctx context.Context, id int64, secret string, snapshot v
 		return unauthorized(err)
 	}
 	if err != nil {
-		infra.WithModule("virt").Error(ctx, "VM snapshot persistence failed", err)
+		infra.WithModule("virt").Error(ctx, "VM snapshot update failed", err)
 		return &Error{Code: "virt_unavailable", Cause: err}
 	}
 	return nil

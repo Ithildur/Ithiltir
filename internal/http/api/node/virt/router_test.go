@@ -3,14 +3,16 @@ package virt_test
 import (
 	"bytes"
 	"encoding/json/v2"
+	"maps"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strconv"
 	"testing"
 	"time"
 
-	adminvirt "dash/internal/http/api/admin/nodes/id/virt"
 	nodevirt "dash/internal/http/api/node/virt"
+	publicvirt "dash/internal/http/api/virt"
 	"dash/internal/nodeingest"
 	"dash/internal/store"
 	nodestore "dash/internal/store/node"
@@ -29,7 +31,7 @@ func TestIntegrationVirtLifecycle(t *testing.T) {
 	root := routes.NewBlueprint()
 	ingest := nodeingest.New(st.Node, st.Metric, st.Front, st.Alert, nil, 0)
 	root.Include("/api/node/virt", nodevirt.Router(ingest, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(401) })))
-	root.Include("/api/admin/nodes/{id}/virt", adminvirt.Router(st.Node, nil), routes.IncludeAuth(routes.AuthRequired))
+	root.Include("/api/virt", publicvirt.Router(st, nil))
 	router, err := routes.NewHandler(root.Routes(), routes.HandlerOptions{})
 	if err != nil {
 		t.Fatal(err)
@@ -49,11 +51,15 @@ func TestIntegrationVirtLifecycle(t *testing.T) {
 		}
 		return w.Body.Bytes()
 	}
-	path := "/api/admin/nodes/" + strconv.FormatInt(server.ID, 10) + "/virt"
-	call("GET", path, "", nil, false, 401)
+	path := "/api/virt/" + strconv.FormatInt(server.ID, 10)
+	call("GET", path, "", nil, false, 403)
 	call("GET", path, "", nil, true, 200)
 	now := time.Now().UTC().Truncate(time.Microsecond)
 	snapshot := virt.Snapshot{Schema: 1, Provider: "pve", Host: "pve", CollectedAt: now, LastSuccessAt: &now, TTLSeconds: 90, Status: "ok", VMs: []virt.VM{{ID: 100, Name: "guest", Status: "running", IPs: []string{"192.0.2.10", "2001:db8::10"}}}}
+	snapshot.VMs[0].NetRateLimits = map[string]float64{"net0": 104.86, "net1": 0}
+	for i := range 1022 {
+		snapshot.VMs[0].IPs = append(snapshot.VMs[0].IPs, "10.0."+strconv.Itoa(i/256)+"."+strconv.Itoa(i%256))
+	}
 	ipTime := now.Add(-5 * time.Minute)
 	snapshot.VMs[0].IPsCollectedAt, snapshot.VMs[0].IPsTTLSeconds = &ipTime, 900
 	post := func(sample virt.Snapshot, secret string, want int) {
@@ -80,10 +86,14 @@ func TestIntegrationVirtLifecycle(t *testing.T) {
 		t.Fatalf("latest snapshot: %+v", view)
 	}
 	firstReceived := *view.ReceivedAt
+	if !maps.Equal(view.Snapshot.VMs[0].NetRateLimits, snapshot.VMs[0].NetRateLimits) {
+		t.Fatal("NIC rate limits were lost or changed in snapshot")
+	}
 	if view.Snapshot.VMs[0].IPsCollectedAt == nil || !view.Snapshot.VMs[0].IPsCollectedAt.Equal(ipTime) || view.Snapshot.VMs[0].IPsTTLSeconds != 900 {
 		t.Fatal("IP freshness was lost or refreshed with hot data")
 	}
 	for _, vm := range []virt.VM{
+		{ID: 100, Status: "running", NetRateLimits: map[string]float64{"net0": -1}},
 		{ID: 100, Status: "running", IPsTTLSeconds: 900},
 		{ID: 100, Status: "running", IPsCollectedAt: &ipTime},
 		{ID: 100, Status: "running", IPsCollectedAt: new(now.Add(time.Second)), IPsTTLSeconds: 900},
@@ -92,10 +102,10 @@ func TestIntegrationVirtLifecycle(t *testing.T) {
 		invalid.VMs = []virt.VM{vm}
 		post(invalid, server.Secret, 400)
 	}
-	if len(view.Snapshot.VMs[0].IPs) != 2 || view.Snapshot.VMs[0].IPs[1] != "2001:db8::10" {
-		t.Fatal("guest IPs were lost in persistence")
+	if len(view.Snapshot.VMs[0].IPs) != 1024 || view.Snapshot.VMs[0].IPs[1] != "2001:db8::10" {
+		t.Fatal("guest IPs were lost in snapshot")
 	}
-	for _, ips := range [][]string{{"not-an-ip"}, {"127.0.0.1"}, {"fe80::1"}, {"ff02::1"}, {"192.0.2.10", "::ffff:192.0.2.10"}, make([]string, 129)} {
+	for _, ips := range [][]string{{"not-an-ip"}, {"127.0.0.1"}, {"fe80::1"}, {"ff02::1"}, {"192.0.2.10", "::ffff:192.0.2.10"}, append(slices.Clone(snapshot.VMs[0].IPs), "198.51.100.1")} {
 		invalid := snapshot
 		invalid.VMs = []virt.VM{snapshot.VMs[0]}
 		invalid.VMs[0].IPs = ips
@@ -138,13 +148,17 @@ func TestIntegrationVirtLifecycle(t *testing.T) {
 	}
 	post(snapshot, server.Secret, 401)
 	post(snapshot, rotated, 204)
+	restarted := store.New(db, nil, time.UTC, pgtest.ConfigCipher(t))
+	if err := restarted.Node.RebuildServerCache(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	view, err = restarted.Node.Virt(t.Context(), server.ID)
+	if err != nil || view.Snapshot != nil || view.ReceivedAt != nil || !view.Stale {
+		t.Fatalf("restart retained VM data: %+v, %v", view, err)
+	}
 	if err := st.Node.DeleteNode(t.Context(), server.ID); err != nil {
 		t.Fatal(err)
 	}
 	post(snapshot, rotated, 401)
 	call("GET", path, "", nil, true, 404)
-	var count int64
-	if err := db.Table("server_virt").Count(&count).Error; err != nil || count != 0 {
-		t.Fatalf("deleted node retained VM snapshot: %d %v", count, err)
-	}
 }

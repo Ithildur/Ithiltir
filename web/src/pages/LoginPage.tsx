@@ -99,16 +99,20 @@ const LoginPage: React.FC = () => {
   const deniedNoticeKeyRef = React.useRef<string | null>(null);
 
   React.useEffect(() => {
-    if (redirectState.denied?.code !== 403 || redirectState.denied.reason !== 'statistics') {
+    const reason = redirectState.denied?.reason;
+    if (redirectState.denied?.code !== 403 || (reason !== 'statistics' && reason !== 'pve')) {
       return;
     }
 
-    const noticeKey = `${location.key}:statistics:403`;
+    const noticeKey = `${location.key}:${reason}:403`;
     if (deniedNoticeKeyRef.current === noticeKey) {
       return;
     }
     deniedNoticeKeyRef.current = noticeKey;
-    pushTopBanner(t('stats_auth_required'), { tone: 'error', durationMs: 4000 });
+    pushTopBanner(t(reason === 'pve' ? 'pve_forbidden' : 'stats_auth_required'), {
+      tone: 'error',
+      durationMs: 4000,
+    });
   }, [location.key, redirectState.denied, t]);
 
   React.useEffect(() => {

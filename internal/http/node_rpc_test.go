@@ -228,6 +228,7 @@ func TestIntegrationNodeHTTPAndRPC(t *testing.T) {
 		return response, raw
 	}
 	base := "/api/admin/nodes/" + strconv.FormatInt(rpcNode.ID, 10) + "/virt"
+	historyPath := "/api/virt/" + strconv.FormatInt(rpcNode.ID, 10) + "/vms/101/history"
 	until := time.Now().Add(2 * time.Second)
 	for {
 		response, body := adminGet(base+"/capabilities", true)
@@ -242,8 +243,8 @@ func TestIntegrationNodeHTTPAndRPC(t *testing.T) {
 		}
 		time.Sleep(time.Millisecond)
 	}
-	if response, _ := adminGet(base+"/vms/101/history", false); response.StatusCode != 401 {
-		t.Fatal("history missing admin boundary")
+	if response, _ := adminGet(historyPath, false); response.StatusCode != 403 {
+		t.Fatal("history missing guest access boundary")
 	}
 	queryDone := make(chan error, 1)
 	go func() {
@@ -263,7 +264,7 @@ func TestIntegrationNodeHTTPAndRPC(t *testing.T) {
 		}
 		queryDone <- err
 	}()
-	response, body := adminGet(base+"/vms/101/history", true)
+	response, body := adminGet(historyPath, true)
 	if response.StatusCode != 200 || !bytes.Contains(body, []byte(`"source":"pve_rrd"`)) {
 		t.Fatalf("history: %d %s", response.StatusCode, body)
 	}
@@ -306,11 +307,20 @@ func TestIntegrationNodeHTTPAndRPC(t *testing.T) {
 	if err := sqlDB.Close(); err != nil {
 		t.Fatal(err)
 	}
-	if body := post("virt", raw, 503); !bytes.Contains(body, []byte(`"virt_unavailable"`)) {
-		t.Fatalf("HTTP storage failure changed: %s", body)
+	vmSnapshot.CollectedAt = time.Now().UTC()
+	vmSnapshot.LastSuccessAt = &vmSnapshot.CollectedAt
+	vmSnapshot.VMs[0].Name = "after-database-close"
+	raw, err = json.Marshal(vmSnapshot)
+	if err != nil {
+		t.Fatal(err)
 	}
+	post("virt", raw, 204)
 	activeCtx := metadata.NewOutgoingContext(t.Context(), metadata.Pairs("x-node-secret", httpNode.Secret))
-	if _, err := client.Virt(activeCtx, &nodewire.Report{Json: raw}); status.Code(err) != codes.Unavailable || status.Convert(err).Message() != "virt_unavailable" {
-		t.Fatalf("RPC storage failure: %v", err)
+	if _, err := client.Virt(activeCtx, &nodewire.Report{Json: raw}); err != nil {
+		t.Fatalf("RPC VM cache depended on PostgreSQL: %v", err)
+	}
+	view, err := st.Node.Virt(t.Context(), httpNode.ID)
+	if err != nil || view.Snapshot == nil || view.Snapshot.VMs[0].Name != "after-database-close" {
+		t.Fatalf("VM read depended on PostgreSQL: %+v %v", view, err)
 	}
 }

@@ -44,7 +44,7 @@ func TestDeployAssetRequiresNodeSecret(t *testing.T) {
 		},
 	}
 	projection := frontprojection.New()
-	st := nodestore.New(nil, frontcache.New(nil, nil, projection), projection, time.Local)
+	st := nodestore.New(nil, nil, frontcache.New(nil, nil, projection), projection, time.Local)
 	if err := st.SyncServerCache(t.Context(), model.Server{ID: 1, Secret: "node-secret"}); err != nil {
 		t.Fatalf("SyncServerCache() error = %v", err)
 	}

@@ -35,11 +35,11 @@ AArch64 机器使用 `ARCH=arm64`。在受支持的 Debian/Ubuntu 系统上，�
 
 安装完成后访问配置的 `app.public_url`，在地址后加 `/login` 进入管理台。创建节点后，按管理台生成的命令安装 Node。
 
-可选 PVE VM 监控需要使用 `scripts/package.sh --with-pve` 打包采集工具，再在 PVE 宿主机的 Linux Node 安装命令末尾追加 `--pve`。目前提供独立上报和管理员读取接口，没有 UI。安装、更新和停用方式见 [Node 部署说明](deploy/node/README.md#optional-pve-monitoring)。
+可选 PVE VM 监控需要使用 `scripts/package.sh --with-pve` 打包采集工具，再在 PVE 宿主机的 Linux Node 安装命令末尾追加 `--pve`。点击宿主机卡片上的 PVE 系统图标可查看 VM 列表、详情和历史指标。游客访问默认关闭，可在系统设置中开启，且仅适用于游客可见的宿主机。历史查询要求 Node gRPC 查询连接。安装、更新和停用方式见 [Node 部署说明](deploy/node/README.md#optional-pve-monitoring)。
 
 ## 源码运行
 
-源码开发需要 Go 1.27.1+、Bun 1.3.11、PostgreSQL 16+ 及对应主版本的 TimescaleDB。除非用 `--no-redis` 启动，否则还需要 Redis。
+源码开发需要 Go 1.27.3+、Bun 1.3.11、PostgreSQL 16+ 及对应主版本的 TimescaleDB。除非用 `--no-redis` 启动，否则还需要 Redis。
 
 ```bash
 cp configs/config.example.yaml config.local.yaml

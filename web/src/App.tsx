@@ -13,12 +13,13 @@ import { isCanceledRequestError } from '@utils/errors';
 const AdminConsolePage = React.lazy(() => import('@pages/AdminConsolePage'));
 const StatisticsPage = React.lazy(() => import('@pages/statistics/Page'));
 const TrafficPage = React.lazy(() => import('@pages/traffic/Page'));
+const PVEPage = React.lazy(() => import('@pages/pve/Page'));
 
 type LoginRedirectState = {
   from?: string;
   denied?: {
     code: 403;
-    reason: 'statistics';
+    reason: 'statistics' | 'pve';
   };
 };
 
@@ -65,7 +66,7 @@ const RequireAuth: React.FC<{
 };
 
 const RequireStatisticsAccess: React.FC<{
-  kind: 'history' | 'traffic';
+  kind: 'history' | 'traffic' | 'pve';
   children: React.ReactElement;
 }> = ({ kind, children }) => {
   const { t } = useI18n();
@@ -95,7 +96,8 @@ const RequireStatisticsAccess: React.FC<{
   }
   if (isAuthenticated) return children;
   if (accessError !== null) {
-    const messageKey: TranslationKey = kind === 'history' ? 'stats_error' : 'traffic_error';
+    const messageKey: TranslationKey =
+      kind === 'pve' ? 'pve_error' : kind === 'history' ? 'stats_error' : 'traffic_error';
     return (
       <div className="min-h-screen bg-(--theme-page-bg) text-(--theme-fg-default) dark:bg-(--theme-bg-default)">
         <main
@@ -113,16 +115,18 @@ const RequireStatisticsAccess: React.FC<{
   if (accessStatus !== 'ready' || !access) return <FullScreenLoader />;
 
   const allowed =
-    kind === 'history'
-      ? access.history_guest_access_mode === 'by_node'
-      : access.traffic_guest_access_mode === 'by_node';
+    kind === 'pve'
+      ? access.pve_guest_visible === true
+      : kind === 'history'
+        ? access.history_guest_access_mode === 'by_node'
+        : access.traffic_guest_access_mode === 'by_node';
   if (!allowed) {
     return (
       <Navigate
         to="/login"
         replace
         state={{
-          denied: { code: 403, reason: 'statistics' },
+          denied: { code: 403, reason: kind === 'pve' ? 'pve' : 'statistics' },
           from: `${location.pathname}${location.search}${location.hash}`,
         }}
       />
@@ -139,6 +143,16 @@ const App: React.FC = () => (
     <Routes>
       <Route path="/login" element={<LoginPage />} />
       <Route path="/" element={<DashboardPage />} />
+      <Route
+        path="/pve/:serverId"
+        element={
+          <RequireStatisticsAccess kind="pve">
+            <LazyPage>
+              <PVEPage />
+            </LazyPage>
+          </RequireStatisticsAccess>
+        }
+      />
       <Route
         path="/statistics/:serverId"
         element={

@@ -25,6 +25,9 @@ import (
 )
 
 type updateInput struct {
+	VMMemoryEnabled          *bool                             `json:"vm_memory_enabled"`
+	VMCPUThreshold           *int                              `json:"vm_cpu_threshold"`
+	VMMemoryThreshold        *int                              `json:"vm_memory_threshold"`
 	Name                     *string                           `json:"name"`
 	IsGuestVisible           *bool                             `json:"is_guest_visible"`
 	TrafficP95Enabled        *bool                             `json:"traffic_p95_enabled"`
@@ -67,6 +70,8 @@ func (h *handler) updateHandler(w http.ResponseWriter, r *http.Request, rawID st
 	}
 	if err := normalizeUpdate(&in); err != nil {
 		switch {
+		case errors.Is(err, errInvalidVMThreshold):
+			httperr.Write(w, http.StatusBadRequest, "invalid_vm_threshold", err.Error())
 		case errors.Is(err, errInvalidNodeName):
 			httperr.Write(w, http.StatusBadRequest, "invalid_name", err.Error())
 		case errors.Is(err, errInvalidDisplayOrder):
@@ -143,6 +148,7 @@ func (h *handler) updateHandler(w http.ResponseWriter, r *http.Request, rawID st
 }
 
 var (
+	errInvalidVMThreshold             = errors.New("VM thresholds must be integers between 1 and 100")
 	errInvalidNodeName                = errors.New("name must contain 1 to 64 characters and no control characters")
 	errInvalidDisplayOrder            = errors.New("display_order must be positive")
 	errInvalidTrafficCycleMode        = errors.New("traffic_cycle_mode is invalid")
@@ -156,6 +162,11 @@ var (
 func normalizeUpdate(in *updateInput) error {
 	if in == nil {
 		return errors.New("request is required")
+	}
+	for _, threshold := range []*int{in.VMCPUThreshold, in.VMMemoryThreshold} {
+		if threshold != nil && (*threshold < 1 || *threshold > 100) {
+			return errInvalidVMThreshold
+		}
 	}
 	if in.Name != nil {
 		name := strings.TrimSpace(*in.Name)
@@ -287,6 +298,9 @@ func nodeCycleError(err error) error {
 
 func updateFromInput(in updateInput) nodestore.NodeUpdate {
 	upd := nodestore.NodeUpdate{
+		VMMemoryEnabled:          in.VMMemoryEnabled,
+		VMCPUThreshold:           in.VMCPUThreshold,
+		VMMemoryThreshold:        in.VMMemoryThreshold,
 		Name:                     in.Name,
 		IsGuestVisible:           in.IsGuestVisible,
 		TrafficP95Enabled:        in.TrafficP95Enabled,
@@ -308,6 +322,8 @@ func updateFromInput(in updateInput) nodestore.NodeUpdate {
 
 func hasNodeUpdates(upd nodestore.NodeUpdate) bool {
 	return upd.Name != nil ||
+		upd.VMMemoryEnabled != nil ||
+		upd.VMCPUThreshold != nil || upd.VMMemoryThreshold != nil ||
 		upd.IsGuestVisible != nil ||
 		upd.TrafficP95Enabled != nil ||
 		upd.TrafficCycleMode != nil ||

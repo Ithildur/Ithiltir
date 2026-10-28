@@ -56,6 +56,7 @@ type Settings struct {
 	DashUpdateChannel  DashUpdateChannel
 	DashUpdateMode     DashUpdateMode
 	UptimeGuestVisible bool
+	PVEGuestVisible    bool
 	UptimeWarningSLA   float64
 	UptimeErrorSLA     float64
 }
@@ -67,6 +68,7 @@ type SettingsPatch struct {
 	DashUpdateChannel  *DashUpdateChannel
 	DashUpdateMode     *DashUpdateMode
 	UptimeGuestVisible *bool
+	PVEGuestVisible    *bool
 	UptimeWarningSLA   *float64
 	UptimeErrorSLA     *float64
 }
@@ -223,6 +225,7 @@ func (s *Store) GetSettings(ctx context.Context) (Settings, error) {
 		DashUpdateChannel:  policy.Channel,
 		DashUpdateMode:     policy.Mode,
 		UptimeGuestVisible: item.UptimeGuestVisible,
+		PVEGuestVisible:    item.PVEGuestVisible,
 		UptimeWarningSLA:   item.UptimeWarningSLA,
 		UptimeErrorSLA:     item.UptimeErrorSLA,
 	}, nil
@@ -249,6 +252,9 @@ func (s *Store) PatchSettings(ctx context.Context, patch SettingsPatch) error {
 	}
 	if patch.UptimeGuestVisible != nil {
 		updates["uptime_guest_visible"] = *patch.UptimeGuestVisible
+	}
+	if patch.PVEGuestVisible != nil {
+		updates["pve_guest_visible"] = *patch.PVEGuestVisible
 	}
 	if patch.UptimeWarningSLA != nil {
 		updates["uptime_warning_sla"] = *patch.UptimeWarningSLA

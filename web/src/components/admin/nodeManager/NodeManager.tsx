@@ -9,6 +9,7 @@ import Card from '@components/ui/Card';
 import ConfirmDialog from '@components/ui/ConfirmDialog';
 import SearchInput from '@components/ui/SearchInput';
 import NodeTrafficSettingsModal from './NodeTrafficSettingsModal';
+import NodeVMSettingsModal from './NodeVMSettingsModal';
 import NodeSettingsModal from './NodeSettingsModal';
 import { useAuthStore } from '@stores/authStore';
 import { useAdminNodesStore } from '@stores/adminNodesStore';
@@ -74,6 +75,8 @@ const NodeManager: React.FC = () => {
   const upgradingNodeIds = useAdminNodesStore((state) => state.upgradingNodeIds);
   const [basicSettingsNodeId, setBasicSettingsNodeId] = React.useState<number | null>(null);
   const [trafficSettingsNodeId, setTrafficSettingsNodeId] = React.useState<number | null>(null);
+  const [vmSettingsNodeId, setVMSettingsNodeId] = React.useState<number | null>(null);
+  const vmSettingsNode = nodes.find((node) => node.id === vmSettingsNodeId && node.pve);
 
   const {
     rebuildingNodeId: rebuildingTrafficNodeId,
@@ -190,6 +193,7 @@ const NodeManager: React.FC = () => {
     rebuildNodeTraffic,
     rename,
     saveNodeTrafficSettings,
+    saveVMSettings,
     saveSettings,
     setTrafficP95ForSelected,
     toggleGuestVisible,
@@ -280,7 +284,7 @@ const NodeManager: React.FC = () => {
           />
         </Card>
       ) : (
-        <Card className="hidden md:block overflow-hidden">
+        <Card className="hidden md:block overflow-x-auto">
           <NodeAdvancedTable
             nodes={filteredNodes}
             selectedP95NodeIds={selectedP95NodeIdSet}
@@ -295,6 +299,7 @@ const NodeManager: React.FC = () => {
             onToggleP95Node={toggleP95NodeSelection}
             onToggleTrafficP95={(node) => void toggleTrafficP95(node)}
             onOpenTrafficSettings={(node) => setTrafficSettingsNodeId(node.id)}
+            onOpenVMSettings={(node) => setVMSettingsNodeId(node.id)}
             onRebuildTraffic={(node) => void rebuildNodeTraffic(node)}
           />
           {selectedP95Ids.length > 0 && (
@@ -366,6 +371,7 @@ const NodeManager: React.FC = () => {
               onToggleP95Node={toggleP95NodeSelection}
               onToggleTrafficP95={(target) => void toggleTrafficP95(target)}
               onOpenTrafficSettings={(target) => setTrafficSettingsNodeId(target.id)}
+              onOpenVMSettings={(target) => setVMSettingsNodeId(target.id)}
               onRebuildTraffic={(target) => void rebuildNodeTraffic(target)}
             />
           ))}
@@ -427,6 +433,14 @@ const NodeManager: React.FC = () => {
           saving={savingTrafficSettingsNodeIdSet.has(trafficSettingsNode.id)}
           onClose={() => setTrafficSettingsNodeId(null)}
           onSave={(patch) => saveNodeTrafficSettings(trafficSettingsNode.id, patch)}
+        />
+      )}
+      {vmSettingsNode && (
+        <NodeVMSettingsModal
+          key={vmSettingsNode.id}
+          node={vmSettingsNode}
+          onClose={() => setVMSettingsNodeId(null)}
+          onSave={(settings) => saveVMSettings(vmSettingsNode.id, settings)}
         />
       )}
     </div>

@@ -96,3 +96,22 @@ export const TrafficRebuildButton: React.FC<TrafficRebuildButtonProps> = ({
     </button>
   );
 };
+
+export const VMSettingsButton = ({
+  node,
+  onOpen,
+}: NodeActionProps & { onOpen: (node: NodeRow) => void }) => {
+  const { t } = useI18n();
+  return (
+    <button
+      type="button"
+      disabled={!node.pve}
+      onClick={() => onOpen(node)}
+      className={`ui-focus-ring whitespace-nowrap ${trafficSettingsButtonClass}`}
+      aria-label={t('admin_node_vm_title', { name: node.name })}
+      title={node.pve ? undefined : t('admin_node_vm_pve_only')}
+    >
+      {t('admin_node_vm_settings')}
+    </button>
+  );
+};

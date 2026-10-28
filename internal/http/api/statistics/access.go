@@ -14,6 +14,7 @@ import (
 )
 
 type accessView struct {
+	PVEGuestVisible        bool                              `json:"pve_guest_visible"`
 	HistoryGuestAccessMode metricdata.HistoryGuestAccessMode `json:"history_guest_access_mode"`
 	GuestAccessMode        trafficstore.GuestAccessMode      `json:"traffic_guest_access_mode"`
 }
@@ -49,7 +50,12 @@ func loadAccess(ctx context.Context, st *store.Stores) (accessView, error) {
 	if err != nil {
 		return accessView{}, err
 	}
+	settings, err := st.System.GetSettings(dbCtx)
+	if err != nil {
+		return accessView{}, err
+	}
 	return accessView{
+		PVEGuestVisible:        settings.PVEGuestVisible,
 		HistoryGuestAccessMode: historyMode,
 		GuestAccessMode:        trafficSettings.GuestAccessMode,
 	}, nil

@@ -4,9 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 
 	"dash/internal/config"
+	"dash/internal/infra"
 	"dash/internal/model"
 
 	"gorm.io/datatypes"
@@ -14,6 +16,9 @@ import (
 )
 
 var serverMetaSelectColumns = []string{
+	"vm_memory_enabled",
+	"vm_cpu_threshold",
+	"vm_memory_threshold",
 	"id",
 	"name",
 	"hostname",
@@ -46,94 +51,103 @@ var serverMetaSelectColumns = []string{
 
 // ServerMeta is the static server data used to assemble frontend and ingest views.
 type ServerMeta struct {
-	ID              int64          `json:"id"`
-	Name            string         `json:"name"`
-	Hostname        string         `json:"hostname"`
-	DisplayOrder    int            `json:"display_order"`
-	IP              *string        `json:"ip,omitempty"`
-	OS              *string        `json:"os,omitempty"`
-	Platform        *string        `json:"platform,omitempty"`
-	PlatformVersion *string        `json:"platform_version,omitempty"`
-	KernelVersion   *string        `json:"kernel_version,omitempty"`
-	Arch            *string        `json:"arch,omitempty"`
-	CPUModel        *string        `json:"cpu_model,omitempty"`
-	CPUVendor       *string        `json:"cpu_vendor,omitempty"`
-	CPUCoresPhys    *int16         `json:"cpu_cores_physical,omitempty"`
-	CPUCoresLog     *int16         `json:"cpu_cores_logical,omitempty"`
-	CPUSockets      *int16         `json:"cpu_sockets,omitempty"`
-	CPUMhz          *float64       `json:"cpu_mhz,omitempty"`
-	MemTotal        *int64         `json:"mem_total,omitempty"`
-	SwapTotal       *int64         `json:"swap_total,omitempty"`
-	DiskTotal       *int64         `json:"disk_total,omitempty"`
-	RootPath        *string        `json:"root_path,omitempty"`
-	RootFSType      *string        `json:"root_fs_type,omitempty"`
-	RaidSupported   *bool          `json:"raid_supported,omitempty"`
-	RaidAvailable   *bool          `json:"raid_available,omitempty"`
-	IntervalSec     *int32         `json:"interval_sec,omitempty"`
-	AgentVersion    *string        `json:"agent_version,omitempty"`
-	Tags            datatypes.JSON `json:"tags,omitempty"`
+	VMMemoryEnabled   bool           `json:"vm_memory_enabled"`
+	VMCPUThreshold    int            `json:"vm_cpu_threshold"`
+	VMMemoryThreshold int            `json:"vm_memory_threshold"`
+	ID                int64          `json:"id"`
+	Name              string         `json:"name"`
+	Hostname          string         `json:"hostname"`
+	DisplayOrder      int            `json:"display_order"`
+	IP                *string        `json:"ip,omitempty"`
+	OS                *string        `json:"os,omitempty"`
+	Platform          *string        `json:"platform,omitempty"`
+	PlatformVersion   *string        `json:"platform_version,omitempty"`
+	KernelVersion     *string        `json:"kernel_version,omitempty"`
+	Arch              *string        `json:"arch,omitempty"`
+	CPUModel          *string        `json:"cpu_model,omitempty"`
+	CPUVendor         *string        `json:"cpu_vendor,omitempty"`
+	CPUCoresPhys      *int16         `json:"cpu_cores_physical,omitempty"`
+	CPUCoresLog       *int16         `json:"cpu_cores_logical,omitempty"`
+	CPUSockets        *int16         `json:"cpu_sockets,omitempty"`
+	CPUMhz            *float64       `json:"cpu_mhz,omitempty"`
+	MemTotal          *int64         `json:"mem_total,omitempty"`
+	SwapTotal         *int64         `json:"swap_total,omitempty"`
+	DiskTotal         *int64         `json:"disk_total,omitempty"`
+	RootPath          *string        `json:"root_path,omitempty"`
+	RootFSType        *string        `json:"root_fs_type,omitempty"`
+	RaidSupported     *bool          `json:"raid_supported,omitempty"`
+	RaidAvailable     *bool          `json:"raid_available,omitempty"`
+	IntervalSec       *int32         `json:"interval_sec,omitempty"`
+	AgentVersion      *string        `json:"agent_version,omitempty"`
+	Tags              datatypes.JSON `json:"tags,omitempty"`
 }
 
 func metaFromServer(srv model.Server) ServerMeta {
 	return ServerMeta{
-		ID:              srv.ID,
-		Name:            srv.Name,
-		Hostname:        srv.Hostname,
-		DisplayOrder:    srv.DisplayOrder,
-		IP:              srv.IP,
-		OS:              srv.OS,
-		Platform:        srv.Platform,
-		PlatformVersion: srv.PlatformVersion,
-		KernelVersion:   srv.KernelVersion,
-		Arch:            srv.Arch,
-		CPUModel:        srv.CPUModel,
-		CPUVendor:       srv.CPUVendor,
-		CPUCoresPhys:    srv.CPUCoresPhys,
-		CPUCoresLog:     srv.CPUCoresLog,
-		CPUSockets:      srv.CPUSockets,
-		CPUMhz:          srv.CPUMhz,
-		MemTotal:        srv.MemTotal,
-		SwapTotal:       srv.SwapTotal,
-		DiskTotal:       srv.DiskTotal,
-		RootPath:        srv.RootPath,
-		RootFSType:      srv.RootFSType,
-		RaidSupported:   srv.RaidSupported,
-		RaidAvailable:   srv.RaidAvailable,
-		IntervalSec:     srv.IntervalSec,
-		AgentVersion:    srv.AgentVersion,
-		Tags:            srv.Tags,
+		VMMemoryEnabled:   srv.VMMemoryEnabled,
+		VMCPUThreshold:    srv.VMCPUThreshold,
+		VMMemoryThreshold: srv.VMMemoryThreshold,
+		ID:                srv.ID,
+		Name:              srv.Name,
+		Hostname:          srv.Hostname,
+		DisplayOrder:      srv.DisplayOrder,
+		IP:                srv.IP,
+		OS:                srv.OS,
+		Platform:          srv.Platform,
+		PlatformVersion:   srv.PlatformVersion,
+		KernelVersion:     srv.KernelVersion,
+		Arch:              srv.Arch,
+		CPUModel:          srv.CPUModel,
+		CPUVendor:         srv.CPUVendor,
+		CPUCoresPhys:      srv.CPUCoresPhys,
+		CPUCoresLog:       srv.CPUCoresLog,
+		CPUSockets:        srv.CPUSockets,
+		CPUMhz:            srv.CPUMhz,
+		MemTotal:          srv.MemTotal,
+		SwapTotal:         srv.SwapTotal,
+		DiskTotal:         srv.DiskTotal,
+		RootPath:          srv.RootPath,
+		RootFSType:        srv.RootFSType,
+		RaidSupported:     srv.RaidSupported,
+		RaidAvailable:     srv.RaidAvailable,
+		IntervalSec:       srv.IntervalSec,
+		AgentVersion:      srv.AgentVersion,
+		Tags:              srv.Tags,
 	}
 }
 
 func (m ServerMeta) toServer(secret string) model.Server {
 	return model.Server{
-		ID:              m.ID,
-		Name:            m.Name,
-		Hostname:        m.Hostname,
-		Secret:          secret,
-		DisplayOrder:    m.DisplayOrder,
-		IP:              m.IP,
-		OS:              m.OS,
-		Platform:        m.Platform,
-		PlatformVersion: m.PlatformVersion,
-		KernelVersion:   m.KernelVersion,
-		Arch:            m.Arch,
-		CPUModel:        m.CPUModel,
-		CPUVendor:       m.CPUVendor,
-		CPUCoresPhys:    m.CPUCoresPhys,
-		CPUCoresLog:     m.CPUCoresLog,
-		CPUSockets:      m.CPUSockets,
-		CPUMhz:          m.CPUMhz,
-		MemTotal:        m.MemTotal,
-		SwapTotal:       m.SwapTotal,
-		DiskTotal:       m.DiskTotal,
-		RootPath:        m.RootPath,
-		RootFSType:      m.RootFSType,
-		RaidSupported:   m.RaidSupported,
-		RaidAvailable:   m.RaidAvailable,
-		IntervalSec:     m.IntervalSec,
-		AgentVersion:    m.AgentVersion,
-		Tags:            m.Tags,
+		VMMemoryEnabled:   m.VMMemoryEnabled,
+		VMCPUThreshold:    m.VMCPUThreshold,
+		VMMemoryThreshold: m.VMMemoryThreshold,
+		ID:                m.ID,
+		Name:              m.Name,
+		Hostname:          m.Hostname,
+		Secret:            secret,
+		DisplayOrder:      m.DisplayOrder,
+		IP:                m.IP,
+		OS:                m.OS,
+		Platform:          m.Platform,
+		PlatformVersion:   m.PlatformVersion,
+		KernelVersion:     m.KernelVersion,
+		Arch:              m.Arch,
+		CPUModel:          m.CPUModel,
+		CPUVendor:         m.CPUVendor,
+		CPUCoresPhys:      m.CPUCoresPhys,
+		CPUCoresLog:       m.CPUCoresLog,
+		CPUSockets:        m.CPUSockets,
+		CPUMhz:            m.CPUMhz,
+		MemTotal:          m.MemTotal,
+		SwapTotal:         m.SwapTotal,
+		DiskTotal:         m.DiskTotal,
+		RootPath:          m.RootPath,
+		RootFSType:        m.RootFSType,
+		RaidSupported:     m.RaidSupported,
+		RaidAvailable:     m.RaidAvailable,
+		IntervalSec:       m.IntervalSec,
+		AgentVersion:      m.AgentVersion,
+		Tags:              m.Tags,
 	}
 }
 
@@ -195,7 +209,7 @@ func (s *Store) deleteServerMeta(id int64, secret string) {
 	}
 }
 
-func (s *Store) removeServerState(id int64, secret string) {
+func (s *Store) removeServerState(ctx context.Context, id int64, secret string) {
 	s.deleteServerMeta(id, secret)
 	if s == nil || s.mem == nil || id <= 0 {
 		return
@@ -203,6 +217,16 @@ func (s *Store) removeServerState(id int64, secret string) {
 	s.mem.updateMu.Lock()
 	delete(s.mem.updates, id)
 	s.mem.updateMu.Unlock()
+	s.mem.virtMu.Lock()
+	delete(s.mem.virt, id)
+	s.mem.virtMu.Unlock()
+	if s.redis != nil {
+		cacheCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), config.RedisWriteTimeout)
+		defer cancel()
+		if err := s.redis.Del(cacheCtx, virtKey(id)).Err(); err != nil {
+			infra.WithModule("virt").Warn(ctx, "deleted node VM cache cleanup failed", err, slog.Int64("node_id", id))
+		}
+	}
 }
 
 // reconcileCommit reloads PostgreSQL-owned metadata after Commit reports an
@@ -236,7 +260,7 @@ func (s *Store) RefreshMetaByIDs(ctx context.Context, ids []int64) error {
 	for _, srv := range rows {
 		seen[srv.ID] = struct{}{}
 		if srv.IsDeleted {
-			s.removeServerState(srv.ID, srv.Secret)
+			s.removeServerState(ctx, srv.ID, srv.Secret)
 			continue
 		}
 		if err := s.SyncServerCache(ctx, srv); err != nil {
@@ -248,7 +272,7 @@ func (s *Store) RefreshMetaByIDs(ctx context.Context, ids []int64) error {
 		if _, ok := seen[id]; ok {
 			continue
 		}
-		s.removeServerState(id, "")
+		s.removeServerState(ctx, id, "")
 	}
 	return nil
 }

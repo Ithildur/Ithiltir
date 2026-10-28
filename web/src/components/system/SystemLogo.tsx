@@ -127,6 +127,15 @@ export const PlatformLogo: React.FC<LogoProps & { platform: NodeDeployPlatform }
   }
 };
 
+export const isPVESystem = (system: RuntimeSystem): boolean => {
+  const name =
+    `${system.os ?? ''} ${system.platform ?? ''} ${system.kernelVersion ?? ''}`.toLowerCase();
+  return (
+    !name.includes('windows') &&
+    (name.includes('proxmox') || name.includes(' pve') || name.includes('-pve'))
+  );
+};
+
 export const SystemLogo: React.FC<LogoProps & { system: RuntimeSystem }> = ({
   system,
   size = 16,
@@ -137,7 +146,7 @@ export const SystemLogo: React.FC<LogoProps & { system: RuntimeSystem }> = ({
     .toLowerCase();
 
   if (haystack.includes('windows')) return <WindowsLogo size={size} className={className} />;
-  if (haystack.includes('proxmox') || haystack.includes(' pve') || haystack.includes('-pve')) {
+  if (isPVESystem(system)) {
     return <ProxmoxLogo size={size} className={className} />;
   }
   if (haystack.includes('mac') || haystack.includes('os x') || haystack.includes('darwin')) {

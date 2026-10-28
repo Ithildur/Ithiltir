@@ -29,6 +29,9 @@ const (
 // Nil fields are not updated; non-nil fields are applied.
 // GroupIDs uses tri-state semantics: nil = no change, empty = clear all, non-empty = replace.
 type NodeUpdate struct {
+	VMMemoryEnabled          *bool
+	VMCPUThreshold           *int
+	VMMemoryThreshold        *int
 	Name                     *string
 	IsGuestVisible           *bool
 	TrafficP95Enabled        *bool
@@ -44,6 +47,11 @@ type NodeUpdate struct {
 }
 
 type NodeItem struct {
+	VMMemoryEnabled          bool           `json:"vm_memory_enabled"`
+	VMCPUThreshold           int            `json:"vm_cpu_threshold"`
+	VMMemoryThreshold        int            `json:"vm_memory_threshold"`
+	Platform                 *string        `json:"platform,omitempty"`
+	KernelVersion            *string        `json:"kernel_version,omitempty"`
 	ID                       int64          `json:"id"`
 	Name                     string         `json:"name"`
 	Hostname                 string         `json:"hostname"`
@@ -73,7 +81,7 @@ func (s *Store) Nodes(ctx context.Context) ([]NodeItem, error) {
 	var nodes []NodeItem
 	err := s.db.WithContext(ctx).
 		Model(&model.Server{}).
-		Select([]string{"id", "name", "hostname", "ip", "os", "arch", "is_guest_visible", "traffic_p95_enabled", "traffic_cycle_mode", "traffic_billing_start_day", "traffic_billing_anchor_date", "traffic_billing_timezone", "traffic_direction_mode", "secret", "tags", "display_order", "agent_version"}).
+		Select([]string{"id", "name", "hostname", "ip", "os", "arch", "platform", "kernel_version", "vm_cpu_threshold", "vm_memory_threshold", "vm_memory_enabled", "is_guest_visible", "traffic_p95_enabled", "traffic_cycle_mode", "traffic_billing_start_day", "traffic_billing_anchor_date", "traffic_billing_timezone", "traffic_direction_mode", "secret", "tags", "display_order", "agent_version"}).
 		Where("is_deleted = ?", false).
 		Order("display_order DESC").
 		Find(&nodes).
@@ -251,7 +259,7 @@ func (s *Store) UpdateNode(ctx context.Context, id int64, upd NodeUpdate) error 
 }
 
 func needsMetaRefresh(upd NodeUpdate) bool {
-	return upd.Name != nil || upd.DisplayOrder != nil || upd.Secret != nil || upd.Tags != nil
+	return upd.Name != nil || upd.DisplayOrder != nil || upd.Secret != nil || upd.Tags != nil || upd.VMCPUThreshold != nil || upd.VMMemoryThreshold != nil || upd.VMMemoryEnabled != nil
 }
 
 func normalizeSecret(value string) (string, error) {
@@ -471,6 +479,15 @@ func (s *Store) syncFrontNodeOrders(ctx context.Context, ids []int64) error {
 
 func patchFields(upd NodeUpdate) map[string]any {
 	m := make(map[string]any)
+	if upd.VMMemoryEnabled != nil {
+		m["vm_memory_enabled"] = *upd.VMMemoryEnabled
+	}
+	if upd.VMCPUThreshold != nil {
+		m["vm_cpu_threshold"] = *upd.VMCPUThreshold
+	}
+	if upd.VMMemoryThreshold != nil {
+		m["vm_memory_threshold"] = *upd.VMMemoryThreshold
+	}
 	if upd.Name != nil {
 		m["name"] = *upd.Name
 	}
@@ -545,9 +562,6 @@ func (s *Store) deleteNode(ctx context.Context, id int64) error {
 
 	// Only invalidate catalogs before commit. Deleting the runtime here would
 	// lose the last good sample if PostgreSQL later failed to commit.
-	if err := tx.Where("server_id = ?", id).Delete(&model.ServerVirt{}).Error; err != nil {
-		return err
-	}
 	if err := s.invalidateFrontNodeDeletion(ctx); err != nil {
 		return err
 	}
@@ -560,7 +574,7 @@ func (s *Store) deleteNode(ctx context.Context, id int64) error {
 	}
 	committed = true
 
-	s.removeServerState(id, old.Secret)
+	s.removeServerState(ctx, id, old.Secret)
 	// Physical cache cleanup is derived-state housekeeping after the durable
 	// delete. Catalogs are already invalid, so cleanup failure cannot expose the
 	// deleted node as a valid projection.

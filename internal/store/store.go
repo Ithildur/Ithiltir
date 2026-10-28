@@ -48,7 +48,7 @@ func New(
 		Metric:  metricdata.New(db),
 		Front:   front,
 		Alert:   alert,
-		Node:    node.New(db, front, projection, trafficLoc),
+		Node:    node.New(db, redisClient, front, projection, trafficLoc),
 		System:  system.New(db),
 		MTLogin: mtlogin.New(),
 	}

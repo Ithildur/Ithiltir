@@ -1,5 +1,6 @@
 import type { Group, ManagedNode } from '@app-types/api';
 import type { NodeRow } from '@app-types/admin';
+import { isPVESystem } from '@components/system/SystemLogo';
 
 export const buildGroupLookup = (groups: Group[]): Record<number, string> =>
   groups.reduce(
@@ -16,6 +17,14 @@ const nodeRowFromManaged = (node: ManagedNode, groupLookup: Record<number, strin
     typeof node.hostname === 'string' && node.hostname.trim() ? node.hostname.trim() : '';
 
   return {
+    pve: isPVESystem({
+      os: node.os ?? undefined,
+      platform: node.platform ?? undefined,
+      kernelVersion: node.kernel_version ?? undefined,
+    }),
+    vmCPUThreshold: node.vm_cpu_threshold,
+    vmMemoryThreshold: node.vm_memory_threshold,
+    vmMemoryEnabled: node.vm_memory_enabled,
     id: node.id,
     name: node.name,
     hostname: resolvedHostname,

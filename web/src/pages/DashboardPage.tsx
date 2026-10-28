@@ -165,6 +165,7 @@ const DashboardPage: React.FC = () => {
   const canOpenTraffic =
     isAuthenticated || statisticsAccess?.traffic_guest_access_mode === 'by_node';
   const compact = theme.dashboard.density === 'compact';
+  const canOpenPVE = isAuthenticated || statisticsAccess?.pve_guest_visible === true;
   const summaryStrip = theme.dashboard.summary === 'strip';
   const summaryCardClass = `${SUMMARY_CARD_BASE_CLASS} ${compact ? 'rounded-2xl p-3.5' : 'rounded-xl p-4'}`;
   const summaryGridClass = compact
@@ -410,6 +411,7 @@ const DashboardPage: React.FC = () => {
                 view={view}
                 canOpenHistory={canOpenHistory}
                 canOpenTraffic={canOpenTraffic}
+                canOpenPVE={canOpenPVE}
               />
             ))}
 

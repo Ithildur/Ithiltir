@@ -3,7 +3,12 @@ import Card from '@components/ui/Card';
 import Checkbox from '@components/ui/Checkbox';
 import type { NodeRow } from '@app-types/admin';
 import { useI18n } from '@i18n';
-import { NodeP95Switch, TrafficRebuildButton, TrafficSettingsButton } from './NodeAdvancedActions';
+import {
+  NodeP95Switch,
+  TrafficRebuildButton,
+  TrafficSettingsButton,
+  VMSettingsButton,
+} from './NodeAdvancedActions';
 
 interface Props {
   node: NodeRow;
@@ -16,6 +21,7 @@ interface Props {
   onToggleP95Node: (id: number) => void;
   onToggleTrafficP95: (node: NodeRow) => void;
   onOpenTrafficSettings: (node: NodeRow) => void;
+  onOpenVMSettings: (node: NodeRow) => void;
   onRebuildTraffic: (node: NodeRow) => void;
 }
 
@@ -30,6 +36,7 @@ const MobileAdvancedNodeCard: React.FC<Props> = ({
   onToggleP95Node,
   onToggleTrafficP95,
   onOpenTrafficSettings,
+  onOpenVMSettings,
   onRebuildTraffic,
 }) => {
   const { t } = useI18n();
@@ -65,7 +72,8 @@ const MobileAdvancedNodeCard: React.FC<Props> = ({
           onOpen={onOpenTrafficSettings}
         />
       </div>
-      <div className="mt-3 flex justify-end">
+      <div className="mt-3 flex items-center justify-between gap-3">
+        <VMSettingsButton node={node} onOpen={onOpenVMSettings} />
         <TrafficRebuildButton
           node={node}
           billingEnabled={billingEnabled}

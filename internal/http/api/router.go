@@ -18,6 +18,7 @@ import (
 	nodeapi "dash/internal/http/api/node"
 	statisticsapi "dash/internal/http/api/statistics"
 	versionapi "dash/internal/http/api/version"
+	virtapi "dash/internal/http/api/virt"
 	"dash/internal/http/request"
 	"dash/internal/nodeingest"
 	"dash/internal/nodesession"
@@ -64,6 +65,7 @@ func Router(cfg *config.Config, deps Dependencies) (*routes.Blueprint, error) {
 	r.Include("/front", frontapi.Router(deps.Stores, cfg.App.EffectiveNodeOfflineThreshold(), optionalBearer))
 	r.Include("/metrics", metricsapi.Router(deps.Stores, cfg.App.EffectiveLocation(), optionalBearer))
 	r.Include("/statistics", statisticsapi.Router(deps.Stores, cfg.App.EffectiveLocation(), bearer, optionalBearer))
+	r.Include("/virt", virtapi.Router(deps.Stores, deps.NodeSessions), routes.IncludeAuth(routes.AuthOptional), routes.IncludeMiddleware(optionalBearer))
 	return r, nil
 }
 

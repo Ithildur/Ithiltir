@@ -12,5 +12,5 @@ import (
 
 func newTestStore(db *gorm.DB, client *redis.Client) *Store {
 	projection := frontprojection.New()
-	return New(db, frontcache.New(db, client, projection), projection, time.Local)
+	return New(db, client, frontcache.New(db, client, projection), projection, time.Local)
 }
