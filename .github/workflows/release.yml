@@ -151,7 +151,7 @@ jobs:
           if [[ -n "${ITHILTIR_NODE_VERSION:-}" ]]; then
             node_args=(--node-version "$ITHILTIR_NODE_VERSION")
           fi
-          bash scripts/package.sh --use-git-tag --release "${node_args[@]}" -o release -t linux/amd64,linux/arm64 --tar-gz
+          bash scripts/package.sh --use-git-tag --release --with-pve "${node_args[@]}" -o release -t linux/amd64,linux/arm64 --tar-gz
 
       - name: Upload Release Artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2

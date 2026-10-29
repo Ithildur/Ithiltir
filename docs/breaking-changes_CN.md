@@ -1,5 +1,20 @@
 # 破坏性变更
 
+## 0.4.0
+
+### 数据库升级
+
+- 从 `0.3.3` 升级会应用迁移 `0015`：新增 PVE 可见性和节点 VM 图表设置，删除未使用的通知/控制任务租约字段、恒为空对象的旧通知 `config` 列，以及固定的全局账期列。已有通知密文、渠道设置、节点账期、指标及流量历史保持不变，通知密钥无需更换。
+- 升级前备份 PostgreSQL，并单独备份 `$DASH_HOME/configs/notify-config.key`。受管 `dash update` 会先停止 Dash，执行迁移后再启动新版本。手工部署应先停止旧 Dash，使用新二进制和原有 `DASH_HOME` 执行 `dash migrate -config <配置路径>`，然后启动连接该数据库的新二进制。
+- Dash 与数据库结构必须配套升级。应用 `0015` 后，仅换回 `0.3.3` 二进制不构成回滚：旧二进制会拒绝启动于更高版本的 schema。受管更新中断时使用 `dash update recover`；迁移一旦开始，恢复会继续完成候选版本，不会让旧二进制连接已经变更的 schema。
+- 新安装执行完整迁移链；已有安装只执行待应用迁移。
+
+### Node 与 PVE 兼容性
+
+- 现有 HTTP 节点上报保持兼容，Node 默认传输仍为 HTTP。Dash `0.4.0` 的 gRPC 上报和 PVE 监控配套 Node `0.3.0`，PVE 监控还需要同版本的 root helper 服务，无需增加第二个公开端口。
+- Dash 发版流程会打入所选 Node release 的 PVE helper。打包 Dash `0.4.0` 前，应先发布 Node `0.3.0`，并提供 `Ithiltir-pve-cache-linux-amd64` 和 `Ithiltir-pve-cache-linux-arm64` 两个资产；helper 与内置 Node 使用同一版本。
+- Node 自更新不会替换 root 所有的 PVE helper 和服务单元，安装或更新它们需要带 `--pve` 重装；历史查询还需启用 `grpc` 或 `auto` 传输。PVE 游客访问默认关闭。安装及代理配置见 [Node 部署说明](../deploy/node/README.md#optional-pve-monitoring)。
+
 ## 0.3.3（2026-09-19）
 
 ### Uptime 时长统计

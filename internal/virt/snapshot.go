@@ -32,6 +32,8 @@ func (s Snapshot) MarshalJSON() ([]byte, error) {
 }
 
 type VM struct {
+	CollectedAt    *time.Time         `json:"collected_at,omitempty"`
+	TTLSeconds     int                `json:"ttl_seconds,omitzero"`
 	IPsCollectedAt *time.Time         `json:"ips_collected_at,omitempty"`
 	IPsTTLSeconds  int                `json:"ips_ttl_seconds,omitempty"`
 	IPs            []string           `json:"ips,omitempty"`
@@ -63,7 +65,7 @@ func (s Snapshot) Validate() error {
 	if len(s.Error) > 1024 || len(s.VMs) > 4096 {
 		return errors.New("virtualization snapshot exceeds limits")
 	}
-	if s.Status == "ok" && (s.Host == "" || s.LastSuccessAt == nil || !s.LastSuccessAt.Equal(s.CollectedAt) || s.Error != "" || s.VMs == nil) {
+	if s.Status == "ok" && (s.Host == "" || s.LastSuccessAt == nil || s.Error != "" || s.VMs == nil) {
 		return errors.New("invalid successful virtualization snapshot")
 	}
 	if s.Status == "error" && s.Error == "" || len(s.VMs) > 0 && s.LastSuccessAt == nil {
@@ -78,6 +80,9 @@ func (s Snapshot) Validate() error {
 			return fmt.Errorf("invalid VM %d", vm.ID)
 		}
 		seen[vm.ID] = true
+		if vm.CollectedAt == nil && vm.TTLSeconds != 0 || vm.CollectedAt != nil && (vm.CollectedAt.IsZero() || vm.CollectedAt.After(s.CollectedAt) || vm.TTLSeconds < 1 || vm.TTLSeconds > 3600) {
+			return fmt.Errorf("invalid VM %d freshness", vm.ID)
+		}
 		if vm.IPsCollectedAt == nil && vm.IPsTTLSeconds != 0 || vm.IPsCollectedAt != nil && (vm.IPsCollectedAt.IsZero() || vm.IPsCollectedAt.After(s.CollectedAt) || vm.IPsTTLSeconds < 1 || vm.IPsTTLSeconds > 3600) {
 			return fmt.Errorf("invalid VM %d IP freshness", vm.ID)
 		}
@@ -108,4 +113,15 @@ func (s Snapshot) Validate() error {
 		}
 	}
 	return nil
+}
+
+// Expire hides live metrics without changing their original observation time.
+// Configuration and the separately timestamped IP sample retain their meaning.
+func (vm *VM) Expire(now time.Time) {
+	if vm.CollectedAt != nil && now.Sub(*vm.CollectedAt) <= time.Duration(vm.TTLSeconds)*time.Second {
+		return
+	}
+	vm.Status, vm.QMPStatus = "unknown", ""
+	vm.CPU, vm.Memory, vm.Uptime = nil, nil, nil
+	vm.DiskRead, vm.DiskWrite, vm.NetIn, vm.NetOut = nil, nil, nil, nil
 }

@@ -247,19 +247,21 @@ Bearer 可选端点会把缺失、格式错误、过期、已撤销或其他非�
   "last_success_at": "2026-09-28T10:00:00Z",
   "ttl_seconds": 90,
   "status": "ok",
-  "vms": [{"id": 100, "name": "guest", "status": "running", "template": false, "cpus": 2, "cpu_ratio": 0.25}]
+  "vms": [{"id": 100, "name": "guest", "status": "running", "template": false, "collected_at": "2026-09-28T10:00:00Z", "ttl_seconds": 90, "cpus": 2, "cpu_ratio": 0.25}]
 }
 ```
 
-`status` 为 `ok` 或 `error`。成功时 `last_success_at` 等于 `collected_at`，`vms: []` 表示成功枚举且没有 VM；失败时必须提供 `error`，可保留上次成功的 VM 列表及时间，没有历史样本时允许 `vms: null`。读取接口以成功采样时间和接收时间共同判定过期；重新上传旧缓存不会刷新其采样时间，同时间戳的重试不会刷新接收时间。较旧报告返回 `204` 但不覆盖当前快照。
+`status` 为 `ok` 或 `error`。成功时 `last_success_at` 为最近一次成功读取 VM 清单的时间，可早于快照组装时间 `collected_at`，`vms: []` 表示成功枚举且没有 VM；失败时必须提供 `error`，可保留上次成功的 VM 列表及时间，没有历史样本时允许 `vms: null`。读取接口以成功采样时间和接收时间共同判定过期；重新上传旧缓存不会刷新其采样时间，同时间戳的重试不会刷新接收时间。较旧报告返回 `204` 但不覆盖当前快照。
 
 每台 VM 的必填字段为 `id`、`name`、`status`、`template`；可选字段为 `qmp_status`、`cpus`、`cpu_ratio`、`memory_bytes`、`memory_limit_bytes`、`disk_capacity_bytes`、`disk_read_bytes`、`disk_write_bytes`、`net_in_bytes`、`net_out_bytes`、`net_rate_limits_mbps`、`uptime_seconds`、`ips`。缺失表示未知，不补零。CPU 按相邻 `/proc` 进程计数差值除以时间和 VM vCPU 数计算，首次采样未知；内存采用扣除文件缓存的 cgroup 用量，有 balloon 数据时使用来宾总量减空闲量；磁盘容量为低频查询的 PVE `maxdisk`；磁盘和网络字节数为累计计数，不是速率或来宾文件系统用量。`qmp_status` 保留暂停等 QEMU 状态。关机 VM 保留在清单中，模板排除；只有 QMP 状态为 `running` 才上报动态指标和 IP。
 
-可选 `net_rate_limits_mbps` 按网卡名（如 `net0`）上报 PVE 配置限速，值为 JSON 数字，单位 Mbps（1 Mbps = 1,000,000 bit/s），四舍五入至两位小数；JSON 数字不补尾随零。PVE `rate` 按 MiB/s 换算，例如 `12.5` 上报 `104.86`。同一值分别适用于收、发方向，不是 VM 所有网卡共享的总额度。`0` 表示该网卡未配置限速；字段缺失表示未采集到网卡配置。helper 每轮直接读取本机 `/etc/pve/qemu-server/<vmid>.conf` 的当前配置，忽略待应用修改和快照段；读取或解析失败时省略该字段并记录日志，基础指标继续上报。
+每台 VM 使用独立的可选 `collected_at`、`ttl_seconds`（helper 使用 90 秒）记录实际观测时间，而非外层快照组装时间。缺少观测时间表示动态指标未知。helper 和 Dash 对过期 VM 省略 CPU、内存用量、磁盘/网络计数和运行时长，将状态标为 `unknown`，同时保留原观测时间及配置信息；IP 新鲜度仍独立判断。
 
-Guest Agent IP 通过可选 `ips` 数组返回，每台 VM 最多 1024 个不重复的 IPv4/IPv6 地址，包含私网地址，排除回环、链路本地、未指定、多播及非法地址。IP 通过本机 QGA socket 独立采集，只查询 QMP 状态明确为 `running` 且启用了 Guest Agent 的 VM。调度器每 3 秒检查到期任务，最多 8 路并发，每台 VM 总超时 3 秒，每轮预算 10 秒，轮次不重叠。成功后间隔 30 秒再查，失败按 1、2、5 分钟退避；健康刷新优先，失败重试最多占用 2 个槽位。这些间隔是最小等待时间，负载饱和时查询可能推迟。VM 重启或 agent 配置变化会清除该 VM 的旧 IP 和冷却状态。每台 VM 的文件锁防止重复查询；仅 root 可读的 `/run/ithiltir-node/pve-guest` 状态可跨 helper 重启保留，宿主重启后重建。基础采集只读 IP 缓存，不等待 QGA。手动单次采集使用 `--guest`。
+可选 `net_rate_limits_mbps` 按网卡名（如 `net0`）上报 PVE 配置限速，值为 JSON 数字，单位 Mbps（1 Mbps = 1,000,000 bit/s），四舍五入至两位小数；JSON 数字不补尾随零。PVE `rate` 按 MiB/s 换算，例如 `12.5` 上报 `104.86`。同一值分别适用于收、发方向，不是 VM 所有网卡共享的总额度。`0` 表示该网卡未配置限速；字段缺失表示未采集到网卡配置。helper 每轮直接读取本机 `/etc/pve/qemu-server/<vmid>.conf` 的当前配置，忽略待应用修改和快照段；限速值解析失败时省略该字段并记录日志，基础指标继续上报。
 
-可选字段 `ips_collected_at`、`ips_ttl_seconds` 独立描述 IP 样本新鲜度。helper 使用 900 秒 IP TTL；复用时保留原采样时间，省略过期样本以及已知早于 VM 本次启动的样本。成功查询无地址时可以只有新鲜度字段而没有 `ips`。查询失败仅在原 IP 样本未过期时继续使用；读取方必须单独判断 IP 新鲜度，不能只看快照 `stale`。兼容不带这两个字段的报告，此时 IP 新鲜度未知；提供时，时间必须非零且不晚于 `collected_at`，TTL 为 1–3600。
+Guest Agent IP 通过可选 `ips` 数组返回，每台 VM 最多 1024 个不重复的 IPv4/IPv6 地址，包含私网地址，排除回环、链路本地、未指定、多播及非法地址。IP 通过本机 QGA socket 独立采集，只查询 QMP 状态明确为 `running` 且启用了 Guest Agent 的 VM。调度器每 3 秒检查到期任务，最多 8 路并发，每台 VM 总超时 3 秒，每轮预算 10 秒，轮次不重叠。成功后间隔 60 秒再查，失败按 1、2、5 分钟退避；健康刷新优先，失败重试最多占用 2 个槽位。这些间隔是最小等待时间，负载饱和时查询可能推迟。VM 重启或 agent 配置变化会清除该 VM 的旧 IP 和冷却状态。采集锁防止 IP 轮次重叠；仅 root 可读的 `/run/ithiltir-node/pve-guest` 状态可跨 helper 重启保留，宿主重启后重建。基础采集只读 IP 缓存，不等待 QGA。
+
+可选字段 `ips_collected_at`、`ips_ttl_seconds` 独立描述 IP 样本新鲜度。helper 使用 900 秒 IP TTL；复用时保留原采样时间，省略过期样本以及已知早于 VM 本次启动的样本。成功查询无地址时可以只有新鲜度字段而没有 `ips`。查询失败仅在原 IP 样本未过期时继续使用；读取方必须单独判断 IP 新鲜度，不能只看快照 `stale`。兼容不带这两个字段的报告，此时 IP 新鲜度未知；提供时，IP 时间必须非零且不晚于外层快照的 `collected_at`，TTL 为 1–3600。IP 时间可以晚于该 VM 的 `collected_at`。
 
 最多 4096 台 VM，ID 不得重复；名称和宿主名最多 255 字节，状态字符串最多 64 字节，错误最多 1024 字节；计数器必须是非负有符号 64 位整数。`ttl_seconds` 为 1–3600，采集时间不能超前服务端时间超过 5 分钟。非法 JSON 或数据返回 `400 invalid_virt`；超限返回 `413 body_too_large`；密钥无效返回 `401 unauthorized`（失败鉴权受限流约束）；快照更新失败返回 `503 virt_unavailable`。
 

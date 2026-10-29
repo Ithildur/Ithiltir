@@ -153,6 +153,10 @@ func (s *Store) Virt(ctx context.Context, id int64) (VirtView, error) {
 		return view, err
 	}
 	view.Snapshot, view.ReceivedAt = &snapshot, &row.receivedAt
+	now := time.Now()
+	for i := range snapshot.VMs {
+		snapshot.VMs[i].Expire(now)
+	}
 	ttl := time.Duration(snapshot.TTLSeconds) * time.Second
 	view.Stale = snapshot.LastSuccessAt == nil || time.Since(*snapshot.LastSuccessAt) > ttl || time.Since(row.receivedAt) > ttl
 	return view, nil

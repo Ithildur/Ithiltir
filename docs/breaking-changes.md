@@ -1,5 +1,20 @@
 # Breaking Changes
 
+## 0.4.0
+
+### Database upgrade
+
+- Upgrading from `0.3.3` applies migration `0015`. It adds PVE visibility and per-node VM chart settings, removes unused notification/control-task lease fields, removes the empty legacy notification `config` column, and removes fixed global billing-cycle columns. Existing notification ciphertext, channel settings, node billing cycles, metrics, and traffic history are preserved. The notification key remains unchanged.
+- Back up PostgreSQL and keep a separate backup of `$DASH_HOME/configs/notify-config.key` before upgrading. Managed `dash update` stops Dash and runs migrations before starting the new version. For manual deployments, stop the old Dash process, run `dash migrate -config <config-path>` with the new binary and the existing `DASH_HOME`, then start the new binary against that database.
+- Dash and its database schema must be upgraded together. After `0015`, replacing only the binary with `0.3.3` does not roll back the installation: the old binary rejects the newer schema. For an interrupted managed update, use `dash update recover`; once migration has started, recovery completes the candidate version rather than restarting the old binary against the changed schema.
+- Fresh installations run the full migration chain; existing installations apply only pending migrations.
+
+### Node and PVE compatibility
+
+- Existing HTTP node reporting remains supported, and HTTP remains Node's default transport. Dash `0.4.0` pairs with Node `0.3.0` for gRPC reporting and PVE monitoring. PVE monitoring also requires the matching `0.3.0` root helper service. No second public port is required.
+- The Dash release workflow includes PVE helpers from the selected Node release. Publish Node `0.3.0` with both `Ithiltir-pve-cache-linux-amd64` and `Ithiltir-pve-cache-linux-arm64` assets before packaging Dash `0.4.0`. The helpers and bundled Node use the same version.
+- Node self-update does not replace root-owned PVE helpers or service units. Reinstall with `--pve` to install or update them; enable `grpc` or `auto` transport for history queries. PVE guest access defaults to disabled. See [Node deployment](../deploy/node/README.md#optional-pve-monitoring) for installation and proxy configuration.
+
 ## 0.3.3 (2026-09-19)
 
 ### Uptime duration statistics

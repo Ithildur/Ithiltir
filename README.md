@@ -35,7 +35,7 @@ Use `ARCH=arm64` on AArch64 systems. On supported Debian/Ubuntu systems, the ins
 
 After installation, open the configured `app.public_url`; append `/login` for the admin console. Create a node there and follow the generated install command.
 
-Optional PVE VM monitoring requires helpers bundled with `scripts/package.sh --with-pve`; append `--pve` to the Linux Node installation command on the PVE host. Click the host card's PVE system icon to view its VM list, details and historical metrics. Guest access is disabled by default and can be enabled in system settings for guest-visible hosts. History requires the Node gRPC query connection. See [Node deployment](deploy/node/README.md#optional-pve-monitoring) for installation, updates and disabling collection.
+Release packages include the helpers for optional PVE VM monitoring; custom packages require `scripts/package.sh --with-pve`. Append `--pve` to the Linux Node installation command on the PVE host. Click the host card's PVE system icon to view its VM list, details and historical metrics. Guest access is disabled by default and can be enabled in system settings for guest-visible hosts. History requires the Node gRPC query connection. See [Node deployment](deploy/node/README.md#optional-pve-monitoring) for installation, updates and disabling collection.
 
 ## Run From Source
 
@@ -93,11 +93,11 @@ cd web
 FRONT_TEST_API=http://127.0.0.1:8080 bun run dev
 ```
 
-Build the frontend and a Linux release package with:
+Build the frontend and a Linux package with:
 
 ```bash
-bash scripts/build_frontend.sh --version 0.0.0-dev -o build/frontend/dist
-bash scripts/package.sh --version 0.0.0-dev.0 --node-version 0.0.0-dev.0 \
+bash scripts/build_frontend.sh -o build/frontend/dist
+bash scripts/package.sh --with-pve \
   -o release -t linux/amd64 --tar-gz
 ```
 
@@ -121,4 +121,4 @@ AGPL-3.0-only. See [LICENSE](LICENSE).
 
 ## Node gRPC transport
 
-HTTP remains the default for compatibility. Set `ITHILTIR_NODE_TRANSPORT=grpc` (RPC only) or `auto` (negotiate before reports) in the Node service environment, then restart Node. Dash serves gRPC on its existing HTTP/2 listener; proxies must forward `/ithiltir.node.v1.Node/` with gRPC support. These modes never authorize plaintext fallback after authentication or TLS failures. PVE history also requires the root helper service (`pve-cache --serve`). Browser APIs and asset downloads remain HTTP.
+HTTP remains the default for compatibility. Set `ITHILTIR_NODE_TRANSPORT=grpc` (RPC only) or `auto` (negotiate before reports) in the Node service environment, then restart Node. Dash serves gRPC on its existing HTTP/2 listener; proxies must forward `/ithiltir.node.v1.Node/` with gRPC support. These modes never authorize plaintext fallback after authentication or TLS failures. PVE history also requires the root helper service (`pve-cache`). Browser APIs and asset downloads remain HTTP.

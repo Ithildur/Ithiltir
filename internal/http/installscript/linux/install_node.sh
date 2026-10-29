@@ -2031,7 +2031,7 @@ configure_pve() {
     as_root systemctl stop "$PVE_SERVICE" "$PVE_GUEST_SERVICE" >/dev/null 2>&1 || true
   fi
   if [[ "$PVE_ENABLED" -ne 1 ]]; then
-    as_root rm -f "$PVE_DROPIN" "/etc/systemd/system/$PVE_SERVICE" "/etc/systemd/system/$PVE_TIMER" "$PVE_HELPER" "$CACHE_DIR/virt.json"
+    as_root rm -f "$PVE_DROPIN" "/etc/systemd/system/$PVE_SERVICE" "/etc/systemd/system/$PVE_TIMER" "$PVE_HELPER"
     as_root rm -f "/etc/systemd/system/$PVE_GUEST_SERVICE" "/etc/systemd/system/$PVE_GUEST_TIMER"
     if systemd_available; then as_root systemctl daemon-reload; fi
     return 0
@@ -2040,7 +2040,7 @@ configure_pve() {
   as_root install -d -m 0755 -o root -g root "$(dirname "$PVE_DROPIN")"
   as_root tee "$PVE_DROPIN" >/dev/null <<EOF
 [Service]
-Environment=ITHILTIR_NODE_VIRT_CACHE=/run/ithiltir-node/virt.json
+Environment=ITHILTIR_NODE_PVE_SOCKET=/run/ithiltir-node/pve.sock
 EOF
   as_root rm -f "/etc/systemd/system/$PVE_TIMER" "/etc/systemd/system/$PVE_GUEST_TIMER" "/etc/systemd/system/$PVE_GUEST_SERVICE"
   as_root tee "/etc/systemd/system/$PVE_SERVICE" >/dev/null <<EOF
@@ -2051,7 +2051,7 @@ Type=simple
 User=root
 Group=${RUN_GROUP}
 UMask=0027
-ExecStart=${PVE_HELPER} --serve --group ${RUN_GROUP}
+ExecStart=${PVE_HELPER} --group ${RUN_GROUP}
 Restart=on-failure
 RestartSec=10s
 TimeoutStopSec=15s

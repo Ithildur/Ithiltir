@@ -1,4 +1,6 @@
 export interface PVEVM {
+  collected_at?: string;
+  ttl_seconds?: number;
   id: number;
   name: string;
   status: string;
@@ -13,6 +15,7 @@ export interface PVEVM {
   disk_write_bytes?: number;
   net_in_bytes?: number;
   net_out_bytes?: number;
+  net_rate_limits_mbps?: Record<string, number>;
   uptime_seconds?: number;
   ips?: string[];
   ips_collected_at?: string;

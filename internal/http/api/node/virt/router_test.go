@@ -57,6 +57,10 @@ func TestIntegrationVirtLifecycle(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Microsecond)
 	snapshot := virt.Snapshot{Schema: 1, Provider: "pve", Host: "pve", CollectedAt: now, LastSuccessAt: &now, TTLSeconds: 90, Status: "ok", VMs: []virt.VM{{ID: 100, Name: "guest", Status: "running", IPs: []string{"192.0.2.10", "2001:db8::10"}}}}
 	snapshot.VMs[0].NetRateLimits = map[string]float64{"net0": 104.86, "net1": 0}
+	vmTime := now.Add(-time.Second)
+	snapshot.VMs[0].CollectedAt, snapshot.VMs[0].TTLSeconds, snapshot.VMs[0].CPU = &vmTime, 90, new(0.25)
+	expiredVMTime := now.Add(-2 * time.Minute)
+	snapshot.VMs = append(snapshot.VMs, virt.VM{ID: 101, Name: "old", Status: "running", QMPStatus: "running", CollectedAt: &expiredVMTime, TTLSeconds: 90, CPU: new(0.75), Memory: new(int64(1024)), NetIn: new(int64(100)), Uptime: new(int64(600))})
 	for i := range 1022 {
 		snapshot.VMs[0].IPs = append(snapshot.VMs[0].IPs, "10.0."+strconv.Itoa(i/256)+"."+strconv.Itoa(i%256))
 	}
@@ -82,10 +86,16 @@ func TestIntegrationVirtLifecycle(t *testing.T) {
 	if err := json.Unmarshal(call("GET", path, "", nil, true, 200), &view); err != nil {
 		t.Fatal(err)
 	}
-	if view.Stale || view.Snapshot == nil || !view.Snapshot.CollectedAt.Equal(now) || len(view.Snapshot.VMs) != 1 {
+	if view.Stale || view.Snapshot == nil || !view.Snapshot.CollectedAt.Equal(now) || len(view.Snapshot.VMs) != 2 {
 		t.Fatalf("latest snapshot: %+v", view)
 	}
 	firstReceived := *view.ReceivedAt
+	if live := view.Snapshot.VMs[0]; live.CollectedAt == nil || !live.CollectedAt.Equal(vmTime) || live.CPU == nil || *live.CPU != 0.25 {
+		t.Fatalf("fresh VM lost its observation time or metrics: %+v", live)
+	}
+	if expired := view.Snapshot.VMs[1]; expired.Status != "unknown" || expired.CPU != nil || expired.Memory != nil || expired.NetIn != nil || expired.Uptime != nil || !expired.CollectedAt.Equal(expiredVMTime) {
+		t.Fatalf("fresh snapshot exposed expired VM metrics: %+v", expired)
+	}
 	if !maps.Equal(view.Snapshot.VMs[0].NetRateLimits, snapshot.VMs[0].NetRateLimits) {
 		t.Fatal("NIC rate limits were lost or changed in snapshot")
 	}
@@ -93,6 +103,9 @@ func TestIntegrationVirtLifecycle(t *testing.T) {
 		t.Fatal("IP freshness was lost or refreshed with hot data")
 	}
 	for _, vm := range []virt.VM{
+		{ID: 100, Status: "running", TTLSeconds: 90},
+		{ID: 100, Status: "running", CollectedAt: &vmTime},
+		{ID: 100, Status: "running", CollectedAt: new(now.Add(time.Second)), TTLSeconds: 90},
 		{ID: 100, Status: "running", NetRateLimits: map[string]float64{"net0": -1}},
 		{ID: 100, Status: "running", IPsTTLSeconds: 900},
 		{ID: 100, Status: "running", IPsCollectedAt: &ipTime},
@@ -130,7 +143,7 @@ func TestIntegrationVirtLifecycle(t *testing.T) {
 	failed.Status, failed.Error = "error", "collection timed out"
 	post(failed, server.Secret, 204)
 	view, err = st.Node.Virt(t.Context(), server.ID)
-	if err != nil || !view.Stale || view.Snapshot.Status != "error" || len(view.Snapshot.VMs) != 1 {
+	if err != nil || !view.Stale || view.Snapshot.Status != "error" || len(view.Snapshot.VMs) != 2 {
 		t.Fatal("failed collection lost its previous inventory or freshness", err)
 	}
 	empty := snapshot
