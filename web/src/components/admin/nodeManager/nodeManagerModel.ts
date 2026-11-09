@@ -1,9 +1,20 @@
 import type { NodeRow } from '@app-types/admin';
+import type { NodeDeploy, NodeDeployTarget } from '@app-types/api';
 import type { TranslationKey } from '@i18n';
 import { isVersionUpdateTarget } from '@utils/version';
 import { nodeTrafficCycleLabelKey, nodeTrafficDirectionLabelKey } from '@lib/trafficSettingsModel';
 
 type Translate = (key: TranslationKey, vars?: Record<string, string | number>) => string;
+
+export const nodeDeployCommand = (
+  deploy: NodeDeploy | null | undefined,
+  target: NodeDeployTarget,
+  secret: string,
+): string | null => {
+  if (target === 'pve' && !deploy?.pve) return null;
+  const prefix = deploy?.scripts[target === 'pve' ? 'linux' : target]?.command_prefix;
+  return prefix ? `${prefix}${secret}${target === 'pve' ? ' --pve' : ''}` : null;
+};
 
 const nodeHasBundledUpdate = (node: NodeRow, bundledNodeVersion: string): boolean => {
   if (!bundledNodeVersion) return false;

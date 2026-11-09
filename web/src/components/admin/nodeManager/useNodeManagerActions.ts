@@ -1,7 +1,7 @@
 import React from 'react';
 import type {
   NodeDeploy,
-  NodeDeployPlatform,
+  NodeDeployTarget,
   NodeTrafficPatch,
   NodeVMSettings,
 } from '@app-types/api';
@@ -25,6 +25,7 @@ import {
 } from '@stores/adminNodesStore';
 import type { TrafficRebuildStartOutcome } from '@stores/trafficRebuildStore';
 import { copyTextToClipboardWithFeedback } from '@utils/clipboard';
+import { nodeDeployCommand } from './nodeManagerModel';
 
 export const useNodeManagerActions = ({
   token,
@@ -65,13 +66,13 @@ export const useNodeManagerActions = ({
   );
 
   const copyDeploy = React.useCallback(
-    (platform: NodeDeployPlatform, secret: string) => {
-      const prefix = deploy?.scripts?.[platform]?.command_prefix;
-      if (!prefix) {
+    (target: NodeDeployTarget, secret: string) => {
+      const command = nodeDeployCommand(deploy, target, secret);
+      if (!command) {
         pushTopBanner(t('admin_deploy_command_unavailable'), { tone: 'error' });
         return;
       }
-      void copyToClipboard(`${prefix}${secret}`, t('admin_deploy_command_copied'));
+      void copyToClipboard(command, t('admin_deploy_command_copied'));
     },
     [copyToClipboard, deploy, t],
   );

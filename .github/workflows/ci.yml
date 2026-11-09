@@ -86,7 +86,7 @@ jobs:
           if [[ -n "${ITHILTIR_NODE_VERSION:-}" ]]; then
             node_args=(--node-version "$ITHILTIR_NODE_VERSION")
           fi
-          bash scripts/package.sh --version 0.0.0-ci.1 "${node_args[@]}" -o release -t linux/amd64 --tar-gz
+          bash scripts/package.sh --version 0.0.0-ci.1 --with-pve "${node_args[@]}" -o release -t linux/amd64 --tar-gz
 
       - name: Upload Package Artifact
         uses: actions/upload-artifact@v4

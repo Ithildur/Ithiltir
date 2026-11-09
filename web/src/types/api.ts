@@ -87,6 +87,7 @@ export interface AppVersion {
 }
 
 export type NodeDeployPlatform = 'linux' | 'macos' | 'windows';
+export type NodeDeployTarget = NodeDeployPlatform | 'pve';
 
 interface DeployScript {
   url: string;
@@ -95,4 +96,5 @@ interface DeployScript {
 
 export interface NodeDeploy {
   scripts: Record<NodeDeployPlatform, DeployScript>;
+  pve: boolean;
 }

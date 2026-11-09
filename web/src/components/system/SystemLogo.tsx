@@ -1,6 +1,6 @@
 import React from 'react';
 import { FaApple, FaLinux, FaWindows } from 'react-icons/fa';
-import type { NodeDeployPlatform } from '@app-types/api';
+import type { NodeDeployTarget } from '@app-types/api';
 import { OS_LOGO_RULES } from '@config/osIcons';
 
 type RuntimeSystem = {
@@ -90,12 +90,14 @@ const ProxmoxLogo: React.FC<LogoProps> = ({ size = 16, className = '' }) => (
   <ImageLogo src="/system-logos/proxmox.svg" size={size} className={className} />
 );
 
-export const PlatformLogo: React.FC<LogoProps & { platform: NodeDeployPlatform }> = ({
+export const PlatformLogo: React.FC<LogoProps & { platform: NodeDeployTarget }> = ({
   platform,
   size = 16,
   className = '',
 }) => {
   switch (platform) {
+    case 'pve':
+      return <ProxmoxLogo size={size} className={className} />;
     case 'windows':
       return (
         <FaWindows

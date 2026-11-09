@@ -13,7 +13,7 @@
 
 - 现有 HTTP 节点上报保持兼容，Node 默认传输仍为 HTTP。Dash `0.4.0` 的 gRPC 上报和 PVE 监控配套 Node `0.3.0`，PVE 监控还需要同版本的 root helper 服务，无需增加第二个公开端口。
 - Dash 发版流程会打入所选 Node release 的 PVE helper。打包 Dash `0.4.0` 前，应先发布 Node `0.3.0`，并提供 `Ithiltir-pve-cache-linux-amd64` 和 `Ithiltir-pve-cache-linux-arm64` 两个资产；helper 与内置 Node 使用同一版本。
-- Node 自更新不会替换 root 所有的 PVE helper 和服务单元，安装或更新它们需要带 `--pve` 重装；历史查询还需启用 `grpc` 或 `auto` 传输。PVE 游客访问默认关闭。安装及代理配置见 [Node 部署说明](../deploy/node/README.md#optional-pve-monitoring)。
+- Node 自更新不会替换 root 所有的 PVE helper 和服务单元，带 `--pve` 重装会安装或更新它们，并配置历史查询所需的 gRPC 传输。反向代理需转发 gRPC。PVE 游客访问默认关闭。安装及代理配置见 [Node 部署说明](../deploy/node/README.md#optional-pve-monitoring)。
 
 ## 0.3.3（2026-09-19）
 

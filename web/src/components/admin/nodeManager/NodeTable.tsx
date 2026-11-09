@@ -11,7 +11,7 @@ import IOSSwitch from '@components/ui/IOSSwitch';
 import Input from '@components/ui/Input';
 import { Tooltip } from '@components/ui/Tooltip';
 import { PlatformLogo } from '@components/system/SystemLogo';
-import type { NodeDeployPlatform } from '@app-types/api';
+import type { NodeDeployTarget } from '@app-types/api';
 import type { AlertEventSummary, NodeRow } from '@app-types/admin';
 import { useI18n } from '@i18n';
 import { alertSummaryMetricName } from '@components/admin/alertManager/alertLabels';
@@ -30,7 +30,8 @@ interface Props {
   onRename: (node: NodeRow, nextName: string) => void;
   onToggleGuestVisible: (node: NodeRow) => void;
   onCopySecret: (secret: string) => void;
-  onDeployCopy: (platform: NodeDeployPlatform, secret: string) => void;
+  pveDeployAvailable: boolean;
+  onDeployCopy: (target: NodeDeployTarget, secret: string) => void;
   onRequestUpgrade: (node: NodeRow) => void;
   onOpenSettings: (node: NodeRow) => void;
   onDelete: (node: NodeRow) => void;
@@ -54,6 +55,7 @@ const NodeTable: React.FC<Props> = ({
   onRename,
   onToggleGuestVisible,
   onCopySecret,
+  pveDeployAvailable,
   onDeployCopy,
   onRequestUpgrade,
   onOpenSettings,
@@ -293,6 +295,18 @@ const NodeTable: React.FC<Props> = ({
                   <PlatformLogo platform="macos" size={16} />
                   <span className="sr-only">macOS</span>
                 </Button>
+                {pveDeployAvailable && (
+                  <Button
+                    variant="plain"
+                    className={deployButtonClass}
+                    title="PVE"
+                    size="none"
+                    onClick={() => onDeployCopy('pve', node.secret)}
+                  >
+                    <PlatformLogo platform="pve" size={16} />
+                    <span className="sr-only">PVE</span>
+                  </Button>
+                )}
               </div>
             </td>
             <td className="px-3 py-2 text-xs text-(--theme-fg-muted) dark:text-(--theme-fg-muted) w-44">

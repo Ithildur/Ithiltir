@@ -13,7 +13,7 @@
 
 - Existing HTTP node reporting remains supported, and HTTP remains Node's default transport. Dash `0.4.0` pairs with Node `0.3.0` for gRPC reporting and PVE monitoring. PVE monitoring also requires the matching `0.3.0` root helper service. No second public port is required.
 - The Dash release workflow includes PVE helpers from the selected Node release. Publish Node `0.3.0` with both `Ithiltir-pve-cache-linux-amd64` and `Ithiltir-pve-cache-linux-arm64` assets before packaging Dash `0.4.0`. The helpers and bundled Node use the same version.
-- Node self-update does not replace root-owned PVE helpers or service units. Reinstall with `--pve` to install or update them; enable `grpc` or `auto` transport for history queries. PVE guest access defaults to disabled. See [Node deployment](../deploy/node/README.md#optional-pve-monitoring) for installation and proxy configuration.
+- Node self-update does not replace root-owned PVE helpers or service units. Reinstall with `--pve` to install or update them and configure gRPC transport for history queries. Reverse proxies must forward gRPC. PVE guest access defaults to disabled. See [Node deployment](../deploy/node/README.md#optional-pve-monitoring) for installation and proxy configuration.
 
 ## 0.3.3 (2026-09-19)
 

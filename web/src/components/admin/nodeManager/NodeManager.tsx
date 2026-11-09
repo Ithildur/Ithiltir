@@ -273,6 +273,7 @@ const NodeManager: React.FC = () => {
             onToggleGuestVisible={(node) => void toggleGuestVisible(node)}
             onCopySecret={(secret) => void copyToClipboard(secret)}
             onDeployCopy={copyDeploy}
+            pveDeployAvailable={deploy?.pve === true}
             onRequestUpgrade={(node) => void confirmUpgrade(node)}
             onOpenSettings={(node) => setBasicSettingsNodeId(node.id)}
             onDelete={(node) => void confirmAndDelete(node)}
@@ -352,6 +353,7 @@ const NodeManager: React.FC = () => {
               onToggleGuestVisible={(target) => void toggleGuestVisible(target)}
               onCopySecret={(secret) => void copyToClipboard(secret)}
               onDeployCopy={copyDeploy}
+              pveDeployAvailable={deploy?.pve === true}
               onRequestUpgrade={(target) => void confirmUpgrade(target)}
             />
           ))}

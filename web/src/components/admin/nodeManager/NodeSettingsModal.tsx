@@ -14,10 +14,11 @@ import { Modal, ModalHeader, ModalBody, ModalFooter } from '@components/ui/Modal
 import { pushTopBanner } from '@runtime/topBannerRuntime';
 import { PlatformLogo } from '@components/system/SystemLogo';
 import type { NodeRow } from '@app-types/admin';
-import type { Group, NodeDeploy, NodeDeployPlatform } from '@app-types/api';
+import type { Group, NodeDeploy, NodeDeployTarget } from '@app-types/api';
 import { useI18n } from '@i18n';
 import { copyTextToClipboardWithFeedback } from '@utils/clipboard';
 import { normalizeTags } from '@utils/tags';
+import { nodeDeployCommand } from './nodeManagerModel';
 
 interface Props {
   isOpen: boolean;
@@ -35,10 +36,11 @@ interface Props {
   }) => Promise<boolean>;
 }
 
-const platforms: { id: NodeDeployPlatform; label: string }[] = [
+const platforms: { id: NodeDeployTarget; label: string }[] = [
   { id: 'linux', label: 'Linux' },
   { id: 'windows', label: 'Windows' },
   { id: 'macos', label: 'macOS' },
+  { id: 'pve', label: 'PVE' },
 ];
 
 interface TagDraft {
@@ -80,14 +82,14 @@ const NodeSettingsModal: React.FC<Props> = ({
   const [tagDrafts, setTagDrafts] = React.useState<TagDraft[]>(() => tagDraftsFromList(node.tags));
   const [editingTagIds, setEditingTagIds] = React.useState<Set<string>>(() => new Set());
   const [tagsDirty, setTagsDirty] = React.useState(false);
-  const [activePlatform, setActivePlatform] = React.useState<NodeDeployPlatform>('linux');
+  const [activePlatform, setActivePlatform] = React.useState<NodeDeployTarget>('linux');
   const [copied, setCopied] = React.useState(false);
   const tagInputRefs = React.useRef(new Map<string, HTMLInputElement>());
   const pendingTagFocusId = React.useRef<string | null>(null);
   const copiedTimerRef = React.useRef<number | null>(null);
   const { t } = useI18n();
-  const commandPrefix = deploy?.scripts?.[activePlatform]?.command_prefix;
-  const installCommand = commandPrefix ? `${commandPrefix}${secret}` : null;
+  const selectedPlatform = activePlatform === 'pve' && !deploy?.pve ? 'linux' : activePlatform;
+  const installCommand = nodeDeployCommand(deploy, selectedPlatform, secret);
 
   React.useEffect(() => {
     setName(node.name);
@@ -420,20 +422,22 @@ const NodeSettingsModal: React.FC<Props> = ({
 
           <div className="rounded-xl overflow-hidden ring-1 ring-(--theme-border-default) shadow-xl">
             <div className="flex border-b border-(--theme-border-default)">
-              {platforms.map((p) => (
-                <button
-                  key={p.id}
-                  onClick={() => setActivePlatform(p.id)}
-                  className={`flex-1 flex items-center justify-center gap-2 py-3 text-sm font-medium transition-colors ${
-                    activePlatform === p.id
-                      ? 'bg-(--theme-bg-inverse) text-(--theme-fg-inverse)'
-                      : 'text-(--theme-fg-subtle) hover:text-(--theme-fg-default) hover:bg-(--theme-bg-default)/50'
-                  }`}
-                >
-                  <PlatformLogo platform={p.id} size={16} />
-                  {p.label}
-                </button>
-              ))}
+              {platforms
+                .filter((p) => p.id !== 'pve' || deploy?.pve)
+                .map((p) => (
+                  <button
+                    key={p.id}
+                    onClick={() => setActivePlatform(p.id)}
+                    className={`min-w-0 flex-1 flex flex-col items-center justify-center gap-1 py-3 text-xs font-medium transition-colors sm:flex-row sm:gap-2 sm:text-sm ${
+                      selectedPlatform === p.id
+                        ? 'bg-(--theme-bg-inverse) text-(--theme-fg-inverse)'
+                        : 'text-(--theme-fg-subtle) hover:text-(--theme-fg-default) hover:bg-(--theme-bg-default)/50'
+                    }`}
+                  >
+                    <PlatformLogo platform={p.id} size={16} />
+                    {p.label}
+                  </button>
+                ))}
             </div>
 
             <div

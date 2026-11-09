@@ -126,10 +126,9 @@ func (s *Session) Complete(id string, result Result) {
 		}
 	}
 }
+
+// History dispatches a query already validated by the HTTP handler.
 func (h *Hub) History(ctx context.Context, id int64, q virt.HistoryQuery) ([]byte, error) {
-	if err := q.Validate(); err != nil {
-		return nil, err
-	}
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 	s, err := h.current(ctx, id)

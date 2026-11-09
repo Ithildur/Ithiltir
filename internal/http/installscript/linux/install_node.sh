@@ -216,7 +216,7 @@ usage() {
     cat >&2 <<EOF
 用法：sudo bash $0 <dash_ip> [dash_port] <secret> [interval_seconds] [--net iface1,iface2] [--service-manager=auto|systemd|openrc|none]
 
-PVE：--pve 安装或更新采集工具；--no-pve 停用；省略则保留现状。仅支持 PVE/systemd。
+PVE：--pve 安装或更新采集工具并启用 gRPC；--no-pve 停用；省略则保留现状。仅支持 PVE/systemd。
 
 示例：
   sudo bash $0 10.0.0.2 8080 mysecret
@@ -227,7 +227,7 @@ EOF
     cat >&2 <<EOF
 Usage:  sudo bash $0 <dash_ip> [dash_port] <secret> [interval_seconds] [--net iface1,iface2] [--service-manager=auto|systemd|openrc|none]
 
-PVE: --pve installs/updates the collector; --no-pve disables it; omitted preserves current state. Requires PVE/systemd.
+PVE: --pve installs/updates the collector and enables gRPC; --no-pve disables it; omitted preserves current state. Requires PVE/systemd.
 
 Examples:
   sudo bash $0 10.0.0.2 8080 mysecret
@@ -2041,6 +2041,7 @@ configure_pve() {
   as_root tee "$PVE_DROPIN" >/dev/null <<EOF
 [Service]
 Environment=ITHILTIR_NODE_PVE_SOCKET=/run/ithiltir-node/pve.sock
+Environment=ITHILTIR_NODE_TRANSPORT=grpc
 EOF
   as_root rm -f "/etc/systemd/system/$PVE_TIMER" "/etc/systemd/system/$PVE_GUEST_TIMER" "/etc/systemd/system/$PVE_GUEST_SERVICE"
   as_root tee "/etc/systemd/system/$PVE_SERVICE" >/dev/null <<EOF

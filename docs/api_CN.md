@@ -234,7 +234,7 @@ Bearer 可选端点会把缺失、格式错误、过期、已撤销或其他非�
 
 - `POST /api/node/virt`：使用 `X-Node-Secret`，节点归属由密钥决定；JSON body 上限 4 MiB，不影响 `/api/node/metrics` 的 1 MiB 限制。成功返回 `204`，不携带更新 manifest。
 - `GET /api/virt/{id}`：使用下述 VM 访问策略。返回 `{ "snapshot": ..., "received_at": ..., "stale": false }`。节点存在但未上报时，前两项为 `null`、`stale` 为 `true`；节点不存在或已删除时返回 `404 not_found`。
-- `GET /api/admin/nodes/deploy` 增加布尔字段 `pve`，表示本机发布包是否包含与打包 node 版本匹配且校验通过的 PVE 工具。安装命令可追加 `--pve`；安装界面尚不生成该选项。
+- `GET /api/admin/nodes/deploy` 返回布尔字段 `pve`，表示本机安装包是否包含与内置 Node 版本匹配且校验通过的 PVE 工具。为 true 时，管理台提供 PVE 部署命令，由 `scripts.linux.command_prefix`、节点 secret 和 `--pve` 组成。`scripts` 的键仍为 `linux`、`macos` 和 `windows`。
 
 上报体和 `snapshot` 使用同一结构：
 
@@ -259,7 +259,7 @@ Bearer 可选端点会把缺失、格式错误、过期、已撤销或其他非�
 
 可选 `net_rate_limits_mbps` 按网卡名（如 `net0`）上报 PVE 配置限速，值为 JSON 数字，单位 Mbps（1 Mbps = 1,000,000 bit/s），四舍五入至两位小数；JSON 数字不补尾随零。PVE `rate` 按 MiB/s 换算，例如 `12.5` 上报 `104.86`。同一值分别适用于收、发方向，不是 VM 所有网卡共享的总额度。`0` 表示该网卡未配置限速；字段缺失表示未采集到网卡配置。helper 每轮直接读取本机 `/etc/pve/qemu-server/<vmid>.conf` 的当前配置，忽略待应用修改和快照段；限速值解析失败时省略该字段并记录日志，基础指标继续上报。
 
-Guest Agent IP 通过可选 `ips` 数组返回，每台 VM 最多 1024 个不重复的 IPv4/IPv6 地址，包含私网地址，排除回环、链路本地、未指定、多播及非法地址。IP 通过本机 QGA socket 独立采集，只查询 QMP 状态明确为 `running` 且启用了 Guest Agent 的 VM。调度器每 3 秒检查到期任务，最多 8 路并发，每台 VM 总超时 3 秒，每轮预算 10 秒，轮次不重叠。成功后间隔 60 秒再查，失败按 1、2、5 分钟退避；健康刷新优先，失败重试最多占用 2 个槽位。这些间隔是最小等待时间，负载饱和时查询可能推迟。VM 重启或 agent 配置变化会清除该 VM 的旧 IP 和冷却状态。采集锁防止 IP 轮次重叠；仅 root 可读的 `/run/ithiltir-node/pve-guest` 状态可跨 helper 重启保留，宿主重启后重建。基础采集只读 IP 缓存，不等待 QGA。
+Guest Agent IP 通过可选 `ips` 数组返回，每台 VM 最多 1024 个不重复的 IPv4/IPv6 地址，包含私网地址，排除回环、链路本地、未指定、多播及非法地址。IP 通过本机 QGA socket 独立采集，只查询 QMP 状态明确为 `running` 且启用了 Guest Agent 的 VM。调度器每 3 秒检查到期任务，最多 8 路并发，每台 VM 总超时 3 秒，每轮预算 10 秒，轮次不重叠。成功后间隔 60 秒再查，失败按 1、2、5 分钟退避；健康刷新优先，失败重试最多占用 2 个槽位。这些间隔是最小等待时间，负载饱和时查询可能推迟。VM 重启或 agent 配置变化会清除该 VM 的旧 IP 和冷却状态。helper 进程锁保证单进程运行，IP 采集循环等待当前轮次完成后再启动下一轮；仅 root 可读的 `/run/ithiltir-node/pve-guest` 状态可跨 helper 重启保留，宿主重启后重建。基础采集只读 IP 缓存，不等待 QGA。
 
 可选字段 `ips_collected_at`、`ips_ttl_seconds` 独立描述 IP 样本新鲜度。helper 使用 900 秒 IP TTL；复用时保留原采样时间，省略过期样本以及已知早于 VM 本次启动的样本。成功查询无地址时可以只有新鲜度字段而没有 `ips`。查询失败仅在原 IP 样本未过期时继续使用；读取方必须单独判断 IP 新鲜度，不能只看快照 `stale`。兼容不带这两个字段的报告，此时 IP 新鲜度未知；提供时，IP 时间必须非零且不晚于外层快照的 `collected_at`，TTL 为 1–3600。IP 时间可以晚于该 VM 的 `collected_at`。
 
