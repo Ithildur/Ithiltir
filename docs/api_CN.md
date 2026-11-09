@@ -234,7 +234,7 @@ Bearer 可选端点会把缺失、格式错误、过期、已撤销或其他非�
 
 - `POST /api/node/virt`：使用 `X-Node-Secret`，节点归属由密钥决定；JSON body 上限 4 MiB，不影响 `/api/node/metrics` 的 1 MiB 限制。成功返回 `204`，不携带更新 manifest。
 - `GET /api/virt/{id}`：使用下述 VM 访问策略。返回 `{ "snapshot": ..., "received_at": ..., "stale": false }`。节点存在但未上报时，前两项为 `null`、`stale` 为 `true`；节点不存在或已删除时返回 `404 not_found`。
-- `GET /api/admin/nodes/deploy` 返回布尔字段 `pve`，表示本机安装包是否包含与内置 Node 版本匹配且校验通过的 PVE 工具。为 true 时，管理台提供 PVE 部署命令，由 `scripts.linux.command_prefix`、节点 secret 和 `--pve` 组成。`scripts` 的键仍为 `linux`、`macos` 和 `windows`。
+- `GET /api/admin/nodes/deploy` 返回布尔字段 `pve`，表示本机安装包是否包含与内置 Node 版本匹配且校验通过的 PVE 工具。为 true 时，管理台提供 PVE 部署命令，由去掉 `sudo` 的 `scripts.linux.command_prefix`、节点 secret 和 `--pve` 组成，在 root shell 中执行。`scripts` 的键仍为 `linux`、`macos` 和 `windows`。
 
 上报体和 `snapshot` 使用同一结构：
 

@@ -29,6 +29,8 @@ export const en = {
   pve_last_collected: 'Last collected: {{time}}',
   pve_vm_count: 'Virtual machines ({{count}})',
   pve_vm: 'Virtual machine',
+  pve_expand_all: 'Expand all',
+  pve_collapse_all: 'Collapse all',
   pve_status: 'Status',
   pve_running: 'Running',
   pve_stopped: 'Stopped',

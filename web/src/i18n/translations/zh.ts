@@ -29,6 +29,8 @@ export const zh = {
   pve_last_collected: '最近采集：{{time}}',
   pve_vm_count: '虚拟机（{{count}}）',
   pve_vm: '虚拟机',
+  pve_expand_all: '全部展开',
+  pve_collapse_all: '全部折叠',
   pve_status: '状态',
   pve_running: '运行中',
   pve_stopped: '已停止',

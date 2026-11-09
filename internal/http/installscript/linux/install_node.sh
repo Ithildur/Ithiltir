@@ -2050,7 +2050,7 @@ Description=Collect PVE status and serve local read-only VM queries
 [Service]
 Type=simple
 User=root
-Group=${RUN_GROUP}
+Group=root
 UMask=0027
 ExecStart=${PVE_HELPER} --group ${RUN_GROUP}
 Restart=on-failure

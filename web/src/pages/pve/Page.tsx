@@ -2,6 +2,7 @@ import React from 'react';
 import { Link, useParams, useSearchParams } from 'react-router';
 import ArrowLeft from 'lucide-react/dist/esm/icons/arrow-left';
 import RefreshCw from 'lucide-react/dist/esm/icons/refresh-cw';
+import ChevronRight from 'lucide-react/dist/esm/icons/chevron-right';
 import Button from '@components/ui/Button';
 import Card from '@components/ui/Card';
 import ThemeToggle from '@components/ui/ThemeToggle';
@@ -12,7 +13,7 @@ import type { PVEView, PVEVM } from '@app-types/virt';
 import { formatBytes } from '@pages/dashboard/viewModel';
 import { isCanceledRequestError } from '@utils/errors';
 import { formatLocalDateTime } from '@utils/time';
-import VMHistory from './VMHistory';
+import VMDetails from './VMDetails';
 import VMIPs from './VMIPs';
 
 const bytes = (value?: number) => (value == null ? '—' : formatBytes(value));
@@ -105,20 +106,26 @@ const PVEHost = ({ serverId }: { serverId: number }) => {
     const status = vmState(vm);
     statusCounts.set(status, (statusCounts.get(status) ?? 0) + 1);
   }
-  const requestedVM = searchParams.get('vm');
-  const selected = requestedVM ? vms.find((vm) => String(vm.id) === requestedVM) : vms[0];
+  const expandedVMs = new Set(searchParams.getAll('vm'));
+  const allExpanded = vms.length > 0 && vms.every((vm) => expandedVMs.has(String(vm.id)));
+  const anyExpanded = vms.some((vm) => expandedVMs.has(String(vm.id)));
   const collectedAt = snapshot?.last_success_at ?? snapshot?.collected_at;
-  const ipStale =
-    selected?.ips_collected_at != null &&
-    selected.ips_ttl_seconds != null &&
-    observedAt > Date.parse(selected.ips_collected_at) + selected.ips_ttl_seconds * 1000;
   const date = (timestamp: string) =>
     formatLocalDateTime(timestamp, lang, { dateStyle: 'medium', timeStyle: 'medium' });
   const errorMessage = validID ? error : 'pve_host_missing';
-  const selectVM = (vmId: number) =>
+  const toggleVM = (vmId: number) =>
     setSearchParams((current) => {
       const next = new URLSearchParams(current);
-      next.set('vm', String(vmId));
+      const id = String(vmId);
+      if (next.getAll('vm').includes(id)) next.delete('vm', id);
+      else next.append('vm', id);
+      return next;
+    });
+  const expandAll = (expand: boolean) =>
+    setSearchParams((current) => {
+      const next = new URLSearchParams(current);
+      next.delete('vm');
+      if (expand) for (const vm of vms) next.append('vm', String(vm.id));
       return next;
     });
 
@@ -203,93 +210,92 @@ const PVEHost = ({ serverId }: { serverId: number }) => {
                   )}
                 </div>
               </div>
+              {vms.length > 0 && (
+                <div className="flex flex-wrap justify-end gap-2 border-b border-(--theme-border-subtle) px-4 py-2">
+                  <Button
+                    variant="secondary"
+                    disabled={allExpanded}
+                    onClick={() => expandAll(true)}
+                  >
+                    {t('pve_expand_all')}
+                  </Button>
+                  <Button
+                    variant="secondary"
+                    disabled={!anyExpanded}
+                    onClick={() => expandAll(false)}
+                  >
+                    {t('pve_collapse_all')}
+                  </Button>
+                </div>
+              )}
               {vms.length === 0 ? (
                 <p className="p-6 text-sm text-(--theme-fg-muted)">
                   {t(snapshot.vms ? 'pve_empty' : 'pve_inventory_unknown')}
                 </p>
               ) : (
-                <>
-                  <div className="divide-y divide-(--theme-border-subtle) md:hidden">
-                    {vms.map((vm) => (
-                      <button
-                        key={vm.id}
-                        type="button"
-                        aria-pressed={selected?.id === vm.id}
-                        onClick={() => selectVM(vm.id)}
-                        className={`ui-focus-ring block w-full space-y-2 px-4 py-3 text-left text-sm ${selected?.id === vm.id ? 'bg-(--theme-bg-muted)' : 'hover:bg-(--theme-bg-muted)'}`}
-                      >
-                        <span className="flex items-start justify-between gap-3">
-                          <span className="flex min-w-0 flex-wrap items-baseline gap-x-2">
-                            <span className="block wrap-anywhere font-medium">
-                              {vm.name || `VM ${vm.id}`}
-                            </span>
-                            <span className="font-mono text-xs text-(--theme-fg-muted)">
-                              #{vm.id}
-                            </span>
-                          </span>
-                          <span className="shrink-0 text-xs">
-                            <VMStatus vm={vm} />
-                          </span>
-                        </span>
-                        <span className="flex flex-wrap justify-between gap-x-4 gap-y-1 font-mono text-xs text-(--theme-fg-muted)">
-                          <span>CPU {percent(vm.cpu_ratio)}</span>
-                          <span>
-                            {t('memory')} {memoryPercent(vm) ? `${memoryPercent(vm)} · ` : ''}
-                            {bytes(vm.memory_bytes)} / {bytes(vm.memory_limit_bytes)}
-                          </span>
-                        </span>
-                      </button>
-                    ))}
-                  </div>
-                  <div className="hidden overflow-x-auto md:block">
-                    <table className="w-full text-left text-sm">
-                      <thead className="text-xs text-(--theme-fg-muted)">
-                        <tr>
-                          {[t('pve_vm'), t('pve_status'), t('cpu'), t('memory'), t('pve_ips')].map(
-                            (label, index) => (
-                              <th
-                                key={label}
-                                scope="col"
-                                className={`whitespace-nowrap px-4 py-2 font-medium ${index === 4 ? 'hidden lg:table-cell' : ''}`}
-                              >
-                                {label}
-                              </th>
-                            ),
-                          )}
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {vms.map((vm) => (
-                          <tr
-                            key={vm.id}
-                            className={`border-t border-(--theme-border-subtle) ${selected?.id === vm.id ? 'bg-(--theme-bg-muted)' : ''}`}
+                <table className="block w-full text-left text-sm md:table">
+                  <thead className="hidden text-xs text-(--theme-fg-muted) md:table-header-group">
+                    <tr>
+                      {[t('pve_vm'), t('pve_status'), t('cpu'), t('memory'), t('pve_ips')].map(
+                        (label, index) => (
+                          <th
+                            key={label}
+                            scope="col"
+                            className={`px-4 py-2 font-medium ${index === 4 ? 'hidden lg:table-cell' : ''}`}
                           >
-                            <td className="px-4 py-2.5">
+                            {label}
+                          </th>
+                        ),
+                      )}
+                    </tr>
+                  </thead>
+                  <tbody className="block md:table-row-group">
+                    {vms.map((vm) => {
+                      const expanded = expandedVMs.has(String(vm.id));
+                      return (
+                        <React.Fragment key={vm.id}>
+                          <tr
+                            className={`grid grid-cols-2 items-center border-t border-(--theme-border-subtle) md:table-row ${expanded ? 'bg-(--theme-bg-muted)' : ''}`}
+                          >
+                            <td className="min-w-0 px-4 pt-3 pb-1 md:py-2.5">
                               <button
+                                id={`vm-toggle-${vm.id}`}
                                 type="button"
-                                aria-pressed={selected?.id === vm.id}
-                                className="ui-focus-ring flex max-w-64 flex-wrap items-baseline gap-x-2 rounded text-left hover:text-(--theme-fg-interactive)"
-                                onClick={() => selectVM(vm.id)}
+                                aria-expanded={expanded}
+                                aria-controls={`vm-details-${vm.id}`}
+                                className="ui-focus-ring flex max-w-64 items-center gap-2 rounded text-left hover:text-(--theme-fg-interactive)"
+                                onClick={() => toggleVM(vm.id)}
                               >
-                                <span className="block wrap-anywhere font-medium">
-                                  {vm.name || `VM ${vm.id}`}
-                                </span>
-                                <span className="font-mono text-xs text-(--theme-fg-muted)">
-                                  #{vm.id}
+                                <ChevronRight
+                                  aria-hidden="true"
+                                  size={14}
+                                  className={`shrink-0 ${expanded ? 'rotate-90' : ''}`}
+                                />
+                                <span className="flex min-w-0 flex-wrap items-baseline gap-x-2">
+                                  <span className="wrap-anywhere font-medium">
+                                    {vm.name || `VM ${vm.id}`}
+                                  </span>
+                                  <span className="font-mono text-xs text-(--theme-fg-muted)">
+                                    #{vm.id}
+                                  </span>
                                 </span>
                               </button>
                             </td>
-                            <td className="whitespace-nowrap px-4 py-2.5">
+                            <td className="px-4 pt-3 pb-1 text-right text-xs md:py-2.5 md:text-left md:text-sm">
                               <VMStatus vm={vm} />
                             </td>
-                            <td className="whitespace-nowrap px-4 py-2.5 font-mono text-xs">
+                            <td className="px-4 pt-1 pb-3 font-mono text-xs md:py-2.5">
+                              <span className="mr-2 text-(--theme-fg-muted) md:hidden">CPU</span>
                               {percent(vm.cpu_ratio)}
                             </td>
-                            <td className="whitespace-nowrap px-4 py-2.5 font-mono text-xs">
+                            <td className="min-w-0 px-4 pt-1 pb-3 text-right font-mono text-xs md:py-2.5 md:text-left">
+                              <span className="mr-2 text-(--theme-fg-muted) md:hidden">
+                                {t('memory')}
+                              </span>
                               {memoryPercent(vm) && (
                                 <span className="mr-3">{memoryPercent(vm)}</span>
                               )}
-                              <span className="text-(--theme-fg-muted)">
+                              <span className="inline-block text-(--theme-fg-muted)">
                                 {bytes(vm.memory_bytes)} / {bytes(vm.memory_limit_bytes)}
                               </span>
                             </td>
@@ -305,65 +311,36 @@ const PVEHost = ({ serverId }: { serverId: number }) => {
                               ) : null}
                             </td>
                           </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </>
+                          <tr
+                            hidden={!expanded}
+                            className={expanded ? 'block md:table-row' : undefined}
+                          >
+                            <td colSpan={5} className="block min-w-0 p-0 md:table-cell">
+                              <section
+                                id={`vm-details-${vm.id}`}
+                                aria-labelledby={`vm-toggle-${vm.id}`}
+                              >
+                                {expanded && (
+                                  <VMDetails
+                                    serverId={serverId}
+                                    vm={vm}
+                                    settings={view}
+                                    observedAt={observedAt}
+                                  />
+                                )}
+                              </section>
+                            </td>
+                          </tr>
+                        </React.Fragment>
+                      );
+                    })}
+                  </tbody>
+                </table>
               )}
             </Card>
-            {selected ? (
-              <Card as="section" variant="panel" className="space-y-3 p-4">
-                <div className="flex flex-wrap items-center gap-3">
-                  <h2 className="min-w-0 wrap-anywhere font-semibold">
-                    {selected.name || `VM ${selected.id}`}
-                  </h2>
-                  <span className="font-mono text-sm text-(--theme-fg-muted)">#{selected.id}</span>
-                  <VMStatus vm={selected} />
-                </div>
-                <dl className="flex flex-wrap gap-x-6 gap-y-2 text-xs">
-                  <div className="flex items-baseline gap-2">
-                    <dt className="text-xs text-(--theme-fg-muted)">{t('pve_disk_capacity')}</dt>
-                    <dd className="font-mono">{bytes(selected.disk_capacity_bytes)}</dd>
-                  </div>
-                  <div className="flex items-baseline gap-2">
-                    <dt className="text-xs text-(--theme-fg-muted)">vCPU</dt>
-                    <dd className="font-mono">{selected.cpus ?? '—'}</dd>
-                  </div>
-                  <div className="flex items-baseline gap-2">
-                    <dt className="text-xs text-(--theme-fg-muted)">{t('uptime')}</dt>
-                    <dd className="font-mono">
-                      {selected.uptime_seconds == null
-                        ? '—'
-                        : t('pve_uptime', {
-                            days: Math.floor(selected.uptime_seconds / 86400),
-                            hours: Math.floor((selected.uptime_seconds % 86400) / 3600),
-                            minutes: Math.floor((selected.uptime_seconds % 3600) / 60),
-                          })}
-                    </dd>
-                  </div>
-                  <div className="flex w-full flex-wrap items-baseline gap-x-3 gap-y-1">
-                    <dt className="text-(--theme-fg-muted)">{t('pve_ips')}</dt>
-                    <dd className="min-w-0 max-w-full font-mono">
-                      <VMIPs key={selected.id} vm={selected} />
-                    </dd>
-                    {ipStale && (
-                      <dd className="text-(--theme-fg-warning-strong)">{t('pve_ip_stale')}</dd>
-                    )}
-                  </div>
-                </dl>
-                {!selected.template && (
-                  <VMHistory
-                    key={selected.id}
-                    serverId={serverId}
-                    vmId={selected.id}
-                    settings={view}
-                  />
-                )}
-              </Card>
-            ) : requestedVM && vms.length > 0 ? (
+            {expandedVMs.size > 0 && !anyExpanded && vms.length > 0 && (
               <p className="text-sm text-(--theme-fg-muted)">{t('pve_vm_missing')}</p>
-            ) : null}
+            )}
           </>
         )}
       </main>

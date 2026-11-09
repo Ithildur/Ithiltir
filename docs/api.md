@@ -238,7 +238,7 @@ System settings (`GET`, `PATCH`, and `PUT /api/admin/system/settings`) include `
 
 - `POST /api/node/virt` authenticates with `X-Node-Secret`; the key determines the owning host. Its JSON body limit is 4 MiB. `/api/node/metrics` keeps its 1 MiB limit. Success returns `204` without an update manifest.
 - `GET /api/virt/{id}` uses the VM access policy below and returns `{ "snapshot": ..., "received_at": ..., "stale": false }`. An existing node without a report returns null snapshot/receipt and `stale: true`; missing or deleted nodes return `404 not_found`.
-- `GET /api/admin/nodes/deploy` returns a boolean `pve` indicating verified bundled PVE helpers matching the bundled Node version. When true, the admin console offers a PVE deployment command using `scripts.linux.command_prefix`, the node secret, and `--pve`. The `scripts` keys remain `linux`, `macos`, and `windows`.
+- `GET /api/admin/nodes/deploy` returns a boolean `pve` indicating verified bundled PVE helpers matching the bundled Node version. When true, the admin console offers a PVE deployment command using `scripts.linux.command_prefix` without `sudo`, the node secret, and `--pve`. The PVE command runs from a root shell. The `scripts` keys remain `linux`, `macos`, and `windows`.
 
 The report and returned snapshot have the same shape:
 

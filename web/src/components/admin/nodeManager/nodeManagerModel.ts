@@ -13,7 +13,10 @@ export const nodeDeployCommand = (
 ): string | null => {
   if (target === 'pve' && !deploy?.pve) return null;
   const prefix = deploy?.scripts[target === 'pve' ? 'linux' : target]?.command_prefix;
-  return prefix ? `${prefix}${secret}${target === 'pve' ? ' --pve' : ''}` : null;
+  if (!prefix) return null;
+  return target === 'pve'
+    ? `${prefix.replace(' | sudo bash ', ' | bash ')}${secret} --pve`
+    : `${prefix}${secret}`;
 };
 
 const nodeHasBundledUpdate = (node: NodeRow, bundledNodeVersion: string): boolean => {

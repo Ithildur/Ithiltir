@@ -87,7 +87,12 @@ const MacOSLogo: React.FC<LogoProps> = ({ size = 16, className = '' }) => (
 );
 
 const ProxmoxLogo: React.FC<LogoProps> = ({ size = 16, className = '' }) => (
-  <ImageLogo src="/system-logos/proxmox.svg" size={size} className={className} />
+  <MaskLogo
+    src="/system-logos/proxmox.svg"
+    paint="currentColor"
+    size={size}
+    className={className}
+  />
 );
 
 export const PlatformLogo: React.FC<LogoProps & { platform: NodeDeployTarget }> = ({

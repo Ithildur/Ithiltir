@@ -170,6 +170,6 @@ Node 每目标持有一个复用 gRPC 连接，用于普通 RPC 上报和独立�
 
 Node 会话循环统一管理最多 32 个待完成查询的受理、取消和完成。查询任务只向循环返回结果，不修改共享会话状态。本机 helper 客户端以四条历史查询连接限制执行并发，等待连接同样消耗查询预算。会话退出时取消并等待全部查询及流读写任务结束，再进入重连。客户端为能力探测保留独立连接；探测失败时保留上次声明的能力，不关闭查询会话，成功探测到能力变化时重新建立会话。
 
-PVE root helper 以 `ithiltir-node-pve-cache.service` 运行，负责采集并持有 `/run/ithiltir-node/pve.sock`。socket 为 root 所有、0660 权限，校验对端 root UID 或运行主 GID。提供读取内存中已完成观测的 `GET /snapshot`、`GET /capabilities` 和经过参数校验的 `POST /history`，不接受任意命令或 PVE 路径。使用 `--pve` 安装时先停用旧 PVE 定时器，再启用常驻服务，并在 `pve.conf` 中配置 Node socket 和 `ITHILTIR_NODE_TRANSPORT=grpc`。省略 PVE 参数会保留该 drop-in；`--no-pve` 将其连同传输设置一起删除。
+PVE root helper 在 `ithiltir-node-pve-cache.service` 中以 `root:root` 运行，负责采集并持有 `/run/ithiltir-node/pve.sock`。PVE IPC 要求 root UID 和主 GID；`--group` 参数只授权 Node 访问 socket，不改变 helper 的主组。socket 为 root 所有、0660 权限，校验对端 root UID 或运行主 GID。提供读取内存中已完成观测的 `GET /snapshot`、`GET /capabilities` 和经过参数校验的 `POST /history`，不接受任意命令或 PVE 路径。使用 `--pve` 安装时先停用旧 PVE 定时器，再启用常驻服务，并在 `pve.conf` 中配置 Node socket 和 `ITHILTIR_NODE_TRANSPORT=grpc`。省略 PVE 参数会保留该 drop-in；`--no-pve` 将其连同传输设置一起删除。
 
 历史查询要求本地新鲜的成功 VM 清单。相同进行中请求共享一次执行，最后一个等待者离开时取消任务。历史查询单独使用四个执行槽和子进程继承的 VM 历史锁，进程退出后释放；QGA 查询使用独立的并发额度。helper 最多受理 32 个不同的进行中历史查询，结果最多 2 MiB、4096 点；成功缓存 30 秒，失败缓存 10 秒，历史失败还对该 VM 的其他窗口施加 10 秒冷却。缓存最多 128 项、16 MiB 结果字节；正在返回的响应可独立持有受限结果。共享执行由缓存持有独立的 8 秒预算，各远端等待者的预算最多 10 秒；某个等待者超时不会取消其他等待者仍需要的执行。VM 历史继续使用 PVE RRD 数据，Dash 不增加 VM 历史表。
