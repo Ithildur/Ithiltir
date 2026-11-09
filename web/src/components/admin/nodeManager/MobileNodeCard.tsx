@@ -272,12 +272,12 @@ const MobileNodeCard: React.FC<Props> = ({
             <Button
               variant="plain"
               className={deployButtonClass}
-              title="PVE"
+              title="Proxmox VE"
               size="none"
               onClick={() => onDeployCopy('pve', node.secret)}
             >
               <PlatformLogo platform="pve" size={16} />
-              <span className="sr-only">PVE</span>
+              <span className="sr-only">Proxmox VE</span>
             </Button>
           )}
         </div>

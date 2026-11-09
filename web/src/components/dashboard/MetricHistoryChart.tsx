@@ -33,8 +33,17 @@ interface Props {
   variant?: 'card' | 'inline';
   loading?: boolean;
   showXAxis?: boolean;
+  showYAxisUnit?: boolean;
   xAxisMaxLabels?: number;
   emptyState?: React.ReactNode;
+  stroke?: string;
+  fill?: string;
+  secondarySeries?: {
+    label: string;
+    data: MetricPoint[];
+    stroke: string;
+    fill?: string;
+  };
 }
 
 const MetricHistoryChart: React.FC<Props> = ({
@@ -48,8 +57,12 @@ const MetricHistoryChart: React.FC<Props> = ({
   variant = 'card',
   loading = false,
   showXAxis = false,
+  showYAxisUnit = false,
   xAxisMaxLabels,
   emptyState,
+  stroke,
+  fill,
+  secondarySeries,
 }) => {
   const { t, lang } = useI18n();
   const containerRef = React.useRef<HTMLDivElement | null>(null);
@@ -68,7 +81,23 @@ const MetricHistoryChart: React.FC<Props> = ({
   const isInline = variant === 'inline';
 
   const sorted = React.useMemo(() => sortMetricPoints(data), [data]);
-  const aligned = React.useMemo(() => alignMetricPoints(sorted), [sorted]);
+  const primary = React.useMemo(() => alignMetricPoints(sorted), [sorted]);
+  const secondaryData = secondarySeries?.data;
+  const secondaryLabel = secondarySeries?.label;
+  const secondaryStroke = secondarySeries?.stroke;
+  const secondaryFill = secondarySeries?.fill;
+  const primaryIndex = secondaryData ? 2 : 1;
+  const secondary = React.useMemo(
+    () => (secondaryData ? alignMetricPoints(sortMetricPoints(secondaryData)) : null),
+    [secondaryData],
+  );
+  const aligned = React.useMemo(
+    () =>
+      secondaryData
+        ? uPlot.join([secondary ? [secondary[0], secondary[1]] : [[], []], primary ?? [[], []]])
+        : primary,
+    [primary, secondary, secondaryData],
+  );
   const xSpanDays = React.useMemo(() => chartSpanDays(aligned), [aligned]);
 
   const normalizedMaxLabels =
@@ -92,9 +121,13 @@ const MetricHistoryChart: React.FC<Props> = ({
     [normalizedMaxLabels, shouldCoarsenXAxis, xSpanDays],
   );
 
-  const stats = React.useMemo(() => chartValueStats(aligned), [aligned]);
+  const stats = React.useMemo(() => {
+    const first = chartValueStats(primary);
+    const second = chartValueStats(secondary);
+    return { max: Math.max(first.max, second.max), maxAbs: Math.max(first.maxAbs, second.maxAbs) };
+  }, [primary, secondary]);
 
-  const hasThresholds = aligned?.length === 3;
+  const hasThresholds = primary?.length === 3;
   const thresholdMax = React.useMemo(
     () => sorted.reduce((max, point) => Math.max(max, point.threshold ?? 0), 0),
     [sorted],
@@ -120,8 +153,15 @@ const MetricHistoryChart: React.FC<Props> = ({
   );
 
   const formatTooltipValue = React.useCallback(
-    (value: number | null) => formatScaledValue(value, 2, unitScale, true, '-'),
-    [unitScale],
+    (value: number | null) =>
+      formatScaledValue(
+        value,
+        2,
+        secondaryLabel ? resolveUnitScale(unit, value) : unitScale,
+        true,
+        '-',
+      ),
+    [unitScale, unit, secondaryLabel],
   );
 
   const formatTooltipDate = React.useCallback(
@@ -200,11 +240,12 @@ const MetricHistoryChart: React.FC<Props> = ({
       }
 
       const xs = current[0] as number[];
-      const ys = current[1] as Array<number | null>;
+      const ys = current[primaryIndex] as Array<number | null>;
       const xPoint = xs[idx];
       const yPoint = ys[idx];
+      const secondaryPoint = secondaryLabel ? current[1]?.[idx] : null;
 
-      if (!Number.isFinite(xPoint) || yPoint == null || !Number.isFinite(yPoint)) {
+      if (!Number.isFinite(xPoint) || (yPoint == null && secondaryPoint == null)) {
         hideTooltip();
         return;
       }
@@ -212,11 +253,17 @@ const MetricHistoryChart: React.FC<Props> = ({
       const timestamp = xPoint * 1000;
       dateNode.textContent = formatTooltipDate(timestamp);
       timeNode.textContent = formatTooltipTime(timestamp);
-      const threshold = current[2]?.[idx];
-      valueNode.textContent =
-        threshold == null
-          ? formatTooltipValue(yPoint)
-          : `${formatTooltipValue(yPoint)} · ${t('pve_threshold_value', { value: formatTooltipValue(threshold) })}`;
+      const threshold = hasThresholds ? current.at(-1)?.[idx] : null;
+      const values = secondaryLabel
+        ? [
+            `${title}: ${formatTooltipValue(yPoint ?? null)}`,
+            `${secondaryLabel}: ${formatTooltipValue(secondaryPoint ?? null)}`,
+          ]
+        : [formatTooltipValue(yPoint ?? null)];
+      if (threshold != null) {
+        values.push(t('pve_threshold_value', { value: formatTooltipValue(threshold) }));
+      }
+      valueNode.textContent = values.join(secondaryLabel ? '\n' : ' · ');
 
       const xPos = plot.cursor.left;
       const yPos = plot.cursor.top;
@@ -281,7 +328,17 @@ const MetricHistoryChart: React.FC<Props> = ({
       tooltip.style.visibility = 'visible';
       tooltip.setAttribute('aria-hidden', 'false');
     },
-    [formatTooltipDate, formatTooltipTime, formatTooltipValue, hideTooltip, t],
+    [
+      formatTooltipDate,
+      formatTooltipTime,
+      formatTooltipValue,
+      hideTooltip,
+      hasThresholds,
+      primaryIndex,
+      secondaryLabel,
+      title,
+      t,
+    ],
   );
 
   const resetZoom = React.useCallback(() => {
@@ -304,6 +361,17 @@ const MetricHistoryChart: React.FC<Props> = ({
     const yAxisSize = isInline ? 44 : 56;
     const padding: uPlot.Padding = isInline ? [8, 10, 8, 10] : [10, 12, 20, 12];
     const showXAxisAxis = !isInline || showXAxis;
+    const secondaryPlotSeries = secondaryLabel
+      ? [
+          {
+            label: secondaryLabel,
+            stroke: secondaryStroke,
+            fill: secondaryFill,
+            width: isInline ? 1.5 : 2,
+            points: { show: false },
+          },
+        ]
+      : [];
 
     return {
       width: 0,
@@ -339,6 +407,9 @@ const MetricHistoryChart: React.FC<Props> = ({
         },
         {
           stroke: axisColor,
+          ...(showYAxisUnit
+            ? { label: unitScale.unitLabel, labelSize: 16, labelFont: '11px system-ui' }
+            : {}),
           grid: { stroke: gridColor, width: 1 },
           ticks: { stroke: tickColor, width: 1 },
           splits: () => [0, yAxisMax / 2, yAxisMax],
@@ -348,20 +419,22 @@ const MetricHistoryChart: React.FC<Props> = ({
       ],
       series: [
         {},
+        ...secondaryPlotSeries,
         {
           label: title,
-          stroke: lineColor,
+          stroke: stroke ?? lineColor,
           width: isInline ? 1.5 : 2,
-          fill: isInline ? 'transparent' : fillColor,
+          fill: fill ?? (isInline ? 'transparent' : fillColor),
           points: {
             show: hasThresholds,
             size: 5,
             stroke: thresholdColor,
             fill: thresholdColor,
             filter: (plot) => {
+              if (!hasThresholds) return null;
               const marked: number[] = [];
-              const limits = plot.data[2];
-              plot.data[1].forEach((value, index) => {
+              const limits = plot.data.at(-1);
+              plot.data[primaryIndex].forEach((value, index) => {
                 const limit = limits?.[index];
                 if (value != null && limit != null && value > limit) marked.push(index);
               });
@@ -387,14 +460,22 @@ const MetricHistoryChart: React.FC<Props> = ({
     dark,
     isInline,
     showXAxis,
+    showYAxisUnit,
     title,
     unitScale.divisor,
+    unitScale.unitLabel,
     moveTooltip,
     syncZoom,
     updateSelect,
     xAxisValues,
     yAxisMax,
     hasThresholds,
+    primaryIndex,
+    stroke,
+    fill,
+    secondaryLabel,
+    secondaryStroke,
+    secondaryFill,
     t,
   ]);
 

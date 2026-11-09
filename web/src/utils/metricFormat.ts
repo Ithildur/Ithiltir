@@ -36,6 +36,11 @@ export const resolveUnitScale = (unit?: string, maxValue: number | null = null):
     return { ...scaled, joiner: ' ' };
   }
 
+  if (normalized === 'bit/s') {
+    const scaled = pickScaledUnit(1000, ['bps', 'Kbps', 'Mbps', 'Gbps', 'Tbps', 'Pbps']);
+    return { ...scaled, joiner: ' ' };
+  }
+
   if (normalized.includes('iops')) {
     const scaled = pickScaledUnit(1000, iopsUnits);
     return { ...scaled, joiner: ' ' };

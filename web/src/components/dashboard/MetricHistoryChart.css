@@ -86,6 +86,7 @@
 }
 
 .metric-history-chart .metric-history-tooltip-value {
+  white-space: pre-line;
   font-weight: 600;
   font-family:
     ui-monospace,

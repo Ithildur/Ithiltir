@@ -87,12 +87,7 @@ const MacOSLogo: React.FC<LogoProps> = ({ size = 16, className = '' }) => (
 );
 
 const ProxmoxLogo: React.FC<LogoProps> = ({ size = 16, className = '' }) => (
-  <MaskLogo
-    src="/system-logos/proxmox.svg"
-    paint="currentColor"
-    size={size}
-    className={className}
-  />
+  <ImageLogo src="/system-logos/proxmox.svg" size={size} className={className} />
 );
 
 export const PlatformLogo: React.FC<LogoProps & { platform: NodeDeployTarget }> = ({
@@ -102,7 +97,14 @@ export const PlatformLogo: React.FC<LogoProps & { platform: NodeDeployTarget }> 
 }) => {
   switch (platform) {
     case 'pve':
-      return <ProxmoxLogo size={size} className={className} />;
+      return (
+        <MaskLogo
+          src="/system-logos/proxmox.svg"
+          paint="currentColor"
+          size={size}
+          className={className}
+        />
+      );
     case 'windows':
       return (
         <FaWindows

@@ -41,9 +41,9 @@ export const en = {
   pve_ip_stale: 'Stale',
   pve_uptime: '{{days}}d {{hours}}h {{minutes}}m',
   pve_history: 'Historical metrics',
-  pve_metric_group: 'Historical metric group',
-  pve_metrics_resources: 'CPU / Memory / Network',
-  pve_metrics_disk: 'Disk I/O',
+  pve_disk_io: 'Disk I/O',
+  pve_memory_used: 'Used memory',
+  pve_memory_limit: 'Memory limit',
   pve_history_offline: 'The node is disconnected. PVE history is temporarily unavailable.',
   pve_history_unsupported:
     'The node does not provide PVE history yet. Check its gRPC connection and collector.',
