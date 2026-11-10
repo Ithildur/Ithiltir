@@ -243,8 +243,8 @@ func TestIntegrationNodeHTTPAndRPC(t *testing.T) {
 		}
 		time.Sleep(time.Millisecond)
 	}
-	if response, _ := adminGet(historyPath, false); response.StatusCode != 403 {
-		t.Fatal("history missing guest access boundary")
+	if response, body := adminGet(historyPath, false); response.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("unauthenticated history: %d %s", response.StatusCode, body)
 	}
 	queryDone := make(chan error, 1)
 	go func() {
