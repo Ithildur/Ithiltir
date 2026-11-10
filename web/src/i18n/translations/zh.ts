@@ -13,7 +13,10 @@ export const zh = {
   pve_exceeded_points: '超限 {{count}} 个采样点',
   admin_system_pve_guest_visible: 'PVE 虚拟机对游客可见',
   admin_system_pve_guest_visible_desc:
-    '默认关闭。开启后，游客可查看已公开宿主机的虚拟机列表、IP 地址和历史指标。',
+    '游客可查看已公开宿主机的虚拟机列表和当前指标。IP 地址和历史曲线仅管理员可见。',
+  admin_system_pve_guest_names: '向游客展示虚拟机名称',
+  admin_system_pve_guest_names_hint:
+    '虚拟机名称可能包含业务用途、客户或内部环境信息，开启后游客可见。',
   pve_open: '查看虚拟机',
   pve_title: '虚拟机',
   pve_error: '无法加载虚拟机数据，请重试。',

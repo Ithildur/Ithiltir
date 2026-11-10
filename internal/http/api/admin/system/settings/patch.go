@@ -79,13 +79,14 @@ func (h *handler) patchHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	patch := systemstore.SettingsPatch{
-		PVEGuestVisible:    in.PVEGuestVisible,
-		SiteBrandPatch:     brand,
-		DashUpdateChannel:  channel,
-		DashUpdateMode:     updateMode,
-		UptimeGuestVisible: in.UptimeGuestVisible,
-		UptimeWarningSLA:   in.UptimeWarningSLA,
-		UptimeErrorSLA:     in.UptimeErrorSLA,
+		PVEGuestVisible:      in.PVEGuestVisible,
+		PVEGuestNamesVisible: in.PVEGuestNamesVisible,
+		SiteBrandPatch:       brand,
+		DashUpdateChannel:    channel,
+		DashUpdateMode:       updateMode,
+		UptimeGuestVisible:   in.UptimeGuestVisible,
+		UptimeWarningSLA:     in.UptimeWarningSLA,
+		UptimeErrorSLA:       in.UptimeErrorSLA,
 	}
 	if err := saveSettingsPatch(r.Context(), h.tx, mode, patch); err != nil {
 		if errors.Is(err, systemstore.ErrInvalidUptimeSLA) {

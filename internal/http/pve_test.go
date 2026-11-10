@@ -48,7 +48,7 @@ func testPVEGuestAccess(t *testing.T, client *redis.Client) {
 		t.Fatal(err)
 	}
 	now := time.Now().UTC().Truncate(time.Microsecond)
-	snapshot := virt.Snapshot{Schema: 1, Provider: "pve", Host: "pve-a", CollectedAt: now, LastSuccessAt: &now, TTLSeconds: 90, Status: "ok", VMs: []virt.VM{{ID: 100, Name: "private-vm", Status: "running", IPs: []string{"192.168.1.10"}}}}
+	snapshot := virt.Snapshot{Schema: 1, Provider: "pve", Host: "pve-a", CollectedAt: now, LastSuccessAt: &now, TTLSeconds: 90, Status: "error", Error: "private-vm at 192.168.1.10 unavailable", VMs: []virt.VM{{ID: 100, Name: "private-vm", Status: "running", IPs: []string{"192.168.1.10"}, IPsCollectedAt: &now, IPsTTLSeconds: 90}}}
 	for _, node := range []struct {
 		id     int64
 		secret string
@@ -111,7 +111,7 @@ func testPVEGuestAccess(t *testing.T, client *redis.Client) {
 	assertPolicy(false)
 	for _, token := range []string{"", "invalid-token"} {
 		call("GET", path, "", token, 403)
-		call("GET", path+history, "", token, 403)
+		call("GET", path+history, "", token, 401)
 	}
 	call("GET", path, "", session.AccessToken, 200)
 	call("GET", hiddenPath, "", session.AccessToken, 200)
@@ -119,14 +119,37 @@ func testPVEGuestAccess(t *testing.T, client *redis.Client) {
 	call("PATCH", settingsPath, `{"pve_guest_visible":true}`, session.AccessToken, 204)
 	assertPolicy(true)
 	var view nodestore.VirtView
-	if err := json.Unmarshal(call("GET", path, "", "", 200), &view); err != nil {
+	public := call("GET", path, "", "", 200)
+	for _, private := range []string{"private-vm", "192.168.1.10", `"name":`, `"ips":`, `"ips_collected_at":`, `"ips_ttl_seconds":`, `"error":`} {
+		if strings.Contains(string(public), private) {
+			t.Fatalf("guest snapshot contains %s: %s", private, public)
+		}
+	}
+	if err := json.Unmarshal(public, &view); err != nil {
 		t.Fatal(err)
 	}
-	if view.Snapshot == nil || !view.Snapshot.CollectedAt.Equal(now) || len(view.Snapshot.VMs) != 1 || view.Snapshot.VMs[0].IPs[0] != "192.168.1.10" {
+	if view.Snapshot == nil || !view.Snapshot.CollectedAt.Equal(now) || len(view.Snapshot.VMs) != 1 || view.Snapshot.VMs[0].ID != 100 || view.Snapshot.Status != "error" {
 		t.Fatalf("public snapshot = %+v", view)
 	}
 	if view.VMCPUThreshold != 80 || view.VMMemoryThreshold != 90 || view.VMMemoryEnabled {
 		t.Fatalf("unexpected VM defaults: %+v", view)
+	}
+	admin := call("GET", path, "", session.AccessToken, 200)
+	if !strings.Contains(string(admin), "private-vm") || !strings.Contains(string(admin), "192.168.1.10") {
+		t.Fatalf("guest redaction changed administrator data: %s", admin)
+	}
+	call("PATCH", settingsPath, `{"pve_guest_names_visible":true}`, session.AccessToken, 204)
+	public = call("GET", path, "", "", 200)
+	if !strings.Contains(string(public), "private-vm") || strings.Contains(string(public), "192.168.1.10") || strings.Contains(string(public), `"error":`) {
+		t.Fatalf("name visibility exposed other private data: %s", public)
+	}
+	call("PATCH", settingsPath, `{"pve_guest_visible":true,"pve_guest_names_visible":null}`, session.AccessToken, 204)
+	if !strings.Contains(string(call("GET", path, "", "", 200)), "private-vm") {
+		t.Fatal("null name setting changed visibility")
+	}
+	call("PATCH", settingsPath, `{"pve_guest_names_visible":false}`, session.AccessToken, 204)
+	if strings.Contains(string(call("GET", path, "", "", 200)), "private-vm") {
+		t.Fatal("explicit false did not hide VM names")
 	}
 	nodePath := "/api/admin/nodes/" + strconv.FormatInt(visible.ID, 10)
 	call("PATCH", nodePath, `{"vm_cpu_threshold":75}`, "", 401)
@@ -169,15 +192,21 @@ func testPVEGuestAccess(t *testing.T, client *redis.Client) {
 	if view.VMCPUThreshold != 75 || view.VMMemoryThreshold != 85 || view.VMMemoryEnabled {
 		t.Fatalf("partial VM update lost thresholds: %+v", view)
 	}
-	call("GET", path+history, "", "", 503)
-	call("GET", path+"/vms/100/history?timeframe=invalid", "", "", 400)
+	call("GET", path+history, "", "", 401)
+	call("GET", path+history, "", "invalid-token", 401)
+	call("GET", path+"/vms/100/history?timeframe=invalid", "", "", 401)
+	call("GET", path+"/vms/100/history?timeframe=invalid", "", session.AccessToken, 400)
 	call("GET", hiddenPath, "", "", 404)
-	call("GET", hiddenPath+history, "", "", 404)
+	call("GET", hiddenPath+history, "", "", 401)
+	call("PATCH", settingsPath, `{"pve_guest_names_visible":true}`, session.AccessToken, 204)
 	call("PUT", settingsPath, `{"history_guest_access_mode":"disabled","dash_update_channel":"release","dash_update_mode":"manual","logo_url":"/brandlogo.svg","page_title":"Ithiltir","topbar_text":"Ops"}`, session.AccessToken, 204)
 	assertPolicy(true)
+	if !strings.Contains(string(call("GET", path, "", "", 200)), "private-vm") {
+		t.Fatal("PUT without name setting changed visibility")
+	}
 	call("PATCH", settingsPath, `{"pve_guest_visible":false}`, session.AccessToken, 204)
 	assertPolicy(false)
 	call("GET", path, "", "", 403)
-	call("GET", path+history, "", "", 403)
+	call("GET", path+history, "", "", 401)
 	call("GET", path, "", session.AccessToken, 200)
 }

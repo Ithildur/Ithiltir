@@ -679,6 +679,26 @@ func TestIntegrationVMSettingsMigration(t *testing.T) {
 	}
 }
 
+func TestIntegrationPVEGuestNamesUpgrade(t *testing.T) {
+	db, keyPath := pgtest.NewDBAt(t, 15)
+	if err := db.Exec("UPDATE system_settings SET pve_guest_visible = true WHERE id = 1").Error; err != nil {
+		t.Fatal(err)
+	}
+	if _, err := kitmigration.Run(t.Context(), migrationConfig(t, db, keyPath)); err != nil {
+		t.Fatal(err)
+	}
+	var settings struct {
+		PVEGuestVisible      bool
+		PVEGuestNamesVisible bool
+	}
+	if err := db.Table("system_settings").Select("pve_guest_visible, pve_guest_names_visible").Where("id = 1").Take(&settings).Error; err != nil {
+		t.Fatal(err)
+	}
+	if !settings.PVEGuestVisible || settings.PVEGuestNamesVisible {
+		t.Fatalf("upgrade changed guest access or exposed VM names: %+v", settings)
+	}
+}
+
 func TestIntegrationSchemaVersionGuard(t *testing.T) {
 	ctx := context.Background()
 	db := pgtest.NewDB(t)

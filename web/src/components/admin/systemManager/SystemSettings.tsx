@@ -10,6 +10,7 @@ import { AdminSectionTabs } from '@components/admin/AdminSectionTabs';
 import { BrandImage } from '@components/BrandLogo';
 import Button from '@components/ui/Button';
 import ConfirmDialog from '@components/ui/ConfirmDialog';
+import Checkbox from '@components/ui/Checkbox';
 import Input from '@components/ui/Input';
 import IOSSwitch from '@components/ui/IOSSwitch';
 import SettingRow, {
@@ -112,6 +113,8 @@ const SystemSettings: React.FC = () => {
   const [savingBrand, setSavingBrand] = React.useState(false);
   const [savingHistoryMode, setSavingHistoryMode] = React.useState(false);
   const [savingPVEAccess, setSavingPVEAccess] = React.useState(false);
+  const [pveDialogOpen, setPVEDialogOpen] = React.useState(false);
+  const [showPVENames, setShowPVENames] = React.useState(false);
   const [savingDashUpdateChannel, setSavingDashUpdateChannel] = React.useState(false);
   const [savingDashUpdateMode, setSavingDashUpdateMode] = React.useState(false);
   const [brandDraft, setBrandDraft] = React.useState<SiteBrand | null>(null);
@@ -202,14 +205,15 @@ const SystemSettings: React.FC = () => {
     [apiError, savingHistoryMode, settings, t],
   );
 
-  const updatePVEAccess = async () => {
+  const updatePVEAccess = async (visible: boolean, namesVisible: boolean) => {
     if (!settings || savingPVEAccess) return;
-    const visible = !settings.pve_guest_visible;
     setSavingPVEAccess(true);
     try {
-      await adminApi.updateSystemSettings({ pve_guest_visible: visible });
-      setSettings((current) => (current ? { ...current, pve_guest_visible: visible } : current));
+      const fields = { pve_guest_visible: visible, pve_guest_names_visible: namesVisible };
+      await adminApi.updateSystemSettings(fields);
+      setSettings((current) => (current ? { ...current, ...fields } : current));
       cachePVEGuestAccess(visible);
+      setPVEDialogOpen(false);
       pushTopBanner(t('admin_system_settings_saved'), { tone: 'info' });
     } catch (error) {
       apiError(error, t('admin_system_settings_save_failed'));
@@ -327,6 +331,28 @@ const SystemSettings: React.FC = () => {
   return (
     <div className="space-y-4 md:space-y-6">
       <ConfirmDialog {...confirmDialogProps} />
+      <ConfirmDialog
+        isOpen={pveDialogOpen}
+        isLoading={savingPVEAccess}
+        title={t('admin_system_pve_guest_visible')}
+        message={
+          <div className="space-y-3">
+            <p>{t('admin_system_pve_guest_visible_desc')}</p>
+            <Checkbox
+              checked={showPVENames}
+              onChange={(event) => setShowPVENames(event.target.checked)}
+              disabled={savingPVEAccess}
+            >
+              {t('admin_system_pve_guest_names')}
+            </Checkbox>
+            <p>{t('admin_system_pve_guest_names_hint')}</p>
+          </div>
+        }
+        confirmLabel={t('common_confirm')}
+        cancelLabel={t('common_cancel')}
+        onConfirm={() => void updatePVEAccess(true, showPVENames)}
+        onCancel={() => setPVEDialogOpen(false)}
+      />
 
       <div className="flex flex-col justify-between gap-3 md:flex-row md:gap-4">
         <div className="flex w-full md:w-auto md:flex-1">
@@ -447,9 +473,28 @@ const SystemSettings: React.FC = () => {
                 checked={settings?.pve_guest_visible ?? false}
                 disabled={!settings || loadingSettings || savingPVEAccess}
                 ariaLabel={t('admin_system_pve_guest_visible')}
-                onChange={() => void updatePVEAccess()}
+                onChange={() => {
+                  if (settings?.pve_guest_visible) void updatePVEAccess(false, false);
+                  else {
+                    setShowPVENames(false);
+                    setPVEDialogOpen(true);
+                  }
+                }}
               />
             </SettingRow>
+            {settings?.pve_guest_visible && (
+              <SettingRow
+                title={t('admin_system_pve_guest_names')}
+                description={t('admin_system_pve_guest_names_hint')}
+              >
+                <IOSSwitch
+                  checked={settings.pve_guest_names_visible}
+                  disabled={loadingSettings || savingPVEAccess}
+                  ariaLabel={t('admin_system_pve_guest_names')}
+                  onChange={() => void updatePVEAccess(true, !settings.pve_guest_names_visible)}
+                />
+              </SettingRow>
+            )}
           </SettingPanel>
           <UptimeSettings
             settings={settings}

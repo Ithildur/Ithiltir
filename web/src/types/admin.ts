@@ -60,6 +60,7 @@ export type DashUpdateMode = 'manual' | 'notify' | 'auto';
 
 export interface SystemSettings extends SiteBrand {
   pve_guest_visible: boolean;
+  pve_guest_names_visible: boolean;
   uptime_guest_visible: boolean;
   uptime_warning_sla: number;
   uptime_error_sla: number;

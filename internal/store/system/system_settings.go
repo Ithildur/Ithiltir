@@ -52,25 +52,27 @@ type SiteBrandPatch struct {
 
 type Settings struct {
 	SiteBrand
-	ActiveThemeID      string
-	DashUpdateChannel  DashUpdateChannel
-	DashUpdateMode     DashUpdateMode
-	UptimeGuestVisible bool
-	PVEGuestVisible    bool
-	UptimeWarningSLA   float64
-	UptimeErrorSLA     float64
+	ActiveThemeID        string
+	DashUpdateChannel    DashUpdateChannel
+	DashUpdateMode       DashUpdateMode
+	UptimeGuestVisible   bool
+	PVEGuestVisible      bool
+	PVEGuestNamesVisible bool
+	UptimeWarningSLA     float64
+	UptimeErrorSLA       float64
 }
 
 // SettingsPatch updates only non-nil fields, including explicit false and zero.
 type SettingsPatch struct {
 	SiteBrandPatch
-	ActiveThemeID      *string
-	DashUpdateChannel  *DashUpdateChannel
-	DashUpdateMode     *DashUpdateMode
-	UptimeGuestVisible *bool
-	PVEGuestVisible    *bool
-	UptimeWarningSLA   *float64
-	UptimeErrorSLA     *float64
+	ActiveThemeID        *string
+	DashUpdateChannel    *DashUpdateChannel
+	DashUpdateMode       *DashUpdateMode
+	UptimeGuestVisible   *bool
+	PVEGuestVisible      *bool
+	PVEGuestNamesVisible *bool
+	UptimeWarningSLA     *float64
+	UptimeErrorSLA       *float64
 }
 
 var ErrInvalidUptimeSLA = errors.New("uptime SLA must satisfy 0 <= error < warning <= 100")
@@ -220,14 +222,15 @@ func (s *Store) GetSettings(ctx context.Context) (Settings, error) {
 		return Settings{}, err
 	}
 	return Settings{
-		SiteBrand:          brand,
-		ActiveThemeID:      item.ActiveThemeID,
-		DashUpdateChannel:  policy.Channel,
-		DashUpdateMode:     policy.Mode,
-		UptimeGuestVisible: item.UptimeGuestVisible,
-		PVEGuestVisible:    item.PVEGuestVisible,
-		UptimeWarningSLA:   item.UptimeWarningSLA,
-		UptimeErrorSLA:     item.UptimeErrorSLA,
+		SiteBrand:            brand,
+		ActiveThemeID:        item.ActiveThemeID,
+		DashUpdateChannel:    policy.Channel,
+		DashUpdateMode:       policy.Mode,
+		UptimeGuestVisible:   item.UptimeGuestVisible,
+		PVEGuestVisible:      item.PVEGuestVisible,
+		PVEGuestNamesVisible: item.PVEGuestNamesVisible,
+		UptimeWarningSLA:     item.UptimeWarningSLA,
+		UptimeErrorSLA:       item.UptimeErrorSLA,
 	}, nil
 }
 
@@ -255,6 +258,9 @@ func (s *Store) PatchSettings(ctx context.Context, patch SettingsPatch) error {
 	}
 	if patch.PVEGuestVisible != nil {
 		updates["pve_guest_visible"] = *patch.PVEGuestVisible
+	}
+	if patch.PVEGuestNamesVisible != nil {
+		updates["pve_guest_names_visible"] = *patch.PVEGuestNamesVisible
 	}
 	if patch.UptimeWarningSLA != nil {
 		updates["uptime_warning_sla"] = *patch.UptimeWarningSLA

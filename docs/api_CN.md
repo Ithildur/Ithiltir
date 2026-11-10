@@ -64,7 +64,7 @@ Bearer 可选端点会把缺失、格式错误、过期、已撤销或其他非�
 - `/api/metrics/uptime` 和 `/api/metrics/uptime/day` 由 `uptime_guest_visible` 和节点游客可见性控制，不使用独立的历史访问设置。
 - `/api/metrics/history` 默认需要 Bearer。只有 `history_guest_access_mode` 为 `by_node` 时，匿名读取才按游客可见节点放开。
 - `/api/statistics/access` 可匿名读取，返回 `history_guest_access_mode`、`traffic_guest_access_mode` 和 `pve_guest_visible`。
-- `/api/virt/{id}` 和 `/api/virt/{id}/vms/{vmid}/history` 仅在 `pve_guest_visible` 开启且宿主机对游客可见时允许游客读取。该设置默认 `false`，独立于宿主历史、流量和在线率可见性。
+- `/api/virt/{id}` 仅在 `pve_guest_visible` 开启且宿主机游客可见时允许游客读取；不返回 IP，默认隐藏 VM 名称。`/api/virt/{id}/vms/{vmid}/history` 始终要求管理员认证。
 - `/api/statistics/traffic/*` 的匿名读取由流量设置控制，并仍受节点游客可见性限制。
 - `GET /api/front/metrics` 在节点配置了标签时，会在节点元数据中包含字符串数组 `node.tags`。
 
@@ -236,7 +236,7 @@ Bearer 可选端点会把缺失、格式错误、过期、已撤销或其他非�
 - `GET /api/virt/{id}`：使用下述 VM 访问策略。返回 `{ "snapshot": ..., "received_at": ..., "stale": false }`。节点存在但未上报时，前两项为 `null`、`stale` 为 `true`；节点不存在或已删除时返回 `404 not_found`。
 - `GET /api/admin/nodes/deploy` 返回布尔字段 `pve`，表示本机安装包是否包含与内置 Node 版本匹配且校验通过的 PVE 工具。为 true 时，管理台提供 PVE 部署命令，由去掉 `sudo` 的 `scripts.linux.command_prefix`、节点 secret 和 `--pve` 组成，在 root shell 中执行。`scripts` 的键仍为 `linux`、`macos` 和 `windows`。
 
-上报体和 `snapshot` 使用同一结构：
+Node 上报体与管理员快照使用以下结构；游客快照会裁剪下述隐私字段：
 
 ```json
 {
@@ -292,14 +292,14 @@ Node 设置 `ITHILTIR_NODE_TRANSPORT=http|grpc|auto` 选择传输，默认 `http
 
 ## PVE 历史查询
 
-系统设置接口（`GET`、`PATCH` 和 `PUT /api/admin/system/settings`）包含布尔字段 `pve_guest_visible`，默认 `false`。开启后，游客可查看已公开宿主机的 VM 快照、IP 地址和历史指标。PATCH、PUT 中未提交或为 `null` 时保持原值；显式 `false` 关闭游客访问。管理员访问不受此开关影响。
+系统设置包含 `pve_guest_visible` 和 `pve_guest_names_visible`，均默认 `false`。游客读取快照要求访客访问开启且宿主机游客可见。游客响应始终省略 `ips`、`ips_collected_at`、`ips_ttl_seconds` 和原始采集错误 `error`；仅在名称展示开启时返回 `name`，`status` 仍表示采集是否失败。GET、PATCH、PUT `/api/admin/system/settings` 均支持这两个字段；省略或为 `null` 的更新保持原值。管理员访问不受影响。
 
-`GET /api/virt/{id}` 与 `GET /api/virt/{id}/vms/{vmid}/history` 允许已认证的管理员访问；游客需要同时满足全局开关开启及宿主机游客可见。游客访问关闭时返回 `403 forbidden`；开启时，隐藏、不存在或已删除的宿主机在派发查询前返回 `404 not_found`。读取访问设置或节点可见性失败时返回 `503 virt_unavailable`。响应使用 `Cache-Control: no-store`。
+`GET /api/virt/{id}` 的游客访问受全局开关和宿主机可见性控制：关闭时返回 `403 forbidden`；开启时，隐藏、不存在或已删除的宿主机返回 `404 not_found`。读取访问设置或节点可见性失败时返回 `503 virt_unavailable`。`GET /api/virt/{id}/vms/{vmid}/history` 要求有效的管理员 Bearer token；未提供、无效或过期时，在数据库和节点查询前返回 `401 unauthorized`。响应使用 `Cache-Control: no-store`。
 
 历史接口从已连接节点的 PVE RRD 读取数据。参数：`timeframe=hour|day|week|month|year`，默认 `hour`；`consolidation=AVERAGE|MAX`，默认 `AVERAGE`。响应包含 `source: "pve_rrd"`、`vm_id`、`timeframe`、`consolidation`、`collected_at`、`points`。每点包含 `timestamp`；可选字段为 `cpu_ratio`、`memory_bytes`、`memory_limit_bytes`、`disk_read_bytes_per_second`、`disk_write_bytes_per_second`、`net_in_bytes_per_second`、`net_out_bytes_per_second`。缺失值表示未知，历史聚合和分辨率由 PVE 决定；`collected_at` 是读取时间，不是每个历史点的采样时间。
 
-历史查询错误：`400 invalid_query`/`invalid_id`、`403 forbidden`、`404 not_found`（节点）/`vm_not_found`（VM）、`429 busy`、`501 unsupported`、`503 node_offline`/`virt_unavailable`、`504 deadline_exceeded`、`502 source_unavailable`/`invalid_result`。查询要求本地新鲜的成功 VM 清单及支持历史查询的 helper 服务。Dash 不持久化 VM 历史，不将其计入宿主流量、在线率或计费。
+历史查询错误：`400 invalid_query`/`invalid_id`、`401 unauthorized`、`404 not_found`（节点）/`vm_not_found`（VM）、`429 busy`、`501 unsupported`、`503 node_offline`/`virt_unavailable`、`504 deadline_exceeded`、`502 source_unavailable`/`invalid_result`。查询要求本地新鲜的成功 VM 清单及支持历史查询的 helper 服务。Dash 不持久化 VM 历史，不将其计入宿主流量、在线率或计费。
 
 `GET /api/admin/nodes/{id}/virt/capabilities` 仅供管理员进行安装诊断，返回 `{"connected":true,"pve_history":true,"version":"...","helper_version":"..."}`；会话断开时能力标志为 false。缺少鉴权时返回 `401 unauthorized`。
 
-有权限的访客可点击面板卡片上的 PVE 系统图标进入 `/pve/{id}`，查看该宿主机的 VM 列表、详情和历史图；`?vm={vmid}` 选择虚拟机。其他系统图标保持展示用途。离线或过期快照在 10 分钟缓存保留期内仍可查看；历史查询要求节点查询会话在线。
+有权限的访客可点击面板卡片上的 PVE 系统图标进入 `/pve/{id}`，查看 VM 列表和当前指标。管理员可展开 VM 行查看 IP、详情和历史曲线；`?vm={vmid}` 选择虚拟机。其他系统图标保持展示用途。离线或过期快照在 10 分钟缓存保留期内仍可查看；历史查询要求节点查询会话在线。

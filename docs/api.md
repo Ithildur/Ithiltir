@@ -64,7 +64,7 @@ The admin password is supplied through `monitor_dash_pwd` and must contain at le
 - `/api/metrics/uptime` and `/api/metrics/uptime/day` use `uptime_guest_visible` and node guest visibility. They do not use the separate history-access setting.
 - `/api/metrics/history` requires bearer by default. If `history_guest_access_mode` is `by_node`, anonymous reads are limited to guest-visible nodes.
 - `/api/statistics/access` is public and returns `history_guest_access_mode`, `traffic_guest_access_mode`, and `pve_guest_visible`.
-- `/api/virt/{id}` and `/api/virt/{id}/vms/{vmid}/history` allow guests only when `pve_guest_visible` is enabled and the host is guest-visible. The setting defaults to `false` and is independent of host history, traffic, and uptime visibility.
+- `/api/virt/{id}` permits guests when `pve_guest_visible` is enabled and the host is guest-visible; IPs are never exposed and VM names are hidden by default. `/api/virt/{id}/vms/{vmid}/history` requires administrator authentication.
 - Anonymous reads under `/api/statistics/traffic/*` are controlled by traffic settings and still respect node guest visibility.
 - `GET /api/front/metrics` node metadata includes `node.tags` as a string array when tags are configured for the node.
 
@@ -232,7 +232,7 @@ The admin password is supplied through `monitor_dash_pwd` and must contain at le
 
 ## Virtual machine snapshots
 
-System settings (`GET`, `PATCH`, and `PUT /api/admin/system/settings`) include `pve_guest_visible`, a boolean defaulting to `false`. Enabling it exposes VM names, IP addresses, snapshots, and historical metrics only for guest-visible hosts. Omitted or `null` values preserve the current setting in PATCH and PUT; explicit `false` disables guest access. Administrator access is unaffected.
+System settings include `pve_guest_visible` and `pve_guest_names_visible`, both defaulting to `false`. Guests can read snapshots only when guest access is enabled and the host is guest-visible. Guest responses always omit `ips`, `ips_collected_at`, `ips_ttl_seconds` and raw collector `error` text. They omit `name` unless name visibility is enabled; `status` still reports collection failures. GET, PATCH and PUT `/api/admin/system/settings` expose both settings; omitted or `null` updates preserve existing values. Administrator access is unaffected.
 
 `GET /api/virt/{id}` returns the VM snapshot envelope described below. A valid administrator Bearer token allows access regardless of the guest switch. Guests receive `403 forbidden` when `pve_guest_visible` is off, and `404 not_found` for hidden, missing, or deleted hosts when it is on. Access-setting or visibility failures return `503 virt_unavailable`. Responses use `Cache-Control: no-store`.
 
@@ -240,7 +240,7 @@ System settings (`GET`, `PATCH`, and `PUT /api/admin/system/settings`) include `
 - `GET /api/virt/{id}` uses the VM access policy below and returns `{ "snapshot": ..., "received_at": ..., "stale": false }`. An existing node without a report returns null snapshot/receipt and `stale: true`; missing or deleted nodes return `404 not_found`.
 - `GET /api/admin/nodes/deploy` returns a boolean `pve` indicating verified bundled PVE helpers matching the bundled Node version. When true, the admin console offers a PVE deployment command using `scripts.linux.command_prefix` without `sudo`, the node secret, and `--pve`. The PVE command runs from a root shell. The `scripts` keys remain `linux`, `macos`, and `windows`.
 
-The report and returned snapshot have the same shape:
+Node reports and administrator snapshots use the following shape; guest snapshots omit the private fields listed above:
 
 ```json
 {"schema":1,"provider":"pve","host":"pve-a","collected_at":"2026-09-28T10:00:00Z","last_success_at":"2026-09-28T10:00:00Z","ttl_seconds":90,"status":"ok","vms":[{"id":100,"name":"guest","status":"running","template":false,"collected_at":"2026-09-28T10:00:00Z","ttl_seconds":90,"cpus":2,"cpu_ratio":0.25}]}
@@ -287,14 +287,14 @@ Set `ITHILTIR_NODE_TRANSPORT=http|grpc|auto` on Node; the default is `http` for 
 
 ## PVE history queries
 
-System settings (`GET`, `PATCH` and `PUT /api/admin/system/settings`) include `pve_guest_visible`, a boolean defaulting to `false`. When enabled, guests can read VM snapshots, IP addresses and history for guest-visible hosts. Omitted or null values in PATCH/PUT preserve the setting; explicit false disables guest access. Administrator access is independent of this switch.
+History access is administrator-only and is independent of the guest snapshot settings.
 
-`GET /api/virt/{id}` and `GET /api/virt/{id}/vms/{vmid}/history` allow an authenticated administrator, or guests when both the global switch and host guest visibility permit access. Disabled guest access returns `403 forbidden`; hidden, missing or deleted hosts return `404 not_found` for guests before a query is dispatched. Access-setting or guest-visibility lookup failures return `503 virt_unavailable`. Responses use `Cache-Control: no-store`.
+`GET /api/virt/{id}/vms/{vmid}/history` requires a valid administrator Bearer token. Missing, invalid or expired authentication returns `401 unauthorized` before database or node queries. Responses use `Cache-Control: no-store`.
 
 The history endpoint reads the connected node's PVE RRD. Parameters: `timeframe=hour|day|week|month|year` (default `hour`), `consolidation=AVERAGE|MAX` (default `AVERAGE`). Results contain `source: "pve_rrd"`, `vm_id`, `timeframe`, `consolidation`, `collected_at`, and `points`. Each point has `timestamp`; optional fields are `cpu_ratio`, `memory_bytes`, `memory_limit_bytes`, `disk_read_bytes_per_second`, `disk_write_bytes_per_second`, `net_in_bytes_per_second` and `net_out_bytes_per_second`. Missing values remain unknown. PVE determines historical aggregation/resolution; `collected_at` is the fetch time, not the timestamp of every point.
 
-History errors: `400 invalid_query`/`invalid_id`, `403 forbidden`, `404 not_found` (node)/`vm_not_found` (VM), `429 busy`, `501 unsupported`, `503 node_offline`/`virt_unavailable`, `504 deadline_exceeded`, `502 source_unavailable`/`invalid_result`. Queries require a fresh successful local VM inventory and a running helper service with history support. Dash does not persist VM history or include it in host traffic, uptime or billing.
+History errors: `400 invalid_query`/`invalid_id`, `401 unauthorized`, `404 not_found` (node)/`vm_not_found` (VM), `429 busy`, `501 unsupported`, `503 node_offline`/`virt_unavailable`, `504 deadline_exceeded`, `502 source_unavailable`/`invalid_result`. Queries require a fresh successful local VM inventory and a running helper service with history support. Dash does not persist VM history or include it in host traffic, uptime or billing.
 
 `GET /api/admin/nodes/{id}/virt/capabilities` is administrator-only and returns `{"connected":true,"pve_history":true,"version":"...","helper_version":"..."}` for installation diagnostics; disconnected sessions return false flags. Missing authentication returns `401 unauthorized`.
 
-The dashboard PVE system icon links to `/pve/{id}` for authorized viewers. The page displays the host's VM list, selected VM details and historical charts; `?vm={vmid}` selects a VM. Other system icons remain display-only. Offline or stale snapshots remain viewable within the ten-minute cache retention window; history requires a connected query session.
+The dashboard PVE system icon links to `/pve/{id}` for authorized viewers. Guests see the VM list and current metrics. Administrators can expand VM rows for IP addresses, details and historical charts; `?vm={vmid}` selects a VM. Other system icons remain display-only. Offline or stale snapshots remain viewable within the ten-minute cache retention window; history requires a connected query session.

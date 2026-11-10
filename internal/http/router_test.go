@@ -102,6 +102,7 @@ func TestHTTPRoutes(t *testing.T) {
 		{"GET", "/api/admin/groups", 401, "unauthorized", nil},
 		{"GET", "/api/admin/groups/", 401, "unauthorized", nil},
 		{"GET", "/api/auth/sessions", 401, "unauthorized", nil},
+		{"GET", "/api/virt/1/vms/100/history", 401, "unauthorized", nil},
 		{"PATCH", "/api/admin/nodes/1", 401, "unauthorized", nil},
 		{"PATCH", "/api/admin/nodes/1/", 401, "unauthorized", nil},
 		{"DELETE", "/api/admin/nodes/1", 401, "unauthorized", nil},

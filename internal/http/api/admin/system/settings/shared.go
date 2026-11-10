@@ -15,6 +15,7 @@ import (
 
 type settingsView struct {
 	PVEGuestVisible        bool                              `json:"pve_guest_visible"`
+	PVEGuestNamesVisible   bool                              `json:"pve_guest_names_visible"`
 	UptimeGuestVisible     bool                              `json:"uptime_guest_visible"`
 	UptimeWarningSLA       float64                           `json:"uptime_warning_sla"`
 	UptimeErrorSLA         float64                           `json:"uptime_error_sla"`
@@ -28,6 +29,7 @@ type settingsView struct {
 
 type settingsInput struct {
 	PVEGuestVisible        *bool                              `json:"pve_guest_visible"`
+	PVEGuestNamesVisible   *bool                              `json:"pve_guest_names_visible"`
 	UptimeGuestVisible     *bool                              `json:"uptime_guest_visible"`
 	UptimeWarningSLA       *float64                           `json:"uptime_warning_sla"`
 	UptimeErrorSLA         *float64                           `json:"uptime_error_sla"`
@@ -81,6 +83,7 @@ func settingsViewFrom(
 ) settingsView {
 	return settingsView{
 		PVEGuestVisible:        settings.PVEGuestVisible,
+		PVEGuestNamesVisible:   settings.PVEGuestNamesVisible,
 		UptimeGuestVisible:     settings.UptimeGuestVisible,
 		UptimeWarningSLA:       settings.UptimeWarningSLA,
 		UptimeErrorSLA:         settings.UptimeErrorSLA,

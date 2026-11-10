@@ -13,7 +13,10 @@ export const en = {
   pve_exceeded_points: '{{count}} samples above threshold',
   admin_system_pve_guest_visible: 'Show PVE virtual machines to guests',
   admin_system_pve_guest_visible_desc:
-    'Off by default. Guests can view VM lists, IP addresses and historical metrics for publicly visible hosts when enabled.',
+    'Guests can view VM lists and current metrics for public hosts. IP addresses and historical charts are only available to administrators.',
+  admin_system_pve_guest_names: 'Show VM names to guests',
+  admin_system_pve_guest_names_hint:
+    'VM names may reveal services, customers or internal environments. Enable this only for names you want to make public.',
   pve_open: 'View virtual machines',
   pve_title: 'Virtual machines',
   pve_error: 'Unable to load virtual machines. Please retry.',

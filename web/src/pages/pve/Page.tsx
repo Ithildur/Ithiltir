@@ -13,6 +13,7 @@ import type { PVEView, PVEVM } from '@app-types/virt';
 import { formatBytes } from '@pages/dashboard/viewModel';
 import { isCanceledRequestError } from '@utils/errors';
 import { formatLocalDateTime } from '@utils/time';
+import { useAuthStore } from '@stores/authStore';
 import VMDetails from './VMDetails';
 import VMIPs from './VMIPs';
 
@@ -52,7 +53,7 @@ const VMStatus = ({ vm }: { vm: PVEVM }) => {
   );
 };
 
-const PVEHost = ({ serverId }: { serverId: number }) => {
+const PVEHost = ({ serverId, isAdmin }: { serverId: number; isAdmin: boolean }) => {
   const { t, lang } = useI18n();
   const [searchParams, setSearchParams] = useSearchParams();
   const [view, setView] = React.useState<PVEView | null>(null);
@@ -106,7 +107,7 @@ const PVEHost = ({ serverId }: { serverId: number }) => {
     const status = vmState(vm);
     statusCounts.set(status, (statusCounts.get(status) ?? 0) + 1);
   }
-  const expandedVMs = new Set(searchParams.getAll('vm'));
+  const expandedVMs = new Set(isAdmin ? searchParams.getAll('vm') : []);
   const allExpanded = vms.length > 0 && vms.every((vm) => expandedVMs.has(String(vm.id)));
   const anyExpanded = vms.some((vm) => expandedVMs.has(String(vm.id)));
   const collectedAt = snapshot?.last_success_at ?? snapshot?.collected_at;
@@ -210,7 +211,7 @@ const PVEHost = ({ serverId }: { serverId: number }) => {
                   )}
                 </div>
               </div>
-              {vms.length > 0 && (
+              {isAdmin && vms.length > 0 && (
                 <div className="flex flex-wrap justify-end gap-2 border-b border-(--theme-border-subtle) px-4 py-2">
                   <Button
                     variant="secondary"
@@ -236,50 +237,63 @@ const PVEHost = ({ serverId }: { serverId: number }) => {
                 <table className="block w-full text-left text-sm md:table">
                   <thead className="hidden text-xs text-(--theme-fg-muted) md:table-header-group">
                     <tr>
-                      {[t('pve_vm'), t('pve_status'), t('cpu'), t('memory'), t('pve_ips')].map(
-                        (label, index) => (
-                          <th
-                            key={label}
-                            scope="col"
-                            className={`px-4 py-2 font-medium ${index === 4 ? 'hidden lg:table-cell' : ''}`}
-                          >
-                            {label}
-                          </th>
-                        ),
-                      )}
+                      {[
+                        t('pve_vm'),
+                        t('pve_status'),
+                        t('cpu'),
+                        t('memory'),
+                        ...(isAdmin ? [t('pve_ips')] : []),
+                      ].map((label, index) => (
+                        <th
+                          key={label}
+                          scope="col"
+                          className={`px-4 py-2 font-medium ${index === 4 ? 'hidden lg:table-cell' : ''}`}
+                        >
+                          {label}
+                        </th>
+                      ))}
                     </tr>
                   </thead>
                   <tbody className="block md:table-row-group">
                     {vms.map((vm) => {
                       const expanded = expandedVMs.has(String(vm.id));
+                      const label = (
+                        <span className="flex min-w-0 flex-wrap items-baseline gap-x-2">
+                          <span className="wrap-anywhere font-medium">
+                            {vm.name || `VM ${vm.id}`}
+                          </span>
+                          {vm.name && (
+                            <span className="font-mono text-xs text-(--theme-fg-muted)">
+                              #{vm.id}
+                            </span>
+                          )}
+                        </span>
+                      );
                       return (
                         <React.Fragment key={vm.id}>
                           <tr
                             className={`grid grid-cols-2 items-center border-t border-(--theme-border-subtle) md:table-row ${expanded ? 'bg-(--theme-bg-muted)' : ''}`}
                           >
                             <td className="min-w-0 px-4 pt-3 pb-1 md:py-2.5">
-                              <button
-                                id={`vm-toggle-${vm.id}`}
-                                type="button"
-                                aria-expanded={expanded}
-                                aria-controls={`vm-details-${vm.id}`}
-                                className="ui-focus-ring flex max-w-64 items-center gap-2 rounded text-left hover:text-(--theme-fg-interactive)"
-                                onClick={() => toggleVM(vm.id)}
-                              >
-                                <ChevronRight
-                                  aria-hidden="true"
-                                  size={14}
-                                  className={`shrink-0 ${expanded ? 'rotate-90' : ''}`}
-                                />
-                                <span className="flex min-w-0 flex-wrap items-baseline gap-x-2">
-                                  <span className="wrap-anywhere font-medium">
-                                    {vm.name || `VM ${vm.id}`}
-                                  </span>
-                                  <span className="font-mono text-xs text-(--theme-fg-muted)">
-                                    #{vm.id}
-                                  </span>
-                                </span>
-                              </button>
+                              {isAdmin ? (
+                                <button
+                                  id={`vm-toggle-${vm.id}`}
+                                  type="button"
+                                  aria-expanded={expanded}
+                                  aria-controls={`vm-details-${vm.id}`}
+                                  className="ui-focus-ring flex max-w-64 items-center gap-2 rounded text-left hover:text-(--theme-fg-interactive)"
+                                  onClick={() => toggleVM(vm.id)}
+                                >
+                                  <ChevronRight
+                                    aria-hidden="true"
+                                    size={14}
+                                    className={`shrink-0 ${expanded ? 'rotate-90' : ''}`}
+                                  />
+                                  {label}
+                                </button>
+                              ) : (
+                                label
+                              )}
                             </td>
                             <td className="px-4 pt-3 pb-1 text-right text-xs md:py-2.5 md:text-left md:text-sm">
                               <VMStatus vm={vm} />
@@ -299,38 +313,42 @@ const PVEHost = ({ serverId }: { serverId: number }) => {
                                 {bytes(vm.memory_bytes)} / {bytes(vm.memory_limit_bytes)}
                               </span>
                             </td>
-                            <td className="hidden max-w-64 px-4 py-2.5 font-mono text-xs lg:table-cell">
-                              <VMIPs vm={vm} />
-                              {vm.ips_collected_at &&
-                              vm.ips_ttl_seconds != null &&
-                              observedAt >
-                                Date.parse(vm.ips_collected_at) + vm.ips_ttl_seconds * 1000 ? (
-                                <span className="block text-(--theme-fg-warning-strong)">
-                                  {t('pve_ip_stale')}
-                                </span>
-                              ) : null}
-                            </td>
+                            {isAdmin && (
+                              <td className="hidden max-w-64 px-4 py-2.5 font-mono text-xs lg:table-cell">
+                                <VMIPs vm={vm} />
+                                {vm.ips_collected_at &&
+                                vm.ips_ttl_seconds != null &&
+                                observedAt >
+                                  Date.parse(vm.ips_collected_at) + vm.ips_ttl_seconds * 1000 ? (
+                                  <span className="block text-(--theme-fg-warning-strong)">
+                                    {t('pve_ip_stale')}
+                                  </span>
+                                ) : null}
+                              </td>
+                            )}
                           </tr>
-                          <tr
-                            hidden={!expanded}
-                            className={expanded ? 'block md:table-row' : undefined}
-                          >
-                            <td colSpan={5} className="block min-w-0 p-0 md:table-cell">
-                              <section
-                                id={`vm-details-${vm.id}`}
-                                aria-labelledby={`vm-toggle-${vm.id}`}
-                              >
-                                {expanded && (
-                                  <VMDetails
-                                    serverId={serverId}
-                                    vm={vm}
-                                    settings={view}
-                                    observedAt={observedAt}
-                                  />
-                                )}
-                              </section>
-                            </td>
-                          </tr>
+                          {isAdmin && (
+                            <tr
+                              hidden={!expanded}
+                              className={expanded ? 'block md:table-row' : undefined}
+                            >
+                              <td colSpan={5} className="block min-w-0 p-0 md:table-cell">
+                                <section
+                                  id={`vm-details-${vm.id}`}
+                                  aria-labelledby={`vm-toggle-${vm.id}`}
+                                >
+                                  {expanded && (
+                                    <VMDetails
+                                      serverId={serverId}
+                                      vm={vm}
+                                      settings={view}
+                                      observedAt={observedAt}
+                                    />
+                                  )}
+                                </section>
+                              </td>
+                            </tr>
+                          )}
                         </React.Fragment>
                       );
                     })}
@@ -350,5 +368,6 @@ const PVEHost = ({ serverId }: { serverId: number }) => {
 
 export default function Page() {
   const { serverId } = useParams();
-  return <PVEHost key={serverId} serverId={Number(serverId)} />;
+  const isAdmin = useAuthStore((state) => state.status === 'authenticated');
+  return <PVEHost key={`${serverId}:${isAdmin}`} serverId={Number(serverId)} isAdmin={isAdmin} />;
 }

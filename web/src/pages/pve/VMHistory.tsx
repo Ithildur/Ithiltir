@@ -75,8 +75,6 @@ const charts: {
 const errorKey = (error: unknown): TranslationKey => {
   if (error instanceof ApiError) {
     switch (error.code) {
-      case 'forbidden':
-        return 'pve_forbidden';
       case 'node_offline':
         return 'pve_history_offline';
       case 'unsupported':

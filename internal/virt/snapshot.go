@@ -35,10 +35,10 @@ type VM struct {
 	CollectedAt    *time.Time         `json:"collected_at,omitempty"`
 	TTLSeconds     int                `json:"ttl_seconds,omitzero"`
 	IPsCollectedAt *time.Time         `json:"ips_collected_at,omitempty"`
-	IPsTTLSeconds  int                `json:"ips_ttl_seconds,omitempty"`
+	IPsTTLSeconds  int                `json:"ips_ttl_seconds,omitzero"`
 	IPs            []string           `json:"ips,omitempty"`
 	ID             int                `json:"id"`
-	Name           string             `json:"name"`
+	Name           string             `json:"name,omitempty"`
 	Status         string             `json:"status"`
 	QMPStatus      string             `json:"qmp_status,omitempty"`
 	Template       bool               `json:"template"`

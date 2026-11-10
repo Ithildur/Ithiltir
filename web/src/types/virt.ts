@@ -2,7 +2,7 @@ export interface PVEVM {
   collected_at?: string;
   ttl_seconds?: number;
   id: number;
-  name: string;
+  name?: string;
   status: string;
   qmp_status?: string;
   template: boolean;

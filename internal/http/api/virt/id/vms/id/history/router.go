@@ -31,7 +31,7 @@ func Router(node *nodestore.Store, sessions *nodesession.Hub) *routes.Blueprint 
 }
 
 func historyRoute(r *routes.Blueprint, h *handler) {
-	r.Get("", "Get visible VM history from PVE", h.historyHandler)
+	r.Get("", "Get VM history from PVE", h.historyHandler)
 }
 
 func (h *handler) historyHandler(w http.ResponseWriter, r *http.Request, rawID, rawVMID string) {

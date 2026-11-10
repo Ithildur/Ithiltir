@@ -35,7 +35,7 @@ Use `ARCH=arm64` on AArch64 systems. On supported Debian/Ubuntu systems, the ins
 
 After installation, open the configured `app.public_url`; append `/login` for the admin console. Create a node there and follow the generated install command.
 
-Release packages include the helpers for optional PVE VM monitoring; custom packages require `scripts/package.sh --with-pve`. Copy the PVE installation command from the admin console and run it on the PVE host. The installer enables the helper and gRPC transport; reverse proxies must forward gRPC. Click the host card's PVE system icon to view its VM list. Expand a VM row for details and historical metrics, or use Expand all / Collapse all. Guest access is disabled by default and can be enabled in system settings for guest-visible hosts. See [Node deployment](deploy/node/README.md#optional-pve-monitoring) for installation, updates and disabling collection.
+Release packages include the helpers for optional PVE VM monitoring; custom packages require `scripts/package.sh --with-pve`. Copy the PVE installation command from the admin console and run it on the PVE host. The installer enables the helper and gRPC transport; reverse proxies must forward gRPC. Click the host card's PVE system icon to view its VM list. Expand a VM row for details and historical metrics, or use Expand all / Collapse all. Guest access is disabled by default and can be enabled for guest-visible hosts. Guests see only VM lists and current metrics, without IPs; names require explicit opt-in. Details and historical charts are administrator-only. See [Node deployment](deploy/node/README.md#optional-pve-monitoring) for installation, updates and disabling collection.
 
 ## Run From Source
 
