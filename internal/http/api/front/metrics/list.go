@@ -1,4 +1,4 @@
-package front
+package frontmetrics
 
 import (
 	"context"
@@ -15,8 +15,6 @@ import (
 	"dash/internal/infra"
 	"dash/internal/metrics"
 	"dash/internal/store/frontcache"
-	nodestore "dash/internal/store/node"
-	systemstore "dash/internal/store/system"
 	"github.com/Ithildur/EiluneKit/http/response"
 	"github.com/Ithildur/EiluneKit/http/routes"
 )
@@ -34,41 +32,18 @@ type listInput struct {
 	Offset int
 }
 
-type handler struct {
-	front          *frontcache.Store
-	node           *nodestore.Store
-	system         *systemstore.Store
-	staleAfterSec  int
-	optionalBearer routes.Middleware
+type listResponse struct {
+	SentAt time.Time          `json:"sent_at"`
+	Nodes  []metrics.NodeView `json:"nodes"`
 }
 
-func newHandler(front *frontcache.Store, node *nodestore.Store, system *systemstore.Store, offlineThreshold time.Duration, optionalBearer routes.Middleware) *handler {
-	if offlineThreshold <= 0 {
-		offlineThreshold = config.DefaultNodeOfflineThreshold
-	}
-	return &handler{
-		front:          front,
-		node:           node,
-		system:         system,
-		staleAfterSec:  metrics.DurationSecondsCeil(offlineThreshold),
-		optionalBearer: optionalBearer,
-	}
+func listRoute(r *routes.Blueprint, h *handler) {
+	r.Get("", "List front metrics", h.listHandler)
 }
 
-func (h *handler) metricsRoute(r *routes.Blueprint) {
-	r.Get(
-		"/metrics",
-		"List front metrics",
-		h.metricsHandler,
-		routes.Tags("front"),
-		routes.Auth(routes.AuthOptional),
-		routes.Use(h.optionalBearer),
-	)
-}
-
-func (h *handler) metricsHandler(w http.ResponseWriter, r *http.Request) {
+func (h *handler) listHandler(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	authorized := h.isAuthorized(r)
+	authorized := routes.Authenticated(ctx)
 
 	in, err := parseList(r)
 	if err != nil {
@@ -85,7 +60,7 @@ func (h *handler) metricsHandler(w http.ResponseWriter, r *http.Request) {
 	if nodes == nil {
 		nodes = make([]metrics.NodeView, 0)
 	}
-	response.WriteJSON(w, http.StatusOK, nodes)
+	response.WriteJSON(w, http.StatusOK, listResponse{SentAt: time.Now().UTC(), Nodes: nodes})
 }
 
 func (h *handler) fetchNodes(ctx context.Context, authorized bool, in listInput) ([]metrics.NodeView, error) {
@@ -249,10 +224,6 @@ func sortByOrder(nodes []metrics.NodeView) {
 		}
 		return nodes[i].Node.Order > nodes[j].Node.Order
 	})
-}
-
-func (h *handler) isAuthorized(r *http.Request) bool {
-	return r != nil && routes.Authenticated(r.Context())
 }
 
 func logCacheWarn(ctx context.Context, action string, err error) {

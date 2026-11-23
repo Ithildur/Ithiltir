@@ -10,6 +10,7 @@ import type { PVEConsolidation, PVEHistory, PVEHistoryPoint, PVETimeframe } from
 import type { NodeVMSettings } from '@app-types/api';
 import { isCanceledRequestError } from '@utils/errors';
 import { formatScaledValue, resolveUnitScale } from '@utils/metricFormat';
+import type { ScheduleHistory } from './historyQueue';
 
 const timeframes: PVETimeframe[] = ['hour', 'day', 'week', 'month', 'year'];
 // Proxmox RRD palette: the second series is used memory, outgoing traffic, or writes.
@@ -92,11 +93,11 @@ const errorKey = (error: unknown): TranslationKey => {
 };
 
 const VMHistory = ({
-  serverId,
+  scheduleHistory,
   vmId,
   settings,
 }: {
-  serverId: number;
+  scheduleHistory: ScheduleHistory;
   vmId: number;
   settings: NodeVMSettings;
 }) => {
@@ -107,25 +108,49 @@ const VMHistory = ({
   const [error, setError] = React.useState<TranslationKey | null>(null);
   const [loading, setLoading] = React.useState(true);
   const [revision, setRevision] = React.useState(0);
+  const sectionRef = React.useRef<HTMLElement>(null);
 
   React.useEffect(() => {
+    const section = sectionRef.current;
+    if (!section) return;
     const controller = new AbortController();
+    const { signal } = controller;
+    let observer: IntersectionObserver | undefined;
+    let dequeue: (() => void) | undefined;
     setLoading(true);
     setError(null);
-    void fetchPVEHistory(serverId, vmId, timeframe, consolidation, controller.signal)
-      .then((next) => {
-        if (!controller.signal.aborted) setHistory(next);
-      })
-      .catch((failure: unknown) => {
-        if (controller.signal.aborted || isCanceledRequestError(failure)) return;
+    const load = async (serverId: number) => {
+      observer?.disconnect();
+      try {
+        const next = await fetchPVEHistory(serverId, vmId, timeframe, consolidation, signal);
+        if (!signal.aborted) setHistory(next);
+      } catch (failure) {
+        if (signal.aborted || isCanceledRequestError(failure)) return;
         setHistory(null);
         setError(errorKey(failure));
-      })
-      .finally(() => {
-        if (!controller.signal.aborted) setLoading(false);
-      });
-    return () => controller.abort();
-  }, [serverId, vmId, timeframe, consolidation, revision]);
+      } finally {
+        if (!signal.aborted) setLoading(false);
+      }
+    };
+    if ('IntersectionObserver' in window) {
+      observer = new IntersectionObserver(
+        (entries) => {
+          if (signal.aborted) return;
+          dequeue?.();
+          if (entries.at(-1)?.isIntersecting) dequeue = scheduleHistory(load);
+        },
+        { rootMargin: '120px 0px' },
+      );
+      observer.observe(section);
+    } else {
+      dequeue = scheduleHistory(load);
+    }
+    return () => {
+      observer?.disconnect();
+      dequeue?.();
+      controller.abort();
+    };
+  }, [scheduleHistory, vmId, timeframe, consolidation, revision]);
 
   const points =
     history?.timeframe === timeframe && history.consolidation === consolidation
@@ -134,6 +159,7 @@ const VMHistory = ({
 
   return (
     <section
+      ref={sectionRef}
       aria-label={t('pve_history')}
       className="space-y-3 border-t border-(--theme-border-subtle) pt-3"
     >

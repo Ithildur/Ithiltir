@@ -320,7 +320,7 @@ restart_service() {
   as_root launchctl kickstart -k system/com.ithiltir.node >/dev/null 2>&1 || true
 }
 
-main() {
+main() (
   if [[ $# -lt 2 ]]; then
     usage
   fi
@@ -406,6 +406,6 @@ main() {
   msg done
   msg status
   msg logs
-}
+)
 
 main "$@"

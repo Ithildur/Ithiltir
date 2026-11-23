@@ -4,14 +4,15 @@ import { useI18n } from '@i18n';
 import { formatBytes } from '@pages/dashboard/viewModel';
 import VMHistory from './VMHistory';
 import VMIPs from './VMIPs';
+import type { ScheduleHistory } from './historyQueue';
 
 const VMDetails = ({
-  serverId,
+  scheduleHistory,
   vm,
   settings,
   observedAt,
 }: {
-  serverId: number;
+  scheduleHistory: ScheduleHistory;
   vm: PVEVM;
   settings: NodeVMSettings;
   observedAt: number;
@@ -55,7 +56,9 @@ const VMDetails = ({
           {ipStale && <dd className="text-(--theme-fg-warning-strong)">{t('pve_ip_stale')}</dd>}
         </div>
       </dl>
-      {!vm.template && <VMHistory serverId={serverId} vmId={vm.id} settings={settings} />}
+      {!vm.template && (
+        <VMHistory scheduleHistory={scheduleHistory} vmId={vm.id} settings={settings} />
+      )}
     </div>
   );
 };

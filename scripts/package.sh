@@ -32,7 +32,7 @@ Usage:
 
 Options:
   --with-pve       Bundle the optional precompiled PVE cache helpers
-  -o OUT_DIR        Output directory (default: release)
+  -o OUT_DIR        Output directory (default: release). Packages are assembled in OUT_DIR/os/arch/Ithiltir-dash
   -t TARGETS        Target os/arch list. Repeatable or comma-separated (default: linux/amd64)
   --version VERSION Build version to inject into dash (default: 0.0.0-dev)
   --use-git-tag     Use the single git tag pointing at HEAD as the build version
@@ -44,7 +44,7 @@ Options:
                     Copy node binaries from local deploy directory or Ithiltir-node-* release binaries
   --release         Require --use-git-tag and a strict SemVer release tag:
                     MAJOR.MINOR.PATCH[-PRERELEASE][+BUILD]
-  -z|-zip|--zip     Write zip file
+  -z|-zip|--zip     Write zip file (requires zip)
   --tar-gz          Write tar.gz file (recommended for linux targets)
 
 Examples:
@@ -241,7 +241,6 @@ download_node_asset() {
 prepare_remote_node_deploy() {
   local deploy_dir="$1"
 
-  rm -rf "$deploy_dir"
   mkdir -p "$deploy_dir/linux" "$deploy_dir/macos" "$deploy_dir/windows"
 
   download_node_asset "Ithiltir-node-linux-amd64" "$deploy_dir/linux/node_linux_amd64"
@@ -282,7 +281,6 @@ prepare_local_node_deploy() {
     exit 1
   fi
 
-  rm -rf "$deploy_dir"
   mkdir -p "$deploy_dir/linux" "$deploy_dir/macos" "$deploy_dir/windows"
 
   copy_local_node_asset "$deploy_dir/linux/node_linux_amd64" \
@@ -326,151 +324,6 @@ set_archive_format() {
   fi
 
   ARCHIVE_FORMAT="$format"
-}
-
-detect_zip_package_manager() {
-  if [[ "$(uname -s)" == "Darwin" ]]; then
-    if command -v brew >/dev/null 2>&1; then
-      echo "brew"
-      return 0
-    fi
-  fi
-
-  if [[ -r /etc/os-release ]]; then
-    # shellcheck disable=SC1091
-    . /etc/os-release
-
-    case "${ID:-}" in
-      ubuntu|debian)
-        echo "apt-get"
-        return 0
-        ;;
-      fedora)
-        echo "dnf"
-        return 0
-        ;;
-      rhel|centos|rocky|almalinux|ol)
-        if command -v dnf >/dev/null 2>&1; then
-          echo "dnf"
-        else
-          echo "yum"
-        fi
-        return 0
-        ;;
-      arch|manjaro)
-        echo "pacman"
-        return 0
-        ;;
-      alpine)
-        echo "apk"
-        return 0
-        ;;
-      opensuse*|sles)
-        echo "zypper"
-        return 0
-        ;;
-    esac
-
-    for like in ${ID_LIKE:-}; do
-      case "$like" in
-        debian)
-          echo "apt-get"
-          return 0
-          ;;
-        fedora|rhel)
-          if command -v dnf >/dev/null 2>&1; then
-            echo "dnf"
-          else
-            echo "yum"
-          fi
-          return 0
-          ;;
-        arch)
-          echo "pacman"
-          return 0
-          ;;
-        alpine)
-          echo "apk"
-          return 0
-          ;;
-        suse)
-          echo "zypper"
-          return 0
-          ;;
-      esac
-    done
-  fi
-
-  for pm in apt-get dnf yum pacman apk zypper brew; do
-    if command -v "$pm" >/dev/null 2>&1; then
-      echo "$pm"
-      return 0
-    fi
-  done
-
-  return 1
-}
-
-run_with_privileges() {
-  if [[ "$(id -u)" -eq 0 ]]; then
-    "$@"
-    return
-  fi
-
-  if command -v sudo >/dev/null 2>&1; then
-    sudo "$@"
-    return
-  fi
-
-  echo "need root or sudo to install zip automatically" >&2
-  return 1
-}
-
-ensure_zip() {
-  if command -v zip >/dev/null 2>&1; then
-    return 0
-  fi
-
-  local pm
-  if ! pm="$(detect_zip_package_manager)"; then
-    echo "zip not found and no supported package manager detected" >&2
-    return 1
-  fi
-
-  echo "zip not found. installing via $pm..." >&2
-  case "$pm" in
-    apt-get)
-      run_with_privileges apt-get update
-      run_with_privileges apt-get install -y zip
-      ;;
-    dnf)
-      run_with_privileges dnf install -y zip
-      ;;
-    yum)
-      run_with_privileges yum install -y zip
-      ;;
-    pacman)
-      run_with_privileges pacman -Sy --noconfirm zip
-      ;;
-    apk)
-      run_with_privileges apk add zip
-      ;;
-    zypper)
-      run_with_privileges zypper --non-interactive install zip
-      ;;
-    brew)
-      brew install zip
-      ;;
-    *)
-      echo "unsupported package manager: $pm" >&2
-      return 1
-      ;;
-  esac
-
-  if ! command -v zip >/dev/null 2>&1; then
-    echo "zip installation finished but zip is still unavailable in PATH" >&2
-    return 1
-  fi
 }
 
 while [[ $# -gt 0 ]]; do
@@ -537,6 +390,15 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+if [[ "$ARCHIVE_FORMAT" == "zip" ]] && ! command -v zip >/dev/null 2>&1; then
+  echo "zip is required to create ZIP archives" >&2
+  exit 1
+fi
+if [[ "$ARCHIVE_FORMAT" == "tar.gz" ]] && ! command -v tar >/dev/null 2>&1; then
+  echo "tar is required to create tar.gz archives" >&2
+  exit 1
+fi
+
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 if [[ -n "$NODE_LOCAL_DIR" && "$NODE_LOCAL_DIR" != /* ]]; then
   NODE_LOCAL_DIR="$repo_root/$NODE_LOCAL_DIR"
@@ -564,7 +426,6 @@ fi
 mkdir -p "$out_root"
 
 dist_root="$repo_root/build"
-node_deploy_dir="$dist_root/node-deploy"
 
 if [[ ${#TARGETS[@]} -eq 0 ]]; then
   TARGETS=("linux/amd64")
@@ -594,6 +455,9 @@ for t in "${target_list[@]}"; do
   fi
 done
 
+node_stage="$(mktemp -d)"
+trap 'rm -rf -- "$node_stage"' EXIT
+node_deploy_dir="$node_stage/deploy"
 if [[ -n "$NODE_LOCAL_DIR" ]]; then
   prepare_local_node_deploy "$NODE_LOCAL_DIR" "$node_deploy_dir"
 else
@@ -676,15 +540,6 @@ if [[ ! -d "$frontend_dist_dir" ]]; then
   exit 1
 fi
 
-if [[ "$ARCHIVE_FORMAT" == "zip" ]]; then
-  ensure_zip
-fi
-
-if [[ "$ARCHIVE_FORMAT" == "tar.gz" ]] && ! command -v tar >/dev/null 2>&1; then
-  echo "tar is required to create tar.gz archives" >&2
-  exit 1
-fi
-
 for t in "${target_list[@]}"; do
   os="${t%%/*}"
   arch="${t#*/}"
@@ -693,10 +548,9 @@ for t in "${target_list[@]}"; do
     exit 2
   fi
 
-  build_root="$out_root/build"
+  build_root="$out_root/$os/$arch"
   pkg_root="$build_root/Ithiltir-dash"
   rm -rf "$pkg_root"
-  mkdir -p "$build_root"
   mkdir -p "$pkg_root/bin" "$pkg_root/configs" "$pkg_root/logs"
 
   exe_name="dash"

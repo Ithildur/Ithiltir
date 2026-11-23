@@ -3,7 +3,7 @@ import { useAuthStore } from '@stores/authStore';
 import { useI18n } from '@i18n';
 import { ApiError } from '@lib/api';
 import { fetchFrontMetrics } from '@lib/frontApi';
-import type { NodeView } from '@app-types/frontMetrics';
+import type { FrontMetricsResponse, NodeView } from '@app-types/frontMetrics';
 import { closeTopBanner, pushTopBanner } from '@runtime/topBannerRuntime';
 import { normalizeNodeViews } from './viewModel';
 import { DASHBOARD_POLL_INTERVAL_MS, DASHBOARD_REQUEST_TIMEOUT_MS } from '@config/dashboard';
@@ -11,9 +11,10 @@ import { isAbortError, isCanceledRequestError } from '@utils/errors';
 
 export const useFrontMetricsPolling = (): {
   nodes: NodeView[];
+  sentAtMs: number;
   isLoading: boolean;
 } => {
-  const [rawNodes, setRawNodes] = React.useState<NodeView[]>([]);
+  const [snapshot, setSnapshot] = React.useState<FrontMetricsResponse | null>(null);
   const [isLoading, setIsLoading] = React.useState(true);
   const { t } = useI18n();
   const status = useAuthStore((state) => state.status);
@@ -63,7 +64,7 @@ export const useFrontMetricsPolling = (): {
     if (previousStatus !== 'authenticated' || status === 'authenticated') return;
 
     loadedRef.current = false;
-    setRawNodes([]);
+    setSnapshot(null);
     setIsLoading(true);
     closeDisconnectedBanner();
   }, [closeDisconnectedBanner, status]);
@@ -90,10 +91,10 @@ export const useFrontMetricsPolling = (): {
         setIsLoading(true);
       }
       try {
-        const nodes = await fetchFrontMetrics({ signal: controller.signal });
+        const next = await fetchFrontMetrics({ signal: controller.signal });
         if (!isMounted) return;
         loadedRef.current = true;
-        setRawNodes(nodes);
+        setSnapshot(next);
         setIsLoading(false);
         markRecovered();
       } catch (error) {
@@ -123,6 +124,9 @@ export const useFrontMetricsPolling = (): {
     };
   }, [closeDisconnectedBanner, markDisconnected, markRecovered, status]);
 
-  const nodes = React.useMemo(() => normalizeNodeViews(rawNodes), [rawNodes]);
-  return { nodes, isLoading };
+  const nodes = React.useMemo(
+    () => (snapshot ? normalizeNodeViews(snapshot.nodes) : []),
+    [snapshot],
+  );
+  return { nodes, sentAtMs: snapshot ? Date.parse(snapshot.sent_at) : Number.NaN, isLoading };
 };

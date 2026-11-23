@@ -1539,6 +1539,20 @@ validate_ident() {
 	[[ "$name" =~ ^[a-zA-Z_][a-zA-Z0-9_]*$ ]] || die "$(txt "${what} 仅允许字母/数字/下划线，且不能以数字开头：${name}" "${what} must match [a-zA-Z_][a-zA-Z0-9_]* (got: ${name})")"
 }
 
+prompt_db_ident() {
+	local prompt="$1" field="$2" name reserved
+	while true; do
+		name="$(prompt_string "$prompt" "monitor" | LC_ALL=C tr 'A-Z' 'a-z')"
+		validate_ident "$name" "$field"
+		reserved="$(as_postgres psql -XAt -d postgres -c "SELECT word FROM pg_catalog.pg_get_keywords() WHERE word = '${name}' AND catcode IN ('R', 'T')")" || return 1
+		if [[ -z "$reserved" ]]; then
+			printf '%s\n' "$name"
+			return 0
+		fi
+		say_err "${field} 的名称 ${name} 是 PostgreSQL 保留关键字，请换一个名称。" "${field} name '${name}' is a PostgreSQL reserved keyword. Choose another name."
+	done
+}
+
 create_db_and_user() {
 	local db_user="$1" db_pass="$2" db_name="$3"
 	validate_ident "$db_user" "database.user"
@@ -2317,9 +2331,9 @@ main() {
 	if prompt_yes_no "$(txt "是否通过本机反向代理（如同机 Nginx/Caddy/Traefik）对外暴露 Dash？IP 部署请选择否；启用后仅信任来自本机代理的转发头。" "Is Dash exposed through a local reverse proxy on the same host (for example Nginx/Caddy/Traefik)? Choose no for a direct IP deployment; enabling this trusts forwarded headers only from that local proxy.")" "N"; then
 		trusted_proxies_yaml='["127.0.0.1/32", "::1/128"]'
 	fi
-	db_user="$(prompt_string "$(txt "请输入数据库账号（database.user）" "database.user")" "monitor")"
+	db_user="$(prompt_db_ident "$(txt "请输入数据库账号（自动转小写）" "database.user (converted to lowercase)")" database.user)"
 	db_pass="$(prompt_secret_confirm "$(txt "请输入数据库密码（database.password）" "database.password")")"
-	db_name="$(prompt_string "$(txt "请输入数据库名（database.name）" "database.name")" "monitor")"
+	db_name="$(prompt_db_ident "$(txt "请输入数据库名（自动转小写）" "database.name (converted to lowercase)")" database.name)"
 	retention_days="$(prompt_retention_days 1)"
 	while true; do
 		redis_addr="$(prompt_string "$(txt "请输入 Redis 地址（redis.addr）" "redis.addr")" "127.0.0.1:6379")"

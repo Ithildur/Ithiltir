@@ -23,7 +23,7 @@ func (h *handler) groupsRoute(r *routes.Blueprint) {
 }
 
 func (h *handler) groupsHandler(w http.ResponseWriter, r *http.Request) {
-	authorized := h.isAuthorized(r)
+	authorized := routes.Authenticated(r.Context())
 	groups, err := h.loadGroups(r.Context(), !authorized)
 	if err != nil {
 		httperr.TryWrite(w, httperr.ServiceUnavailable(err))

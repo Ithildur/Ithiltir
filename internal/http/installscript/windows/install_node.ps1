@@ -44,6 +44,7 @@ function Msg([string]$Key, [object[]]$Args = @()) {
       "UnsupportedArch" { return "仅支持 amd64/arm64，当前 PROCESSOR_ARCHITECTURE=$($Args[0])" }
       "DownloadFailed" { return "下载失败：$($Args[0]) ($($Args[1]))" }
       "ReportConfigFailed" { return "上报配置失败。" }
+      "ServiceConfigFailed" { return "更新 Windows 服务配置失败，错误码 $($Args[0])。" }
       "EnableTimeSync" { return "[+] 正在启用 Windows 时间同步（非致命）" }
       "TimeServiceEnabled" { return "[+] Windows 时间服务已启用" }
       "TimeResyncWarn" { return "Windows 时间服务已启用，但系统未接受立即同步请求。它会按 Windows 正常计划同步。" }
@@ -61,6 +62,7 @@ function Msg([string]$Key, [object[]]$Args = @()) {
     "UnsupportedArch" { return "Only amd64/arm64 are supported; current PROCESSOR_ARCHITECTURE=$($Args[0])" }
     "DownloadFailed" { return "Download failed: $($Args[0]) ($($Args[1]))" }
     "ReportConfigFailed" { return "Report configuration failed." }
+    "ServiceConfigFailed" { return "Windows service configuration failed with error code $($Args[0])." }
     "EnableTimeSync" { return "[+] enabling Windows time sync (non-fatal)" }
     "TimeServiceEnabled" { return "[+] Windows time service is enabled" }
     "TimeResyncWarn" { return "Windows time service is enabled, but immediate resync was not accepted. It should sync on the normal Windows schedule." }
@@ -191,13 +193,6 @@ function Report-Url([string]$DashIP, [string]$DashPort) {
   return "{0}://{1}:{2}/api/node/metrics" -f $DOWNLOAD_SCHEME, (Url-Host $DashIP), $DashPort
 }
 
-function Configure-Report([string]$Url, [string]$Secret, [string[]]$ExtraArgs = @()) {
-  & $BinPath report install $Url $Secret @ExtraArgs
-  if ($LASTEXITCODE -ne 0) {
-    throw (Msg "ReportConfigFailed")
-  }
-}
-
 function Enable-TimeSync {
   Write-Host (Msg "EnableTimeSync")
 
@@ -213,23 +208,6 @@ function Enable-TimeSync {
   } catch {
     Write-Warning (Msg "TimeSyncFailed" @($_.Exception.Message))
   }
-}
-
-function Stop-And-RemoveService([string]$Name) {
-  $svc = Get-Service -Name $Name -ErrorAction SilentlyContinue
-  if ($null -eq $svc) { return }
-
-  try {
-    if ($svc.Status -ne "Stopped") { Stop-Service -Name $Name -Force -ErrorAction SilentlyContinue }
-  } catch { }
-
-  sc.exe delete $Name | Out-Null
-}
-
-function Create-Or-UpdateService([string]$Name, [string]$BinaryPathName) {
-  Stop-And-RemoveService $Name
-  New-Service -Name $Name -BinaryPathName $BinaryPathName -DisplayName "Ithiltir Node" -StartupType Automatic
-  Start-Service -Name $Name
 }
 
 Require-Admin
@@ -273,18 +251,24 @@ New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
 New-Item -ItemType Directory -Force -Path $DataDir | Out-Null
 New-Item -ItemType Directory -Force -Path $NodeBinDir | Out-Null
 
-$tmpFile = Join-Path $env:TEMP ("{0}-{1}.tmp" -f $App, [Guid]::NewGuid().ToString("n"))
+$tmpFile = Join-Path $InstallDir ("{0}-{1}.exe" -f $App, [Guid]::NewGuid().ToString("n"))
 $runnerTmpFile = Join-Path $env:TEMP ("ithiltir-runner-{0}.tmp" -f [Guid]::NewGuid().ToString("n"))
 try {
   Download-File -Url $url -OutFile $tmpFile -Secret $resolvedSecret
-  Copy-Item -Force -Path $tmpFile -Destination $BinPath
   Download-File -Url $runnerUrl -OutFile $runnerTmpFile -Secret $resolvedSecret
+  & $tmpFile report install (Report-Url $DashIP $resolvedPort) $resolvedSecret @reportArgs
+  if ($LASTEXITCODE -ne 0) { throw (Msg "ReportConfigFailed") }
+
+  $service = Get-CimInstance -ClassName Win32_Service -Filter "Name = '$ServiceName'"
+  if ($null -ne $service -and $service.State -ne "Stopped") {
+    Stop-Service -Name $ServiceName -Force
+  }
+  Copy-Item -Force -Path $tmpFile -Destination $BinPath
   Copy-Item -Force -Path $runnerTmpFile -Destination $RunnerPath
 } finally {
   Remove-Item -Force -ErrorAction SilentlyContinue $tmpFile
   Remove-Item -Force -ErrorAction SilentlyContinue $runnerTmpFile
 }
-Configure-Report -Url (Report-Url $DashIP $resolvedPort) -Secret $resolvedSecret -ExtraArgs $reportArgs
 
 $args = @("push")
 if ($intervalValue -gt 0) { $args += @($intervalValue.ToString()) }
@@ -297,7 +281,13 @@ $quotedArgs = $args | ForEach-Object {
 $binaryQuoted = '"' + ($RunnerPath -replace '"', '\"') + '"'
 $binaryPathName = $binaryQuoted + " " + ($quotedArgs -join " ")
 
-Create-Or-UpdateService -Name $ServiceName -BinaryPathName $binaryPathName
+if ($null -eq $service) {
+  New-Service -Name $ServiceName -BinaryPathName $binaryPathName -DisplayName "Ithiltir Node" -StartupType Automatic
+} else {
+  $change = Invoke-CimMethod -InputObject $service -MethodName Change -Arguments @{ PathName = $binaryPathName; StartMode = "Automatic" }
+  if ($change.ReturnValue -ne 0) { throw (Msg "ServiceConfigFailed" @($change.ReturnValue)) }
+}
+Start-Service -Name $ServiceName
 
 Write-Host (Msg "Done")
 Write-Host (Msg "Status")

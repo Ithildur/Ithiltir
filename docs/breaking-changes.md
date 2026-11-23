@@ -1,10 +1,18 @@
 # Breaking Changes
 
+## 0.4.1 (2026-11-23)
+
+`GET /api/front/metrics` now returns an object containing `sent_at` and `nodes`. Clients that consumed the top-level array must read `response.nodes`, including when using pagination. Use `response.sent_at` as the server clock when calculating node age.
+
+Upgrading from the official `0.4.0` release requires no new database migration.
+
+For source builds, use `bash scripts/package.sh` in place of `scripts/package.ps1`. Scripts that consume the unpacked installation directory must switch from `<out>/build/Ithiltir-dash/` to `<out>/<os>/<arch>/Ithiltir-dash/`.
+
 ## 0.4.0
 
 ### Database upgrade
 
-- Upgrading from `0.3.3` applies migration `0015`. It adds PVE visibility and per-node VM chart settings, removes unused notification/control-task lease fields, removes the empty legacy notification `config` column, and removes fixed global billing-cycle columns. Existing notification ciphertext, channel settings, node billing cycles, metrics, and traffic history are preserved. The notification key remains unchanged.
+- Upgrading from `0.3.3` applies migrations `0015` and `0016`. Migration `0016` adds the guest VM name setting, disabled by default. Migration `0015` adds PVE visibility and per-node VM chart settings, removes unused notification/control-task lease fields, removes the empty legacy notification `config` column, and removes fixed global billing-cycle columns. Existing notification ciphertext, channel settings, node billing cycles, metrics, and traffic history are preserved. The notification key remains unchanged.
 - Back up PostgreSQL and keep a separate backup of `$DASH_HOME/configs/notify-config.key` before upgrading. Managed `dash update` stops Dash and runs migrations before starting the new version. For manual deployments, stop the old Dash process, run `dash migrate -config <config-path>` with the new binary and the existing `DASH_HOME`, then start the new binary against that database.
 - Dash and its database schema must be upgraded together. After `0015`, replacing only the binary with `0.3.3` does not roll back the installation: the old binary rejects the newer schema. For an interrupted managed update, use `dash update recover`; once migration has started, recovery completes the candidate version rather than restarting the old binary against the changed schema.
 - Fresh installations run the full migration chain; existing installations apply only pending migrations.

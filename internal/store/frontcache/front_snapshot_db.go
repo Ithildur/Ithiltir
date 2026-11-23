@@ -31,10 +31,18 @@ func (s *Store) FetchFrontNodes(ctx context.Context, staleAfterSec int, limit, o
 // evaluation uses this path when no ingest snapshot is queued; a frontend
 // cache miss must never be interpreted as a recovered alert.
 func (s *Store) FetchCurrentNode(ctx context.Context, id int64, staleAfterSec int) (*metrics.NodeView, error) {
+	return s.fetchNode(ctx, id, staleAfterSec, true, false)
+}
+
+func (s *Store) FetchFrontNode(ctx context.Context, id int64, staleAfterSec int, authorized bool) (*metrics.NodeView, error) {
+	return s.fetchNode(ctx, id, staleAfterSec, authorized, true)
+}
+
+func (s *Store) fetchNode(ctx context.Context, id int64, staleAfterSec int, authorized, withSmart bool) (*metrics.NodeView, error) {
 	if id <= 0 {
 		return nil, nil
 	}
-	projections, err := s.fetchFrontProjections(ctx, staleAfterSec, 1, 0, true, id, false)
+	projections, err := s.fetchFrontProjections(ctx, staleAfterSec, 1, 0, authorized, id, withSmart)
 	if err != nil || len(projections) == 0 {
 		return nil, err
 	}

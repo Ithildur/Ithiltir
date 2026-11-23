@@ -1,4 +1,7 @@
-// /api/front/metrics response shape.
+export interface FrontMetricsResponse {
+  sent_at: string;
+  nodes: NodeView[];
+}
 
 export interface GroupView {
   id: number;

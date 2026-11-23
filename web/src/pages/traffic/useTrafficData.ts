@@ -115,12 +115,6 @@ export const useTrafficData = ({
     [iface, ifaces, isValidServerId, resetTraffic, serverId, trafficGate],
   );
 
-  React.useEffect(() => {
-    const controller = new AbortController();
-    void loadTraffic(controller.signal);
-    return () => controller.abort();
-  }, [loadTraffic]);
-
   return {
     ifaces,
     iface,

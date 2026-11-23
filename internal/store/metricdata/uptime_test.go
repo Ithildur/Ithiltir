@@ -14,7 +14,7 @@ func TestUptimeCalendar(t *testing.T) {
 		{"America/New_York", "2026-03-08", 23},
 		{"America/New_York", "2026-11-01", 25},
 		{"America/Santiago", "2026-09-06", 23},
-		{"America/Havana", "2026-11-01", 25},
+		{"America/Havana", "2025-11-02", 25},
 	} {
 		t.Run(tc.zone+"/"+tc.date, func(t *testing.T) {
 			loc, err := time.LoadLocation(tc.zone)

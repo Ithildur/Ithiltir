@@ -39,7 +39,7 @@ The admin password is supplied through `monitor_dash_pwd` and must contain at le
 | --------------------------------------------- | --------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `/api/auth`                                   | admin password for login; refresh cookie + `X-CSRF-Token` for refresh and logout; bearer for `/sessions*` | `POST /login`, `POST /refresh`, `POST /logout`, session list and revoke                                                                                                                 |
 | `/api/version`                                | none                                                                                                      | `GET /`                                                                                                                                                                                 |
-| `/api/front`                                  | optional bearer                                                                                           | `GET /brand`, `GET /metrics`, `GET /groups`                                                                                                                                             |
+| `/api/front`                                  | optional bearer                                                                                           | `GET /brand`, `GET /metrics`, `GET /metrics/{id}`, `GET /groups`                                                                                                                         |
 | `/api/metrics`                                | optional bearer; metrics history is authenticated by default                                              | `GET /online`, `GET /history`                                                                                                                                                           |
 | `/api/statistics`                             | optional bearer                                                                                           | `GET /access`                                                                                                                                                                           |
 | `/api/statistics/traffic`                     | optional bearer; `PATCH /settings` requires bearer                                                        | `GET /settings`, `PATCH /settings`, `GET /ifaces`, `GET /summary`, `GET /daily`, `GET /monthly`                                                                                         |
@@ -59,12 +59,14 @@ The admin password is supplied through `monitor_dash_pwd` and must contain at le
 ## Anonymous Reads
 
 - `/api/front/brand` is public.
+- `GET /api/front/metrics` returns `{ "sent_at": "...", "nodes": [...] }` for both full and paginated reads. `sent_at` is the UTC RFC 3339 time at which Dash prepares the response. Compare it with each node's `observation.received_at` to determine its age. An empty result has `nodes: []`.
+- `GET /api/front/metrics/{id}` returns one node in the same format as an entry in `nodes`. Anonymous reads require a guest-visible node. A missing, deleted, hidden (for guests), or as-yet unreported node returns `404 not_found`. An invalid ID returns `400 invalid_id`.
 - `/api/front/metrics` and `/api/front/groups` allow anonymous reads, but anonymous results include only guest-visible nodes. Anonymous `/api/front/groups` omits groups that have no guest-visible nodes.
 - `/api/metrics/online` allows anonymous reads for guest-visible nodes.
 - `/api/metrics/uptime` and `/api/metrics/uptime/day` use `uptime_guest_visible` and node guest visibility. They do not use the separate history-access setting.
 - `/api/metrics/history` requires bearer by default. If `history_guest_access_mode` is `by_node`, anonymous reads are limited to guest-visible nodes.
 - `/api/statistics/access` is public and returns `history_guest_access_mode`, `traffic_guest_access_mode`, and `pve_guest_visible`.
-- `/api/virt/{id}` permits guests when `pve_guest_visible` is enabled and the host is guest-visible; IPs are never exposed and VM names are hidden by default. `/api/virt/{id}/vms/{vmid}/history` requires administrator authentication.
+- `/api/virt/{id}` permits guests when `pve_guest_visible` is enabled and the host is guest-visible; guest responses omit IPs and VM names are hidden by default. `/api/virt/{id}/vms/{vmid}/history` requires administrator authentication.
 - Anonymous reads under `/api/statistics/traffic/*` are controlled by traffic settings and still respect node guest visibility.
 - `GET /api/front/metrics` node metadata includes `node.tags` as a string array when tags are configured for the node.
 
@@ -141,7 +143,7 @@ The admin password is supplied through `monitor_dash_pwd` and must contain at le
 
 ## Admin System Settings
 
-- `GET /api/admin/system/settings` returns `history_guest_access_mode`, `dash_update_channel`, `dash_update_mode`, `logo_url`, `page_title`, `topbar_text`, `uptime_guest_visible`, `uptime_warning_sla`, and `uptime_error_sla`. `dash_update_channel` is `release` or `prerelease`; `dash_update_mode` is `manual`, `notify`, or `auto`.
+- `GET /api/admin/system/settings` returns `history_guest_access_mode`, `dash_update_channel`, `dash_update_mode`, `logo_url`, `page_title`, `topbar_text`, `pve_guest_visible`, `pve_guest_names_visible`, `uptime_guest_visible`, `uptime_warning_sla`, and `uptime_error_sla`. `dash_update_channel` is `release` or `prerelease`; `dash_update_mode` is `manual`, `notify`, or `auto`.
 - `PATCH /api/admin/system/settings` validates and updates only the submitted fields, so concurrent updates to different fields do not overwrite one another and an unchanged legacy HTTP logo does not block unrelated edits. An empty update returns `400 no_fields`; invalid submitted values return `400 invalid_fields`.
 - `PUT /api/admin/system/settings` replaces the full settings document and requires `history_guest_access_mode`, `dash_update_channel`, `dash_update_mode`, `logo_url`, `page_title`, and `topbar_text`.
 - `uptime_guest_visible` defaults to `true`; `uptime_warning_sla` and `uptime_error_sla` are percentages defaulting to `99` and `95`. Thresholds refer to daily uptime: below warning is yellow, below error is red, with errors taking priority. They must satisfy `0 <= error < warning <= 100`; decimals are accepted. Omitted or `null` uptime fields retain their current values in both PATCH and PUT for compatibility with older clients. Invalid thresholds return `400 invalid_fields` and roll back the entire settings update. These settings control the new uptime endpoints and dashboard; sampling and the existing `/api/metrics/online` authorization are independent.
@@ -190,7 +192,7 @@ The admin password is supplied through `monitor_dash_pwd` and must contain at le
 - SMART and thermal `status` values are open strings. Known values include `ok`, `partial`, `unsupported`, `not_found`, `no_permission`, `timeout`, `error`, `no_cache`, `stale`, `no_tool`, and `standby`.
 - `disk.smart.status` is collection state. `disk.smart.devices[].health` is disk health. `status=ok` with `health=failed` means collection succeeded and the disk health check failed.
 - `status=no_cache`, `no_tool`, or `unsupported` is not a disk failure. `status=stale` preserves the last `devices[]` while marking the cache expired.
-- `GET /api/front/metrics` combines the latest hot node snapshot with the SMART and thermal field caches and returns `disk.smart`, `disk.temperature_devices`, top-level `thermal`, and top-level `pressure` in each node view when present. `disk.temperature_devices` is the backend-derived list of physical disk names that can be used as `device` for `disk.temp_c` history.
+- `GET /api/front/metrics` combines the latest hot node snapshot with the SMART and thermal field caches and returns `disk.smart`, `disk.temperature_devices`, top-level `thermal`, and top-level `pressure` in each node view when present. The metric snapshot itself supplies `pressure`. `disk.temperature_devices` is the backend-derived list of physical disk names that can be used as `device` for `disk.temp_c` history.
 - `/api/metrics/history` supports `cpu.temp_c`, `disk.temp_c`, and PSI average metrics: `pressure.cpu.some_avg10|avg60|avg300`, `pressure.memory.some_avg10|avg60|avg300`, `pressure.memory.full_avg10|avg60|avg300`, `pressure.io.some_avg10|avg60|avg300`, and `pressure.io.full_avg10|avg60|avg300`. CPU temperature comes from thermal CPU sensors. Disk temperature comes from SMART devices that are confirmed physical disks; virtual disks and RAID devices are not persisted. Passing `device` scopes `disk.temp_c` to one physical disk from `disk.temperature_devices`; omitting it aggregates the persisted physical disk rows. `30m`, `1h`, `12h`, and `24h` read raw metrics; `1w` reads 15-minute aggregates; `15d` produces 30-minute points from weighted 15-minute aggregates; and `30d` reads one-hour aggregates. Temperature and the exposed PSI averages use the same aggregate path, and aggregate queries include the latest real-time raw tail.
 
 ## Alert Metrics
@@ -200,7 +202,6 @@ The admin password is supplied through `monitor_dash_pwd` and must contain at le
 - `disk.smart.failed` counts devices whose SMART health is `failed`. It does not count `no_cache`, `no_tool`, `unsupported`, or other collection states as disk failures.
 - `disk.smart.nvme.critical_warning` counts devices whose `critical_warning` bitset is non-zero. `disk.smart.attribute_failing` counts current `FAILING_NOW` SMART attributes.
 - Missing `disk.smart` data is not a SMART failure. Built-in SMART rules do not trigger when a node has no SMART report.
-- PSI pressure data is stored and exposed only through history queries.
 
 ## Traffic Statistics
 

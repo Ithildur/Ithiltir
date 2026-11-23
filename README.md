@@ -33,6 +33,8 @@ sudo bash install_dash_linux.sh --lang en --service-manager=systemd
 
 Use `ARCH=arm64` on AArch64 systems. On supported Debian/Ubuntu systems, the installer can prepare PostgreSQL, TimescaleDB, Redis, migrations, and the systemd service. Other deployment paths are covered in the [installation guide](https://www.ithiltir.dev/docs/Install).
 
+The installer converts database and role names to lowercase and asks for a different name if PostgreSQL reserves the keyword.
+
 After installation, open the configured `app.public_url`; append `/login` for the admin console. Create a node there and follow the generated install command.
 
 Release packages include the helpers for optional PVE VM monitoring; custom packages require `scripts/package.sh --with-pve`. Copy the PVE installation command from the admin console and run it on the PVE host. The installer enables the helper and gRPC transport; reverse proxies must forward gRPC. Click the host card's PVE system icon to view its VM list. Expand a VM row for details and historical metrics, or use Expand all / Collapse all. Guest access is disabled by default and can be enabled for guest-visible hosts. Guests see only VM lists and current metrics, without IPs; names require explicit opt-in. Details and historical charts are administrator-only. See [Node deployment](deploy/node/README.md#optional-pve-monitoring) for installation, updates and disabling collection.
@@ -100,6 +102,8 @@ bash scripts/build_frontend.sh -o build/frontend/dist
 bash scripts/package.sh --with-pve \
   -o release -t linux/amd64 --tar-gz
 ```
+
+Each target has its own unpacked directory under `release/<os>/<arch>/Ithiltir-dash/`. Archives are written directly to `release/`. The optional `--zip` format requires the `zip` command.
 
 Local Node asset layouts are documented in [deploy/node/README.md](deploy/node/README.md).
 

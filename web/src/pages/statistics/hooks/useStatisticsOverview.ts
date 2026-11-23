@@ -1,7 +1,8 @@
 import React from 'react';
 import type { NodeView } from '@app-types/frontMetrics';
 import type { TranslationKey } from '@i18n';
-import { fetchFrontMetrics } from '@lib/frontApi';
+import { ApiError } from '@lib/api';
+import { fetchFrontNode } from '@lib/frontApi';
 import type { MetricSection } from '../config';
 import { visibleMetricSections } from '../viewModel';
 import { isCanceledRequestError } from '@utils/errors';
@@ -45,11 +46,10 @@ export const useStatisticsOverview = ({
     setServerMissing(false);
     setOverviewErrorKey(null);
 
-    fetchFrontMetrics({ signal: controller.signal })
-      .then((nodes) => nodes.find((node) => Number(node.node.id) === numericServerId) ?? null)
+    fetchFrontNode(numericServerId, controller.signal)
       .then((found) => {
         setNodeView(found);
-        setServerMissing(!found);
+        setServerMissing(false);
         setOverviewErrorKey(null);
         const nextIoDeviceOptions = found?.disk?.io?.by_device
           ? Object.keys(found.disk.io.by_device)
@@ -72,8 +72,9 @@ export const useStatisticsOverview = ({
       .catch((error) => {
         if (isCanceledRequestError(error)) return;
         setNodeView(null);
-        setServerMissing(false);
-        setOverviewErrorKey('stats_load_error');
+        const missing = error instanceof ApiError && error.status === 404;
+        setServerMissing(missing);
+        setOverviewErrorKey(missing ? null : 'stats_load_error');
         setIoDeviceOptions([]);
         setMountOptions([]);
         setIoDevice('');

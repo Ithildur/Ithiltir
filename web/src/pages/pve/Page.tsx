@@ -16,6 +16,7 @@ import { formatLocalDateTime } from '@utils/time';
 import { useAuthStore } from '@stores/authStore';
 import VMDetails from './VMDetails';
 import VMIPs from './VMIPs';
+import { createHistoryQueue } from './historyQueue';
 
 const bytes = (value?: number) => (value == null ? '—' : formatBytes(value));
 const percent = (value?: number) => (value == null ? '—' : `${(value * 100).toFixed(1)}%`);
@@ -61,6 +62,7 @@ const PVEHost = ({ serverId, isAdmin }: { serverId: number; isAdmin: boolean }) 
   const [loading, setLoading] = React.useState(true);
   const [revision, setRevision] = React.useState(0);
   const [observedAt, setObservedAt] = React.useState(0);
+  const [scheduleHistory] = React.useState(() => createHistoryQueue(serverId));
   const validID = Number.isSafeInteger(serverId) && serverId > 0;
 
   React.useEffect(() => {
@@ -339,7 +341,7 @@ const PVEHost = ({ serverId, isAdmin }: { serverId: number; isAdmin: boolean }) 
                                 >
                                   {expanded && (
                                     <VMDetails
-                                      serverId={serverId}
+                                      scheduleHistory={scheduleHistory}
                                       vm={vm}
                                       settings={view}
                                       observedAt={observedAt}

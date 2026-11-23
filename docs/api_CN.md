@@ -39,7 +39,7 @@ Bearer 可选端点会把缺失、格式错误、过期、已撤销或其他非�
 | --------------------------------------------- | -------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `/api/auth`                                   | 登录用管理员密码；刷新和登出用 refresh cookie + `X-CSRF-Token`；`/sessions*` 用 Bearer | `POST /login`、`POST /refresh`、`POST /logout`、会话列表和撤销                                                                                                                          |
 | `/api/version`                                | 无                                                                                     | `GET /`                                                                                                                                                                                 |
-| `/api/front`                                  | Bearer 可选                                                                            | `GET /brand`、`GET /metrics`、`GET /groups`                                                                                                                                             |
+| `/api/front`                                  | Bearer 可选                                                                            | `GET /brand`、`GET /metrics`、`GET /metrics/{id}`、`GET /groups`                                                                                                                         |
 | `/api/metrics`                                | Bearer 可选；历史指标默认只对已授权用户开放                                            | `GET /online`、`GET /history`                                                                                                                                                           |
 | `/api/statistics`                             | Bearer 可选                                                                            | `GET /access`                                                                                                                                                                           |
 | `/api/statistics/traffic`                     | Bearer 可选；`PATCH /settings` 需要 Bearer                                             | `GET /settings`、`PATCH /settings`、`GET /ifaces`、`GET /summary`、`GET /daily`、`GET /monthly`                                                                                         |
@@ -59,12 +59,14 @@ Bearer 可选端点会把缺失、格式错误、过期、已撤销或其他非�
 ## 匿名读取
 
 - `/api/front/brand` 可匿名读取。
+- `GET /api/front/metrics` 的全量和分页响应均为 `{ "sent_at": "...", "nodes": [...] }`。`sent_at` 是 Dash 准备发送响应时的 UTC 时间，使用 RFC 3339 格式。它与每个节点的 `observation.received_at` 之差是距上次接收上报的时长。空结果返回 `nodes: []`。
+- `GET /api/front/metrics/{id}` 返回单个节点，结构与 `nodes` 的一项相同。游客只能读取对其可见的节点。节点不存在、已删除、尚无上报，或对当前游客不可见时，返回 `404 not_found`。ID 无效时返回 `400 invalid_id`。
 - `/api/front/metrics` 和 `/api/front/groups` 允许匿名读取，但匿名结果只包含游客可见节点。匿名 `/api/front/groups` 会省略没有游客可见节点的分组。
 - `/api/metrics/online` 允许匿名读取游客可见节点。
 - `/api/metrics/uptime` 和 `/api/metrics/uptime/day` 由 `uptime_guest_visible` 和节点游客可见性控制，不使用独立的历史访问设置。
 - `/api/metrics/history` 默认需要 Bearer。只有 `history_guest_access_mode` 为 `by_node` 时，匿名读取才按游客可见节点放开。
 - `/api/statistics/access` 可匿名读取，返回 `history_guest_access_mode`、`traffic_guest_access_mode` 和 `pve_guest_visible`。
-- `/api/virt/{id}` 仅在 `pve_guest_visible` 开启且宿主机游客可见时允许游客读取；不返回 IP，默认隐藏 VM 名称。`/api/virt/{id}/vms/{vmid}/history` 始终要求管理员认证。
+- `/api/virt/{id}` 仅在 `pve_guest_visible` 开启且宿主机游客可见时允许游客读取。游客响应省略 IP，默认隐藏 VM 名称。`/api/virt/{id}/vms/{vmid}/history` 始终要求管理员认证。
 - `/api/statistics/traffic/*` 的匿名读取由流量设置控制，并仍受节点游客可见性限制。
 - `GET /api/front/metrics` 在节点配置了标签时，会在节点元数据中包含字符串数组 `node.tags`。
 
@@ -141,7 +143,7 @@ Bearer 可选端点会把缺失、格式错误、过期、已撤销或其他非�
 
 ## 管理系统设置
 
-- `GET /api/admin/system/settings` 返回 `history_guest_access_mode`、`dash_update_channel`、`dash_update_mode`、`logo_url`、`page_title`、`topbar_text`、`uptime_guest_visible`、`uptime_warning_sla` 和 `uptime_error_sla`。`dash_update_channel` 为 `release` 或 `prerelease`；`dash_update_mode` 为 `manual`、`notify` 或 `auto`。
+- `GET /api/admin/system/settings` 返回 `history_guest_access_mode`、`dash_update_channel`、`dash_update_mode`、`logo_url`、`page_title`、`topbar_text`、`pve_guest_visible`、`pve_guest_names_visible`、`uptime_guest_visible`、`uptime_warning_sla` 和 `uptime_error_sla`。`dash_update_channel` 为 `release` 或 `prerelease`；`dash_update_mode` 为 `manual`、`notify` 或 `auto`。
 - `PATCH /api/admin/system/settings` 只校验并更新请求实际提交的字段，因此并发修改不同字段不会互相覆盖，未改动的旧 HTTP Logo 也不会阻断其他字段修改。空更新返回 `400 no_fields`；提交字段非法时返回 `400 invalid_fields`。
 - `PUT /api/admin/system/settings` 全量替换设置文档，必须提交 `history_guest_access_mode`、`dash_update_channel`、`dash_update_mode`、`logo_url`、`page_title` 和 `topbar_text`。
 - `uptime_guest_visible` 默认为 `true`；`uptime_warning_sla`、`uptime_error_sla` 使用百分数，默认分别为 `99`、`95`。阈值按每日在线率定义：低于 warning 为黄色，低于 error 为红色，错误状态优先；必须满足 `0 <= error < warning <= 100`，允许小数。PATCH 和 PUT 中未提交或为 `null` 的 uptime 字段保持原值，以兼容旧客户端；非法阈值返回 `400 invalid_fields`，整个设置更新回滚。这些设置控制新增 Uptime 接口和卡片展示；采样及既有 `/api/metrics/online` 的鉴权保持独立。
@@ -190,7 +192,7 @@ Bearer 可选端点会把缺失、格式错误、过期、已撤销或其他非�
 - SMART 和 thermal 的 `status` 是开放字符串。已知值包括 `ok`、`partial`、`unsupported`、`not_found`、`no_permission`、`timeout`、`error`、`no_cache`、`stale`、`no_tool`、`standby`。
 - `disk.smart.status` 是采集状态，`disk.smart.devices[].health` 是磁盘健康结果。`status=ok` 且 `health=failed` 表示采集成功但磁盘健康失败。
 - `status=no_cache`、`no_tool` 或 `unsupported` 不表示磁盘故障。`status=stale` 会保留最后一次 `devices[]`，同时标记缓存过期。
-- `GET /api/front/metrics` 会把节点最新热点快照、SMART 字段缓存和 thermal 字段缓存组合成节点视图，返回 `disk.smart`、`disk.temperature_devices`、顶层 `thermal` 和顶层 `pressure`。`disk.temperature_devices` 是后端推导出的物理盘名称列表，可作为 `disk.temp_c` 历史查询的 `device`。
+- `GET /api/front/metrics` 会把节点最新热点快照、SMART 字段缓存和 thermal 字段缓存组合成节点视图，返回 `disk.smart`、`disk.temperature_devices`、顶层 `thermal` 和顶层 `pressure`。`pressure` 直接取自该次指标快照。`disk.temperature_devices` 是后端推导出的物理盘名称列表，可作为 `disk.temp_c` 历史查询的 `device`。
 - `/api/metrics/history` 支持 `cpu.temp_c`、`disk.temp_c` 和 PSI 平均值指标：`pressure.cpu.some_avg10|avg60|avg300`、`pressure.memory.some_avg10|avg60|avg300`、`pressure.memory.full_avg10|avg60|avg300`、`pressure.io.some_avg10|avg60|avg300`、`pressure.io.full_avg10|avg60|avg300`。CPU 温度来自 thermal 的 CPU 传感器。硬盘温度来自确认是物理盘的 SMART 设备；虚拟盘和 RAID 设备不会持久化。带 `device` 时查询 `disk.temperature_devices` 中的单块物理盘；不带 `device` 时聚合已持久化的物理盘记录。`30m`、`1h`、`12h`、`24h` 查询 raw；`1w` 查询 15 分钟聚合；`15d` 通过加权的 15 分钟聚合生成 30 分钟点；`30d` 查询 1 小时聚合。温度和公开 PSI 平均值使用相同聚合路径，聚合查询包含最新 real-time raw 尾部。
 
 ## 告警指标
@@ -200,7 +202,6 @@ Bearer 可选端点会把缺失、格式错误、过期、已撤销或其他非�
 - `disk.smart.failed` 只统计 SMART 健康结果为 `failed` 的设备，不把 `no_cache`、`no_tool`、`unsupported` 或其他采集状态计为磁盘故障。
 - `disk.smart.nvme.critical_warning` 统计 `critical_warning` bitset 非 0 的设备数。`disk.smart.attribute_failing` 统计当前 `FAILING_NOW` 的 SMART 属性数。
 - 缺失 `disk.smart` 不表示 SMART 故障。节点没有 SMART 上报时，内置 SMART 规则不会触发。
-- PSI pressure 数据只保存并用于历史查询。
 
 ## 流量统计
 

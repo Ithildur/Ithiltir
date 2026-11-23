@@ -48,7 +48,7 @@ export const useTrafficPage = () => {
     busy: trafficRebuildBusy,
     nodeRebuildActive: nodeTrafficRebuildActive,
     startBusy: trafficRebuildStartBusy,
-    finishedKey: trafficRebuildFinishedKey,
+    completionCount,
     start: startTrafficRebuild,
   } = useTrafficRebuild({
     nodeId: isValidServerId ? numericServerId : null,
@@ -56,11 +56,10 @@ export const useTrafficPage = () => {
   const showTrafficRebuildOutcome = useTrafficRebuildBanner();
 
   React.useEffect(() => {
-    if (!trafficRebuildFinishedKey) return;
     const controller = new AbortController();
     void loadTraffic(controller.signal);
     return () => controller.abort();
-  }, [loadTraffic, trafficRebuildFinishedKey]);
+  }, [loadTraffic, completionCount]);
 
   const serverLabel =
     summary?.server_name?.trim() || (isValidServerId ? `#${numericServerId}` : '');

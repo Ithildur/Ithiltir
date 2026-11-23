@@ -151,21 +151,13 @@ const deriveSearchText = (node: NodeView): string => {
   return tokens;
 };
 
-const resolveObservedAgeMs = (observedAt: string): number => {
-  const observedAtMs = Date.parse(observedAt);
-  if (Number.isNaN(observedAtMs)) return Number.POSITIVE_INFINITY;
-  return Date.now() - observedAtMs;
-};
-
-const computeIsAlive = (node: NodeView): boolean => {
+const computeIsAlive = (node: NodeView, sentAtMs: number): boolean => {
   const staleAfterSec = node.observation?.stale_after_sec;
   const thresholdMs = Number.isFinite(staleAfterSec)
     ? Math.max(0, staleAfterSec) * 1000
     : DASHBOARD_OFFLINE_THRESHOLD_MS;
-  return (
-    resolveObservedAgeMs(node.observation.received_at ?? node.observation.observed_at) <=
-    thresholdMs
-  );
+  const receivedAtMs = Date.parse(node.observation.received_at ?? node.observation.observed_at);
+  return sentAtMs - receivedAtMs <= thresholdMs;
 };
 
 const deriveRaid = (node: NodeView): ServerViewModel['raid'] => {
@@ -211,9 +203,9 @@ const deriveDiskIo = (node: NodeView): ServerViewModel['diskIo'] => {
   };
 };
 
-export const buildServerViewModel = (node: NodeView): ServerViewModel => {
+export const buildServerViewModel = (node: NodeView, sentAtMs: number): ServerViewModel => {
   const mount = pickPrimaryMount(node);
-  const isAlive = computeIsAlive(node);
+  const isAlive = computeIsAlive(node, sentAtMs);
   const searchText = deriveSearchText(node);
   const raid = deriveRaid(node);
   const diskIo = deriveDiskIo(node);

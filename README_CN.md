@@ -33,6 +33,8 @@ sudo bash install_dash_linux.sh --lang zh --service-manager=systemd
 
 AArch64 机器使用 `ARCH=arm64`。在受支持的 Debian/Ubuntu 系统上，安装器可以准备 PostgreSQL、TimescaleDB、Redis、数据库迁移和 systemd 服务；其他部署方式见[安装文档](https://www.ithiltir.dev/docs/Install)。
 
+安装器自动将数据库名和角色名转为小写。若名称是 PostgreSQL 保留关键字，安装器会提示重新输入该名称。
+
 安装完成后访问配置的 `app.public_url`，在地址后加 `/login` 进入管理台。创建节点后，按管理台生成的命令安装 Node。
 
 正式发布包包含可选 PVE VM 监控所需的采集工具；自行打包时需使用 `scripts/package.sh --with-pve`。在管理台复制 PVE 安装命令并在 PVE 宿主机执行，安装器会启用 helper 和 gRPC 传输；反向代理需转发 gRPC。点击宿主机卡片上的 PVE 系统图标可查看 VM 列表；展开对应 VM 行即可查看详情和历史指标，也可全部展开或折叠。游客访问默认关闭，可在系统设置中开启，且仅适用于游客可见的宿主机。游客只看 VM 列表和当前指标，不展示 IP；名称需明确开启展示。详情和历史曲线仅管理员可见。安装、更新和停用方式见 [Node 部署说明](deploy/node/README.md#optional-pve-monitoring)。
@@ -100,6 +102,8 @@ bash scripts/build_frontend.sh -o build/frontend/dist
 bash scripts/package.sh --with-pve \
   -o release -t linux/amd64 --tar-gz
 ```
+
+每个目标的安装目录为 `release/<os>/<arch>/Ithiltir-dash/`。归档文件直接写入 `release/`。使用 `--zip` 需要预装 `zip` 命令。
 
 本地 Node 资产布局见 [deploy/node/README.md](deploy/node/README.md)。
 

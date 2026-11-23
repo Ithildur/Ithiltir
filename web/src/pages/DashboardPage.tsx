@@ -30,7 +30,7 @@ const SUMMARY_CARD_BASE_CLASS =
   'bg-(--theme-bg-default) dark:bg-(--theme-bg-default) border border-(--theme-border-subtle) dark:border-(--theme-border-default) shadow-sm transition-[border-color] duration-200 dark:hover:border-(--theme-fg-accent)/40';
 
 const DashboardPage: React.FC = () => {
-  const { nodes, isLoading } = useFrontMetricsPolling();
+  const { nodes, sentAtMs, isLoading } = useFrontMetricsPolling();
   const uptime = useUptimePolling();
   const [searchTerm, setSearchTerm] = React.useState('');
   const [groups, setGroups] = React.useState<GroupView[]>([]);
@@ -94,10 +94,10 @@ const DashboardPage: React.FC = () => {
   const serverViews = React.useMemo(
     () =>
       nodes.map((node) => ({
-        ...buildServerViewModel(node),
+        ...buildServerViewModel(node, sentAtMs),
         uptimeHistory: uptime?.[node.node.id],
       })),
-    [nodes, uptime],
+    [nodes, sentAtMs, uptime],
   );
 
   const summary = React.useMemo(() => {

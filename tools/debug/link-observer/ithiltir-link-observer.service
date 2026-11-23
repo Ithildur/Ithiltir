@@ -1,0 +1,23 @@
+[Unit]
+Description=Ithiltir node transport diagnostics
+Wants=network-online.target
+After=network-online.target postgresql.service
+
+[Service]
+Type=simple
+EnvironmentFile=/etc/default/ithiltir-link-observer
+ExecStart=/usr/bin/python3 /usr/local/libexec/ithiltir-link-observer.py $OBSERVER_ARGS
+Restart=on-failure
+RestartSec=5s
+LogsDirectory=ithiltir-link-observer
+LogsDirectoryMode=0700
+UMask=0077
+Nice=10
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+NoNewPrivileges=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK AF_PACKET
+
+[Install]
+WantedBy=multi-user.target

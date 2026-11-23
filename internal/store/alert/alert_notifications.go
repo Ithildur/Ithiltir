@@ -195,47 +195,51 @@ const notificationPredecessorReady = `transition <> 'closed' OR NOT EXISTS (
 )`
 
 func (s *Store) TakeNextNotification(ctx context.Context, now time.Time) (*model.AlertNotificationOutbox, error) {
-	var item model.AlertNotificationOutbox
+	var item *model.AlertNotificationOutbox
 	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		err := tx.
-			Clauses(clause.Locking{Strength: "UPDATE"}).
-			Where("(status IN ? AND next_attempt_at <= ?) OR status = ?",
-				[]model.OutboxStatus{
-					model.OutboxStatusPending,
-					model.OutboxStatusRetry,
-					model.OutboxStatusBlocked,
-				}, now,
-				model.OutboxStatusSending).
-			Where(notificationPredecessorReady).
-			Order("CASE WHEN status = 'sending' THEN 0 ELSE 1 END, next_attempt_at ASC, id ASC").
-			Limit(1).
-			Take(&item).Error
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil
-		}
-		if err != nil {
-			return err
-		}
-		isProbe := item.IsProbe || item.Status == model.OutboxStatusBlocked
-		if err := tx.Model(&model.AlertNotificationOutbox{}).
-			Where("id = ?", item.ID).
-			UpdateColumns(map[string]any{
-				"status":          model.OutboxStatusSending,
-				"is_probe":        isProbe,
-				"next_attempt_at": now,
-			}).Error; err != nil {
-			return err
-		}
-		item.Status = model.OutboxStatusSending
-		item.IsProbe = isProbe
-		return nil
+		var err error
+		item, err = takeNextNotification(tx, now)
+		return err
 	})
 	if err != nil {
 		return nil, err
 	}
-	if item.ID == 0 {
+	return item, nil
+}
+
+func takeNextNotification(tx *gorm.DB, now time.Time) (*model.AlertNotificationOutbox, error) {
+	var item model.AlertNotificationOutbox
+	err := tx.
+		Clauses(clause.Locking{Strength: "UPDATE"}).
+		Where("(status IN ? AND next_attempt_at <= ?) OR status = ?",
+			[]model.OutboxStatus{
+				model.OutboxStatusPending,
+				model.OutboxStatusRetry,
+				model.OutboxStatusBlocked,
+			}, now,
+			model.OutboxStatusSending).
+		Where(notificationPredecessorReady).
+		Order("CASE WHEN status = 'sending' THEN 0 ELSE 1 END, next_attempt_at ASC, id ASC").
+		Limit(1).
+		Take(&item).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, nil
 	}
+	if err != nil {
+		return nil, err
+	}
+	isProbe := item.IsProbe || item.Status == model.OutboxStatusBlocked
+	if err := tx.Model(&model.AlertNotificationOutbox{}).
+		Where("id = ?", item.ID).
+		UpdateColumns(map[string]any{
+			"status":          model.OutboxStatusSending,
+			"is_probe":        isProbe,
+			"next_attempt_at": now,
+		}).Error; err != nil {
+		return nil, err
+	}
+	item.Status = model.OutboxStatusSending
+	item.IsProbe = isProbe
 	return &item, nil
 }
 
@@ -243,8 +247,8 @@ func (s *Store) TakeNextNotification(ctx context.Context, now time.Time) (*model
 // Probes and machine-consumed webhooks retain their single-message contract.
 func (s *Store) TakeNotificationBatch(ctx context.Context, now time.Time) ([]model.AlertNotificationOutbox, error) {
 	var items []model.AlertNotificationOutbox
-	err := s.WithTx(ctx, func(tx *Store) error {
-		first, err := tx.TakeNextNotification(ctx, now)
+	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		first, err := takeNextNotification(tx, now)
 		if err != nil || first == nil {
 			return err
 		}
@@ -260,7 +264,7 @@ func (s *Store) TakeNotificationBatch(ctx context.Context, now time.Time) ([]mod
 		}
 		messages := []notify.Message{{Title: payload.Title, Body: payload.Body, Metadata: payload.Metadata}}
 		var candidates []model.AlertNotificationOutbox
-		if err := tx.db.WithContext(ctx).
+		if err := tx.
 			Clauses(clause.Locking{Strength: "UPDATE"}).
 			Where("channel_id = ? AND channel_type = ? AND transition = ? AND id <> ? AND event_id IS NOT NULL",
 				first.ChannelID, first.ChannelType, first.Transition, first.ID).
@@ -292,7 +296,7 @@ func (s *Store) TakeNotificationBatch(ctx context.Context, now time.Time) ([]mod
 		if len(ids) == 0 {
 			return nil
 		}
-		return tx.db.WithContext(ctx).Model(&model.AlertNotificationOutbox{}).
+		return tx.Model(&model.AlertNotificationOutbox{}).
 			Where("id IN ?", ids).UpdateColumns(map[string]any{
 			"status": model.OutboxStatusSending, "next_attempt_at": now,
 		}).Error

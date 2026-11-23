@@ -46,9 +46,11 @@ Linux, macOS, and Windows installers follow at most five download redirects. Eve
 
 Installer messages follow Dash `app.language`.
 
+On Windows, reinstalling downloads both Node and the runner, then runs `report install` with the downloaded Node. The existing service keeps running if either download or report configuration fails.
+
 ## Optional PVE Monitoring
 
-CI and release builds bundle precompiled PVE helpers from the selected Node release. For custom packages, use `scripts/package.sh --with-pve` (PowerShell: `-WithPVE`). Local inputs are `linux/pve_cache_linux_amd64` and `linux/pve_cache_linux_arm64`, or flat `Ithiltir-pve-cache-linux-<arch>` assets. Both helpers share `--node-version`; packages without this option retain the ordinary node assets and installation behavior.
+CI and release builds bundle precompiled PVE helpers from the selected Node release. For custom packages, use `scripts/package.sh --with-pve`. Local inputs are `linux/pve_cache_linux_amd64` and `linux/pve_cache_linux_arm64`, or flat `Ithiltir-pve-cache-linux-<arch>` assets. Both helpers share `--node-version`; packages without this option retain the ordinary node assets and installation behavior.
 
 `deploy/linux/pve-cache.env` contains `format_version=1`, `node_version`, `amd64_sha256`, and `arm64_sha256`. These fields are deliberately separate from the existing `release.env` v1 contract. New Dash updaters verify the optional manifest and both assets; older Dash updaters continue validating their original assets. The Linux PVE installer verifies the selected helper's SHA-256 and executable version before stopping the installed node.
 
