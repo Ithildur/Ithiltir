@@ -1,8 +1,14 @@
+[<img src="../web/public/brandlogo.svg" alt="" width="20" height="20"> Ithiltir Dash](../README_CN.md) · [文档索引](https://www.ithiltir.dev/docs) · [English](architecture.md)
+
 # 架构
 
 Ithiltir Dash 是单实例应用。根入口只启动一个 HTTP 进程，该进程装配 API、SPA、主题资源、安装脚本、节点资产分发和后台服务。
 
-## 运行边界
+可沿[数据流](#数据流)追踪一次节点上报，在[状态和保留策略](#状态和保留策略)中查找数据归属。对外部署 Dash 前，请核对[鉴权边界](#鉴权边界)和[反向代理](#前端和反向代理)。公开路由见 [API 参考](api_CN.md)。
+
+## 进程与服务
+
+### 运行边界
 
 | 组件                     | 责任                                                                                                 |
 | ------------------------ | ---------------------------------------------------------------------------------------------------- |
@@ -17,31 +23,7 @@ Ithiltir Dash 是单实例应用。根入口只启动一个 HTTP 进程，该进
 | Linux root 侧缓存        | systemd timer 刷新 SMART、连接数和 LVM；Alpine/OpenRC 只用 BusyBox cron 刷新 SMART 和 LVM            |
 | Web UI                   | 读取看板数据并提交管理操作                                                                           |
 
-## PVE 采集与上报
-
-PVE 监控使用现有节点身份和更新渠道。root 服务运行预编译的 `/usr/local/libexec/ithiltir-node/pve-cache`，不需要本机编译器或 PVE API 凭据。helper 在内存中保存每台 VM 的观测结果。8 个 worker 按顺序选择到期 VM，同一 VM 不重叠查询，采样间隔至少 3 秒；单次观测超时 2 秒，完成一台即可读取一台，不等待其他 VM，也没有整轮硬截止。只有 QMP 状态为 `running` 才采集动态指标和 IP；其他 VM 保留配置与状态，模板排除。CPU 使用进程计数差值、VM vCPU 配额及宿主 CPU 数计算，不受 helper CPU 亲和性影响；内存保持 PVE cgroup/balloon 口径，磁盘和 tap 网卡字节数为累计计数。配置每 3 秒刷新，磁盘容量每 60 秒单独查询 PVE，超过 2 分钟后省略。Node 按现有 3 秒 VM 上报节奏从 helper Unix socket 读取当前快照。
-
-可选 `net_rate_limits_mbps` 按网卡名（如 `net0`）上报 PVE 配置限速，值为 JSON 数字，单位 Mbps（1 Mbps = 1,000,000 bit/s），四舍五入至两位小数；JSON 数字不补尾随零。PVE `rate` 按 MiB/s 换算，例如 `12.5` 上报 `104.86`。同一值分别适用于收、发方向，不是 VM 所有网卡共享的总额度。`0` 表示该网卡未配置限速；字段缺失表示未采集到网卡配置。helper 每轮直接读取本机 `/etc/pve/qemu-server/<vmid>.conf` 的当前配置，忽略待应用修改和快照段；限速值解析失败时省略该字段并记录日志，基础指标继续上报。
-
-Guest Agent IP 通过可选 `ips` 数组返回，每台 VM 最多 1024 个不重复的 IPv4/IPv6 地址，包含私网地址，排除回环、链路本地、未指定、多播及非法地址。IP 通过本机 QGA socket 独立采集，只查询 QMP 状态明确为 `running` 且启用了 Guest Agent 的 VM。调度器每 3 秒检查到期任务，最多 8 路并发，每台 VM 总超时 3 秒，每轮预算 10 秒，轮次不重叠。成功后间隔 60 秒再查，失败按 1、2、5 分钟退避；健康刷新优先，失败重试最多占用 2 个槽位。这些间隔是最小等待时间，负载饱和时查询可能推迟。VM 重启或 agent 配置变化会清除该 VM 的旧 IP 和冷却状态。helper 进程锁保证单进程运行，IP 采集循环等待当前轮次完成后再启动下一轮；仅 root 可读的 `/run/ithiltir-node/pve-guest` 状态可跨 helper 重启保留，宿主重启后重建。基础采集只读 IP 缓存，不等待 QGA。
-
-每台 VM 使用独立的可选 `collected_at`、`ttl_seconds`（helper 使用 90 秒）记录实际观测时间，而非外层快照组装时间。缺少观测时间表示动态指标未知。helper 和 Dash 对过期 VM 省略 CPU、内存用量、磁盘/网络计数和运行时长，将状态标为 `unknown`，同时保留原观测时间及配置信息；IP 新鲜度仍独立判断。
-
-可选字段 `ips_collected_at`、`ips_ttl_seconds` 独立描述 IP 样本新鲜度。helper 使用 900 秒 IP TTL；复用时保留原采样时间，省略过期样本以及已知早于 VM 本次启动的样本。成功查询无地址时可以只有新鲜度字段而没有 `ips`。查询失败仅在原 IP 样本未过期时继续使用；读取方必须单独判断 IP 新鲜度，不能只看快照 `stale`。兼容不带这两个字段的报告，此时 IP 新鲜度未知；提供时，IP 时间必须非零且不晚于外层快照的 `collected_at`，TTL 为 1–3600。IP 时间可以晚于该 VM 的 `collected_at`。
-
-helper 通过 root 持有的 `/run/ithiltir-node/pve.sock` 提供 `GET /snapshot`，仅 root 或配置的运行组可访问。完成的观测保存在 helper 内存中，Node 在上报时读取副本，不周期性写快照文件。清单读取失败保留原清单及成功时间并记录错误，helper 重启后重新采集。root 代码不执行普通 node 可写的 release 树。
-
-安装器通过 systemd drop-in 设置 `ITHILTIR_NODE_PVE_SOCKET`。未设置时 node 不启动 VM 推送任务；设置后每个上报目标具有独立的缓存轮询、传输超时和失败退避，沿用目标 URL 和密钥向同级 `/virt` 发送。只保留最新样本，不积累报告队列；缓存不可用报告错误，VM 推送失败不阻塞宿主采样和上报。旧 Dash 返回不支持该接口时，VM 任务退避重试，宿主上报继续。
-
-节点 Store 按宿主保存一份最新的编码后 VM 快照：启用 Redis 时使用 Redis，`--no-redis` 模式使用进程内存。快照独立于宿主指标、Uptime、前台投影缓存和计费，不写入 PostgreSQL。Redis 使用独立的 `ithiltir:dash:virt:v1:node:<id>` hash 保存载荷、采样时间和接收时间，不再保存第二份进程内快照；脚本原子比较采样时间、替换数据并设置过期时间。两种模式均从原始接收时间起保留 10 分钟。重复或较旧样本不续期；采样时间已超过 10 分钟的报告仍确认成功，但不再缓存。新鲜度继续按报告中的 TTL 判断。缓存到期后返回空快照；内存条目在读取及后续写入时惰性清理，不启动后台定时任务。Redis 仍保留的未过期快照可以跨 Dash 重启继续读取，内存快照不能。Redis 失败明确返回错误，不切换到内存；Redis 的持久化和淘汰遵循运维配置。鉴权复查与替换使用节点生命周期锁。节点删除提交成功后撤销访问并清理缓存；Redis 清理失败会记录日志，残留 key 自然过期。密钥轮换保留快照。
-
-快照通过 `/api/virt/{id}` 读取，游客访问要求 `system_settings.pve_guest_visible` 开启且宿主机游客可见。游客响应省略 IP、IP 观测元数据和原始采集错误；名称仅在 `pve_guest_names_visible` 开启时返回。两个开关均默认 false。隐私裁剪只作用于本次解码的响应，不修改缓存快照。`/api/virt/{id}/vms` 下的历史查询要求管理员认证。能力查询接口仍仅供管理员进行安装诊断。VM 历史通过节点查询会话按需读取 PVE RRD，不由 Dash 持久化。每节点的图表阈值属于 PostgreSQL 配置，并同步到内存节点元数据：CPU 默认 80%，内存默认 90%，内存标注默认关闭。这些配置用于历史采样点标注，不产生告警事件或通知。
-
-PVE 图标进入 `/pve/{id}`，VM 选择由 URL 保存，快照与历史请求状态归页面所有。快照每 15 秒刷新；管理员选择 VM、时间范围或手动刷新时读取历史。过期快照与新鲜数据、空清单分别展示。
-
-helper 的安装和更新属于特权安装流程；node 自更新只更新普通 node，不替换 helper。可选资产使用 `deploy/linux/pve-cache.env` 独立校验清单；`release.env` v1 保持不变，旧包可以不含 PVE 资产。支持新清单的 Dash 更新器和 PVE 安装器验证版本及 SHA-256；旧 Dash 更新器仍只验证其已知的七项资产，PVE 安装前仍会执行 helper 校验。
-
-## HTTP 面
+### HTTP 面
 
 各路由模块返回 EiluneKit Blueprint，只汇总直属子模块。HTTP 根入口组合 API、主题和各平台安装脚本路由，再通过 `routes.NewHandler` 构造唯一 handler。应用不直接向 chi 注册路由；构造结果由 `http.Server` 在服务生命周期内持有。
 
@@ -62,7 +44,29 @@ helper 的安装和更新属于特权安装流程；node 自更新只更新普�
 | `/deploy`         | 安装脚本和节点发布资产               |
 | `/`               | SPA                                  |
 
-## 数据流
+### 目录
+
+`cmd/dash` 通过 `internal/http` 构造 HTTP 服务。HTTP 根入口组合 API、主题和安装脚本 Blueprint，并提供静态文件回退 handler；路由父模块只汇总直属子模块。MTProto 登录状态的序列化和过期由 `store/mtlogin` 负责，渠道版本检查和会话持久化由 `store/alert` 负责。
+
+| 路径                          | 内容                                     |
+| ----------------------------- | ---------------------------------------- |
+| `cmd/dash`                    | 服务、迁移、更新、Redis 检查和主题打包入口 |
+| `internal/config`             | 配置加载、默认值、校验和运行目录         |
+| `internal/http`               | HTTP 服务、静态资源、主题资源和 API 挂载 |
+| `internal/http/api`           | `/api` 路由树                            |
+| `internal/http/deploy`        | 各平台安装脚本路由树                    |
+| `internal/store`              | 持久化和缓存访问层                       |
+| `internal/model`              | 同包内按领域分文件的数据库模型           |
+| `internal/alert`              | 告警编译、运行时和发送编排               |
+| `internal/traffic`            | 流量统计后台服务                         |
+| `web`                         | SPA 前端源码                             |
+| `configs`                     | 示例配置                                 |
+| `db/migrations`               | 数据库结构变更                           |
+| `scripts`                     | 构建和打包入口                           |
+
+## 指标与存储
+
+### 数据流
 
 1. Node 通过 `/api/node/*` 上报指标和静态主机信息。
    指标在鉴权和解码前记录服务端接收时间，入库截止时间为该时间后 5 秒；鉴权、请求体读取、节点锁等待和数据库事务共用这一预算。超时上报不会在后续 Uptime 窗口才进入指标存储。
@@ -73,7 +77,7 @@ helper 的安装和更新属于特权安装流程；node 自更新只更新普�
 
 节点 IP 是已鉴权 Node 请求的观察值：有 `X-Forwarded-For` 时 Dash 取其第一个 IP，否则回退到 `RemoteAddr`；不可解析的值不会被使用。该字段用于展示和运维，不作为鉴权边界。
 
-## 状态和保留策略
+### 状态和保留策略
 
 - 节点本地生命周期锁的等待遵守调用方取消和截止时间。取消的等待释放锁引用，不执行变更；不同节点仍可独立运行。结构读写锁不支持取消。指标报告在写入关系表前限制磁盘 base IO、逻辑盘、网卡和 SMART 设备的提交项合计最多 1024 项。历史记录使用服务端接收时间，不按相同的 Node 时间戳去重。
 - Uptime 的游客展示开关和每日 SLA 阈值持久化在 `system_settings`，默认开启游客展示，warning 为 99%、error 为 95%。数据库约束保证 `0 <= error < warning <= 100`，设置更新沿用同一事务，非法阈值不会留下部分更新。Uptime 接口校验游客展示权限，并返回供卡片着色的阈值；这些设置不影响采样。
@@ -118,49 +122,33 @@ helper 的安装和更新属于特权安装流程；node 自更新只更新普�
 - 历史指标默认不对游客公开。`history_guest_access_mode=by_node` 时，只对游客可见节点开放。
 - 流量统计是否对游客公开由流量设置控制，并仍受节点可见性限制。
 
-## 鉴权边界
+## 节点与虚拟机
 
-Redis 和内存认证存储均使用 EiluneKit 缺省的每用户 255 个未过期会话上限。容量限制只拒绝新登录，已有会话和刷新轮换仍可使用。会话格式和 `auth:jwt:*` Redis 命名空间保持兼容。
+### PVE 采集与上报
 
-| 区域                                                  | 鉴权                                                          |
-| ----------------------------------------------------- | ------------------------------------------------------------- |
-| `/api/auth/login`                                     | 管理员密码                                                    |
-| `/api/auth/refresh`、`/api/auth/logout`               | `SameSite=Strict` refresh cookie + `X-CSRF-Token`             |
-| `/api/front/*`、`/api/metrics/*`、`/api/statistics/*` | Bearer 可选；匿名请求按系统可见性设置过滤                     |
-| `/api/node/*`                                         | `X-Node-Secret`                                               |
-| `/api/admin/*`                                        | `Authorization: Bearer <access_token>`                        |
-| `/deploy/*` 打包资产                                  | `X-Node-Secret` 或旧 Node 升级临时 token；安装脚本模板仍公开  |
+PVE 监控使用现有节点身份和更新渠道。root 服务运行预编译的 `/usr/local/libexec/ithiltir-node/pve-cache`，不需要本机编译器或 PVE API 凭据。helper 在内存中保存每台 VM 的观测结果。8 个 worker 按顺序选择到期 VM，同一 VM 不重叠查询，采样间隔至少 3 秒；单次观测超时 2 秒，完成一台即可读取一台，不等待其他 VM，也没有整轮硬截止。只有 QMP 状态为 `running` 才采集动态指标和 IP；其他 VM 保留配置与状态，模板排除。CPU 使用进程计数差值、VM vCPU 配额及宿主 CPU 数计算，不受 helper CPU 亲和性影响；内存保持 PVE cgroup/balloon 口径，磁盘和 tap 网卡字节数为累计计数。配置每 3 秒刷新，磁盘容量每 60 秒单独查询 PVE，超过 2 分钟后省略。Node 按现有 3 秒 VM 上报节奏从 helper Unix socket 读取当前快照。
 
-## 前端和反向代理
+可选 `net_rate_limits_mbps` 按网卡名（如 `net0`）上报 PVE 配置限速，值为 JSON 数字，单位 Mbps（1 Mbps = 1,000,000 bit/s），四舍五入至两位小数；JSON 数字不补尾随零。PVE `rate` 按 MiB/s 换算，例如 `12.5` 上报 `104.86`。同一值分别适用于收、发方向，不是 VM 所有网卡共享的总额度。`0` 表示该网卡未配置限速；字段缺失表示未采集到网卡配置。helper 每轮直接读取本机 `/etc/pve/qemu-server/<vmid>.conf` 的当前配置，忽略待应用修改和快照段；限速值解析失败时省略该字段并记录日志，基础指标继续上报。
 
-前端语言 Store 负责语言选择，并通过 localStorage 的 `lang` 键保存。浏览器存储不可用时，语言切换仍对当前页面会话有效。
+Guest Agent IP 通过可选 `ips` 数组返回，每台 VM 最多 1024 个不重复的 IPv4/IPv6 地址，包含私网地址，排除回环、链路本地、未指定、多播及非法地址。IP 通过本机 QGA socket 独立采集，只查询 QMP 状态明确为 `running` 且启用了 Guest Agent 的 VM。调度器每 3 秒检查到期任务，最多 8 路并发，每台 VM 总超时 3 秒，每轮预算 10 秒，轮次不重叠。成功后间隔 60 秒再查，失败按 1、2、5 分钟退避；健康刷新优先，失败重试最多占用 2 个槽位。这些间隔是最小等待时间，负载饱和时查询可能推迟。VM 重启或 agent 配置变化会清除该 VM 的旧 IP 和冷却状态。helper 进程锁保证单进程运行，IP 采集循环等待当前轮次完成后再启动下一轮；仅 root 可读的 `/run/ithiltir-node/pve-guest` 状态可跨 helper 重启保留，宿主重启后重建。基础采集只读 IP 缓存，不等待 QGA。
 
-访问日志以及登录、节点鉴权限流只信任来自 `http.trusted_proxies` 的客户端 IP 转发头。优先级沿用 EiluneKit 缺省值：`X-Forwarded-For`、`X-Real-IP`、`Forwarded`、`True-Client-IP`、`CF-Connecting-IP`。该选择不改变已认证节点的 IP 观测规则，节点 IP 仍使用 `X-Forwarded-For` 第一项或连接地址。
+每台 VM 使用独立的可选 `collected_at`、`ttl_seconds`（helper 使用 90 秒）记录实际观测时间，而非外层快照组装时间。缺少观测时间表示动态指标未知。helper 和 Dash 对过期 VM 省略 CPU、内存用量、磁盘/网络计数和运行时长，将状态标为 `unknown`，同时保留原观测时间及配置信息；IP 新鲜度仍独立判断。
 
-前端可以单独启动开发服务器，但运行边界仍是同源路径。开发代理或生产反向代理应把 `/api`、`/theme`、`/deploy` 转给后端，`/` 保持为 Dash SPA。IP 部署允许使用 HTTP；经过不可信网络时应使用 HTTPS，否则管理员凭据和节点密钥会以明文传输。跨域后端地址需要同时配置 CORS、cookie 和 CSRF 策略。
+可选字段 `ips_collected_at`、`ips_ttl_seconds` 独立描述 IP 样本新鲜度。helper 使用 900 秒 IP TTL；复用时保留原采样时间，省略过期样本以及已知早于 VM 本次启动的样本。成功查询无地址时可以只有新鲜度字段而没有 `ips`。查询失败仅在原 IP 样本未过期时继续使用；读取方必须单独判断 IP 新鲜度，不能只看快照 `stale`。兼容不带这两个字段的报告，此时 IP 新鲜度未知；提供时，IP 时间必须非零且不晚于外层快照的 `collected_at`，TTL 为 1–3600。IP 时间可以晚于该 VM 的 `collected_at`。
 
-## 目录
+helper 通过 root 持有的 `/run/ithiltir-node/pve.sock` 提供 `GET /snapshot`，仅 root 或配置的运行组可访问。完成的观测保存在 helper 内存中，Node 在上报时读取副本，不周期性写快照文件。清单读取失败保留原清单及成功时间并记录错误，helper 重启后重新采集。root 代码不执行普通 node 可写的 release 树。
 
-`cmd/dash` 通过 `internal/http` 构造 HTTP 服务。HTTP 根入口组合 API、主题和安装脚本 Blueprint，并提供静态文件回退 handler；路由父模块只汇总直属子模块。MTProto 登录状态的序列化和过期由 `store/mtlogin` 负责，渠道版本检查和会话持久化由 `store/alert` 负责。
+安装器通过 systemd drop-in 设置 `ITHILTIR_NODE_PVE_SOCKET`。未设置时 node 不启动 VM 推送任务；设置后每个上报目标具有独立的缓存轮询、传输超时和失败退避，沿用目标 URL 和密钥向同级 `/virt` 发送。只保留最新样本，不积累报告队列；缓存不可用报告错误，VM 推送失败不阻塞宿主采样和上报。旧 Dash 返回不支持该接口时，VM 任务退避重试，宿主上报继续。
 
-| 路径                          | 内容                                     |
-| ----------------------------- | ---------------------------------------- |
-| `cmd/dash`                    | 服务、迁移、更新、Redis 检查和主题打包入口 |
-| `internal/config`             | 配置加载、默认值、校验和运行目录         |
-| `internal/http`               | HTTP 服务、静态资源、主题资源和 API 挂载 |
-| `internal/http/api`           | `/api` 路由树                            |
-| `internal/http/deploy`        | 各平台安装脚本路由树                    |
-| `internal/store`              | 持久化和缓存访问层                       |
-| `internal/model`              | 同包内按领域分文件的数据库模型           |
-| `internal/alert`              | 告警编译、运行时和发送编排               |
-| `internal/traffic`            | 流量统计后台服务                         |
-| `web`                         | SPA 前端源码                             |
-| `configs`                     | 示例配置                                 |
-| `db/migrations`               | 数据库结构变更                           |
-| `scripts`                     | 构建和打包入口                           |
+节点 Store 按宿主保存一份最新的编码后 VM 快照：启用 Redis 时使用 Redis，`--no-redis` 模式使用进程内存。快照独立于宿主指标、Uptime、前台投影缓存和计费，不写入 PostgreSQL。Redis 使用独立的 `ithiltir:dash:virt:v1:node:<id>` hash 保存载荷、采样时间和接收时间，不再保存第二份进程内快照；脚本原子比较采样时间、替换数据并设置过期时间。两种模式均从原始接收时间起保留 10 分钟。重复或较旧样本不续期；采样时间已超过 10 分钟的报告仍确认成功，但不再缓存。新鲜度继续按报告中的 TTL 判断。缓存到期后返回空快照；内存条目在读取及后续写入时惰性清理，不启动后台定时任务。Redis 仍保留的未过期快照可以跨 Dash 重启继续读取，内存快照不能。Redis 失败明确返回错误，不切换到内存；Redis 的持久化和淘汰遵循运维配置。鉴权复查与替换使用节点生命周期锁。节点删除提交成功后撤销访问并清理缓存；Redis 清理失败会记录日志，残留 key 自然过期。密钥轮换保留快照。
 
+快照通过 `/api/virt/{id}` 读取，游客访问要求 `system_settings.pve_guest_visible` 开启且宿主机游客可见。游客响应省略 IP、IP 观测元数据和原始采集错误；名称仅在 `pve_guest_names_visible` 开启时返回。两个开关均默认 false。隐私裁剪只作用于本次解码的响应，不修改缓存快照。`/api/virt/{id}/vms` 下的历史查询要求管理员认证。能力查询接口仍仅供管理员进行安装诊断。VM 历史通过节点查询会话按需读取 PVE RRD，不由 Dash 持久化。每节点的图表阈值属于 PostgreSQL 配置，并同步到内存节点元数据：CPU 默认 80%，内存默认 90%，内存标注默认关闭。这些配置用于历史采样点标注，不产生告警事件或通知。
 
-## Node 传输与 PVE 查询归属
+PVE 图标进入 `/pve/{id}`，VM 选择由 URL 保存，快照与历史请求状态归页面所有。快照每 15 秒刷新；管理员选择 VM、时间范围或手动刷新时读取历史。过期快照与新鲜数据、空清单分别展示。
+
+helper 的安装和更新属于特权安装流程；node 自更新只更新普通 node，不替换 helper。可选资产使用 `deploy/linux/pve-cache.env` 独立校验清单；`release.env` v1 保持不变，旧包可以不含 PVE 资产。支持新清单的 Dash 更新器和 PVE 安装器验证版本及 SHA-256；旧 Dash 更新器仍只验证其已知的七项资产，PVE 安装前仍会执行 helper 校验。
+
+### Node 传输与 PVE 查询归属
 
 应用根入口构造一个共享 `nodeingest.Receiver` 和一个 `nodesession.Hub`，并传给 HTTP 服务。HTTP 服务持有 `noderpc` 适配器，并在关闭时回收节点会话。HTTP 和 gRPC 调用相同受理方法，保留既有宿主指标、流量、在线率、告警和缓存行为。同一监听地址支持 HTTP/1、HTTP/2，以及可信 TLS 代理后的明文 HTTP/2；预留的 `grpc_port` 不作为第二监听端口。关闭时并行停止 RPC 会话、等待 HTTP 请求退出，共用 10 秒预算。到期后由 HTTP 服务强制关闭剩余连接，再等待 RPC 清理结束。
 
@@ -173,3 +161,28 @@ Node 会话循环统一管理最多 32 个待完成查询的受理、取消和�
 PVE root helper 在 `ithiltir-node-pve-cache.service` 中以 `root:root` 运行，负责采集并持有 `/run/ithiltir-node/pve.sock`。PVE IPC 要求 root UID 和主 GID；`--group` 参数只授权 Node 访问 socket，不改变 helper 的主组。socket 为 root 所有、0660 权限，校验对端 root UID 或运行主 GID。提供读取内存中已完成观测的 `GET /snapshot`、`GET /capabilities` 和经过参数校验的 `POST /history`，不接受任意命令或 PVE 路径。使用 `--pve` 安装时先停用旧 PVE 定时器，再启用常驻服务，并在 `pve.conf` 中配置 Node socket 和 `ITHILTIR_NODE_TRANSPORT=grpc`。省略 PVE 参数会保留该 drop-in；`--no-pve` 将其连同传输设置一起删除。
 
 历史查询要求本地新鲜的成功 VM 清单。相同进行中请求共享一次执行，最后一个等待者离开时取消任务。历史查询单独使用四个执行槽和子进程继承的 VM 历史锁，进程退出后释放；QGA 查询使用独立的并发额度。helper 最多受理 32 个不同的进行中历史查询，结果最多 2 MiB、4096 点；成功缓存 30 秒，失败缓存 10 秒，历史失败还对该 VM 的其他窗口施加 10 秒冷却。缓存最多 128 项、16 MiB 结果字节；正在返回的响应可独立持有受限结果。共享执行由缓存持有独立的 8 秒预算，各远端等待者的预算最多 10 秒；某个等待者超时不会取消其他等待者仍需要的执行。VM 历史继续使用 PVE RRD 数据，Dash 不增加 VM 历史表。
+
+## 访问与部署
+
+### 鉴权边界
+
+Redis 和内存认证存储均使用 EiluneKit 缺省的每用户 255 个未过期会话上限。容量限制只拒绝新登录，已有会话和刷新轮换仍可使用。会话格式和 `auth:jwt:*` Redis 命名空间保持兼容。
+
+| 区域                                                  | 鉴权                                                          |
+| ----------------------------------------------------- | ------------------------------------------------------------- |
+| `/api/auth/login`                                     | 管理员密码                                                    |
+| `/api/auth/refresh`、`/api/auth/logout`               | `SameSite=Strict` refresh cookie + `X-CSRF-Token`             |
+| `/api/front/*`、`/api/metrics/*`、`/api/statistics/*` | Bearer 可选；匿名请求按系统可见性设置过滤                     |
+| `/api/node/*`                                         | `X-Node-Secret`                                               |
+| `/api/admin/*`                                        | `Authorization: Bearer <access_token>`                        |
+| `/deploy/*` 打包资产                                  | `X-Node-Secret` 或旧 Node 升级临时 token；安装脚本模板仍公开  |
+
+### 前端和反向代理
+
+[标准生产部署](https://www.ithiltir.dev/docs/Install/AllInOne)在同一台主机运行 Dash、PostgreSQL（含 TimescaleDB）和 Redis，由本机反向代理提供 HTTPS 入口。
+
+前端语言 Store 负责语言选择，并通过 localStorage 的 `lang` 键保存。浏览器存储不可用时，语言切换仍对当前页面会话有效。
+
+访问日志以及登录、节点鉴权限流只信任来自 `http.trusted_proxies` 的客户端 IP 转发头。优先级沿用 EiluneKit 缺省值：`X-Forwarded-For`、`X-Real-IP`、`Forwarded`、`True-Client-IP`、`CF-Connecting-IP`。该选择不改变已认证节点的 IP 观测规则，节点 IP 仍使用 `X-Forwarded-For` 第一项或连接地址。
+
+前端可以单独启动开发服务器，但运行边界仍是同源路径。开发代理或生产反向代理应把 `/api`、`/theme`、`/deploy` 转给后端，`/` 保持为 Dash SPA。IP 部署允许使用 HTTP；经过不可信网络时应使用 HTTPS，否则管理员凭据和节点密钥会以明文传输。跨域后端地址需要同时配置 CORS、cookie 和 CSRF 策略。

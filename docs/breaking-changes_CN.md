@@ -1,10 +1,20 @@
+[<img src="../web/public/brandlogo.svg" alt="" width="20" height="20"> Ithiltir Dash](../README_CN.md) · [文档索引](https://www.ithiltir.dev/docs) · [English](breaking-changes.md)
+
 # 破坏性变更
+
+按版本从新到旧列出升级时需要调整的客户端、配置和部署脚本。
 
 ## 0.4.1（2026-11-23）
 
+### 指标响应
+
 `GET /api/front/metrics` 现在返回包含 `sent_at` 和 `nodes` 的对象。原先直接遍历顶层数组的客户端需改为遍历 `response.nodes`，分页响应也采用该结构。判断节点上报距今多久时，使用 `response.sent_at` 作为服务端当前时间。
 
+### 本版数据库要求
+
 从正式版 `0.4.0` 升级无需新增数据库迁移。
+
+### 源码打包
 
 从源码打包时，原先调用 `scripts/package.ps1` 的脚本需改用 `bash scripts/package.sh`。读取解包安装目录的脚本需将路径从 `<out>/build/Ithiltir-dash/` 改为 `<out>/<os>/<arch>/Ithiltir-dash/`。
 

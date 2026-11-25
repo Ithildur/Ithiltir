@@ -1,10 +1,20 @@
+[<img src="../web/public/brandlogo.svg" alt="" width="20" height="20"> Ithiltir Dash](../README.md) · [Documentation](https://www.ithiltir.dev/en/docs) · [简体中文](breaking-changes_CN.md)
+
 # Breaking Changes
+
+Versions are listed newest first. Each entry identifies the client, configuration, or deployment changes required for that upgrade.
 
 ## 0.4.1 (2026-11-23)
 
+### Metrics response
+
 `GET /api/front/metrics` now returns an object containing `sent_at` and `nodes`. Clients that consumed the top-level array must read `response.nodes`, including when using pagination. Use `response.sent_at` as the server clock when calculating node age.
 
+### Database upgrade requirements
+
 Upgrading from the official `0.4.0` release requires no new database migration.
+
+### Source packages
 
 For source builds, use `bash scripts/package.sh` in place of `scripts/package.ps1`. Scripts that consume the unpacked installation directory must switch from `<out>/build/Ithiltir-dash/` to `<out>/<os>/<arch>/Ithiltir-dash/`.
 

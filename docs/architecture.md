@@ -1,8 +1,14 @@
+[<img src="../web/public/brandlogo.svg" alt="" width="20" height="20"> Ithiltir Dash](../README.md) · [Documentation](https://www.ithiltir.dev/en/docs) · [简体中文](architecture_CN.md)
+
 # Architecture
 
 Ithiltir Dash is a single-instance application. The root entry point starts one HTTP process that wires the API, SPA, theme assets, install scripts, node asset downloads, and background services.
 
-## Runtime Boundaries
+Follow a report through the [data flow](#data-flow), check [storage and retention](#state-and-retention), or review the [authentication](#auth-boundaries) and [reverse proxy](#frontend-and-reverse-proxies) boundaries before exposing Dash. The [API reference](api.md) lists the public routes.
+
+## Processes and services
+
+### Runtime Boundaries
 
 | Component                  | Responsibility                                                                                                                            |
 | -------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
@@ -17,31 +23,7 @@ Ithiltir Dash is a single-instance application. The root entry point starts one 
 | Linux root-side caches     | systemd timers refresh SMART, connections, and LVM caches; Alpine/OpenRC uses BusyBox cron for SMART and LVM only                         |
 | web UI                     | reads dashboard data and submits admin operations                                                                                         |
 
-## PVE collection and reporting
-
-PVE monitoring uses the existing node identity and update channel. The precompiled root helper runs at `/usr/local/libexec/ithiltir-node/pve-cache`; no on-host compiler or PVE API credentials are required. The helper keeps per-VM observations in memory. Eight workers rotate through due VMs; each VM is sampled at most once per three seconds, with no overlapping query for the same VM. Each observation has a two-second deadline, and a completed VM becomes readable immediately without waiting for other VMs or a whole-round deadline. Only QMP status `running` permits dynamic metrics and IPs; other VMs retain configuration and state, and templates are excluded. CPU uses process-counter deltas normalized to vCPUs and the host CPU count, independently of helper CPU affinity. Memory follows PVE cgroup/balloon semantics; disk and tap-network bytes are cumulative counters. Configuration is refreshed every three seconds. Disk capacity uses a separate PVE query every 60 seconds and expires after two minutes. Node reads the current snapshot from the helper Unix socket on its existing three-second VM delivery cadence.
-
-Optional `net_rate_limits_mbps` maps NIC names (such as `net0`) to PVE-configured rate limits as JSON numbers in Mbps (1 Mbps = 1,000,000 bit/s), rounded to two decimal places; JSON numbers do not retain trailing zeros. PVE `rate` is converted from MiB/s: `12.5` becomes `104.86`. The same limit applies separately to receive and transmit traffic, not to all VM NICs combined. Zero means no configured limit on that NIC; an absent field means NIC configuration was not collected. Each helper collection reads the current section of local `/etc/pve/qemu-server/<vmid>.conf`, ignoring pending changes and saved snapshots. Invalid NIC rate values are logged and omit this field without stopping basic metrics reporting.
-
-Guest Agent IPs are returned in optional `ips` arrays, up to 1024 unique IPv4/IPv6 addresses per VM, including private addresses and excluding loopback, link-local, unspecified, multicast and invalid addresses. IP collection uses local QGA sockets independently of basic metrics. Only VMs with QMP status `running` and an enabled guest agent are queried. The scheduler checks due work every three seconds, with eight concurrent queries and a three-second total deadline per VM; each round has a ten-second budget and rounds never overlap. Successful queries are eligible again after 60 seconds; failures back off for 1, 2, then 5 minutes. Healthy refreshes have priority, and retries occupy at most two slots. These intervals are minimum delays; saturation can defer a query. Boot or agent configuration changes reset the VM's cached IPs and cooldown. A process lock keeps one helper running; its IP collection loop waits for each round to finish before starting the next. Root-only state in `/run/ithiltir-node/pve-guest` survives helper restarts but is rebuilt after host reboot. Basic collection reads the cached results without waiting for QGA.
-
-Each VM independently carries optional `collected_at` and `ttl_seconds` (the helper uses 90 seconds). These describe the VM observation, not the time the enclosing snapshot was assembled. Missing observation metadata means live metrics are unknown. The helper and Dash omit expired CPU, memory usage, disk/network counters and uptime and expose the VM state as `unknown`, while retaining its original observation timestamp and configuration. IP freshness remains independent.
-
-Optional `ips_collected_at` and `ips_ttl_seconds` describe the IP sample independently of hot metrics. The helper emits a 900-second IP TTL, preserves the original timestamp on reuse, and omits expired samples and samples known to predate the VM's current boot. An empty successful query may have freshness metadata without `ips`. On query failure, the previous IP sample remains usable only until its own expiry. Clients must check IP freshness separately from snapshot `stale`. Reports without these fields remain accepted, with unknown IP freshness; when provided, the timestamp must be nonzero and no later than the enclosing snapshot's `collected_at`, and TTL must be 1–3600. The IP timestamp may be later than the VM's own `collected_at`.
-
-The helper exposes `GET /snapshot` on root-owned `/run/ithiltir-node/pve.sock`, readable by root or the configured runtime group. Completed observations stay in helper memory; Node fetches a copy at delivery time. No periodic snapshot file is written. Inventory failures retain the previous inventory and success time with an explicit error. Helper restart rebuilds VM observations. Root code never executes the node-writable release tree.
-
-The installer enables `ITHILTIR_NODE_PVE_SOCKET` through a systemd drop-in. Without it, node starts no VM delivery tasks. Each configured report target has independent cache polling, HTTP timeout and failure backoff, reusing its URL/key for the sibling `/virt` endpoint. Only the latest sample is retained; unavailable caches produce error observations. Delivery failures, including an older Dash without the endpoint, do not block host monitoring.
-
-The node Store keeps one latest encoded VM snapshot per host in Redis when Redis is enabled, or in process memory with `--no-redis`. Snapshots are independent of host metrics, uptime, frontend projection caches and billing, and are not written to PostgreSQL. Redis uses a separate `ithiltir:dash:virt:v1:node:<id>` hash containing the payload, collection time and receipt time, without a second in-process snapshot cache. A single script compares collection times, replaces the snapshot and sets its expiry. Both modes retain a snapshot for ten minutes from its original receipt time. Duplicate or older samples do not renew expiry; a report whose collection time is already ten minutes old is acknowledged but not cached. Snapshot freshness still follows its reported TTL. Expired entries return an empty snapshot; memory entries are removed lazily on reads and subsequent writes, without a background timer. Unexpired Redis snapshots can survive a Dash restart while Redis retains them; memory snapshots cannot. Redis failures remain explicit errors rather than falling back to memory. Redis persistence and eviction follow the operator’s Redis configuration. Authentication and replacement share the node lifecycle lock. Committed node deletion revokes access and removes the cache entry; a Redis cleanup failure is logged and the key expires naturally. Key rotation preserves the snapshot.
-
-Snapshot reads use `/api/virt/{id}`. Guests require both `system_settings.pve_guest_visible` and host guest visibility. Guest responses omit IPs, IP observation metadata and raw collector errors; names require `pve_guest_names_visible`. Both switches default to false. Redaction affects each decoded response without changing the cached snapshot. History reads under `/api/virt/{id}/vms` require administrator authentication. The administrator-only capabilities endpoint remains available for installation diagnostics. VM history is read on demand from PVE RRD through the node query session and is not persisted by Dash. Per-node chart thresholds remain PostgreSQL configuration and are mirrored into node metadata in memory: CPU defaults to 80%, memory to 90%, and memory annotations are disabled by default. These settings annotate historical samples; they do not create alert events or notifications.
-
-The PVE icon opens `/pve/{id}`, where VM selection belongs to the URL and snapshot/history request state belongs to the page. Snapshot reads refresh every 15 seconds; administrators fetch history when selecting a VM or range and on manual refresh. Stale snapshots remain distinguishable from fresh data and empty inventories.
-
-Privileged installation owns helper upgrades; node self-update never replaces it. Optional helper assets use `deploy/linux/pve-cache.env`; release.env v1 stays unchanged and legacy packages may omit helpers. New Dash updaters and PVE installers verify helper version/checksums. Older Dash updaters verify only their original seven assets; the PVE installer still verifies the helper before execution.
-
-## HTTP Surface
+### HTTP Surface
 
 Each route module returns an EiluneKit Blueprint and includes only its immediate children. The HTTP root combines the API, theme, and platform install-script routes, then constructs one handler with `routes.NewHandler`. The application does not register routes directly on chi; the resulting handler belongs to `http.Server` for the server lifetime.
 
@@ -62,7 +44,29 @@ Install scripts are explicit GET/HEAD routes. Unmatched `/deploy/...` paths use 
 | `/deploy`         | install scripts and packaged node assets                |
 | `/`               | SPA                                                     |
 
-## Data Flow
+### Repository Layout
+
+`cmd/dash` constructs the HTTP server through `internal/http`. The HTTP root combines API, theme, and install-script Blueprints and supplies static-file fallback handlers. Route parents include their direct child modules. MTProto login state serialization and expiry belong to `store/mtlogin`, and channel revision checks and session persistence belong to `store/alert`.
+
+| Path                          | Contents                                                      |
+| ----------------------------- | ------------------------------------------------------------- |
+| `cmd/dash`                    | server, migration, update, Redis-check, and theme packaging entry points |
+| `internal/config`             | config loading, defaults, validation, and runtime directories |
+| `internal/http`               | HTTP server, static assets, theme assets, and API mounting    |
+| `internal/http/api`           | `/api` route tree                                             |
+| `internal/http/deploy`        | platform install-script route tree                            |
+| `internal/store`              | persistence and cache access layer                            |
+| `internal/model`              | database models organized by domain within one package        |
+| `internal/alert`              | alert compilation, runtime, and delivery orchestration        |
+| `internal/traffic`            | traffic statistics background service                         |
+| `web`                         | SPA frontend source                                           |
+| `configs`                     | sample config                                                 |
+| `db/migrations`               | schema changes                                                |
+| `scripts`                     | build and packaging entry points                              |
+
+## Metrics and storage
+
+### Data Flow
 
 1. Nodes submit metrics and static host data through `/api/node/*`.
    Metrics retain their server receive timestamp before authentication and decoding. The persistence deadline is that timestamp plus five seconds; authentication, body reads, node-lock waits and the database transaction share this budget. Expired reports cannot enter metrics storage in a later uptime window.
@@ -73,7 +77,7 @@ Install scripts are explicit GET/HEAD routes. Unmatched `/deploy/...` paths use 
 
 Node IP is an observation from authenticated Node requests: Dash reads the first IP in `X-Forwarded-For` when that header is present, otherwise it falls back to `RemoteAddr`; invalid values are not used. This field is for display and operations, not an auth boundary.
 
-## State And Retention
+### State And Retention
 
 - Node-local lifecycle lock waits observe the caller's cancellation and deadline. A canceled wait releases its lock reference without executing the mutation; different nodes remain independent. The structural read/write lock is not cancelable. Metrics reports allow at most 1024 supplied entries across disk base IO, logical disks, network interfaces, and SMART devices before relational writes. History uses server receive time; equal Node timestamps are not deduplicated.
 - Uptime guest visibility and daily SLA thresholds are persisted in `system_settings`. Guest visibility defaults to on, warning to 99%, and error to 95%. A database constraint enforces `0 <= error < warning <= 100`; settings updates share one transaction, so invalid thresholds cannot leave partial updates. Uptime endpoints enforce guest visibility and return the thresholds used by dashboard colors; these settings do not affect sampling.
@@ -118,49 +122,33 @@ Node IP is an observation from authenticated Node requests: Dash reads the first
 - Metrics history is private by default. `history_guest_access_mode=by_node` exposes it only for guest-visible nodes.
 - Traffic statistics guest access is controlled by traffic settings and still respects node visibility.
 
-## Auth Boundaries
+## Nodes and virtual machines
 
-Redis and memory authentication stores use EiluneKit's default limit of 255 unexpired sessions per user. Capacity rejection affects new logins only; existing sessions and refresh rotation remain usable. Session formats and the `auth:jwt:*` Redis namespace are preserved.
+### PVE collection and reporting
 
-| Area                                                  | Auth                                                                                        |
-| ----------------------------------------------------- | ------------------------------------------------------------------------------------------- |
-| `/api/auth/login`                                     | admin password                                                                              |
-| `/api/auth/refresh`, `/api/auth/logout`               | `SameSite=Strict` refresh cookie + `X-CSRF-Token`                                           |
-| `/api/front/*`, `/api/metrics/*`, `/api/statistics/*` | optional bearer; anonymous requests are filtered by visibility settings                     |
-| `/api/node/*`                                         | `X-Node-Secret`                                                                             |
-| `/api/admin/*`                                        | `Authorization: Bearer <access_token>`                                                      |
-| `/deploy/*` packaged assets                           | `X-Node-Secret` or a temporary legacy upgrade token; install script templates remain public |
+PVE monitoring uses the existing node identity and update channel. The precompiled root helper runs at `/usr/local/libexec/ithiltir-node/pve-cache`; no on-host compiler or PVE API credentials are required. The helper keeps per-VM observations in memory. Eight workers rotate through due VMs; each VM is sampled at most once per three seconds, with no overlapping query for the same VM. Each observation has a two-second deadline, and a completed VM becomes readable immediately without waiting for other VMs or a whole-round deadline. Only QMP status `running` permits dynamic metrics and IPs; other VMs retain configuration and state, and templates are excluded. CPU uses process-counter deltas normalized to vCPUs and the host CPU count, independently of helper CPU affinity. Memory follows PVE cgroup/balloon semantics; disk and tap-network bytes are cumulative counters. Configuration is refreshed every three seconds. Disk capacity uses a separate PVE query every 60 seconds and expires after two minutes. Node reads the current snapshot from the helper Unix socket on its existing three-second VM delivery cadence.
 
-## Frontend And Reverse Proxies
+Optional `net_rate_limits_mbps` maps NIC names (such as `net0`) to PVE-configured rate limits as JSON numbers in Mbps (1 Mbps = 1,000,000 bit/s), rounded to two decimal places; JSON numbers do not retain trailing zeros. PVE `rate` is converted from MiB/s: `12.5` becomes `104.86`. The same limit applies separately to receive and transmit traffic, not to all VM NICs combined. Zero means no configured limit on that NIC; an absent field means NIC configuration was not collected. Each helper collection reads the current section of local `/etc/pve/qemu-server/<vmid>.conf`, ignoring pending changes and saved snapshots. Invalid NIC rate values are logged and omit this field without stopping basic metrics reporting.
 
-The frontend language store owns language selection and persistence under the `lang` localStorage key. If browser storage is unavailable, language changes remain effective for the current page session.
+Guest Agent IPs are returned in optional `ips` arrays, up to 1024 unique IPv4/IPv6 addresses per VM, including private addresses and excluding loopback, link-local, unspecified, multicast and invalid addresses. IP collection uses local QGA sockets independently of basic metrics. Only VMs with QMP status `running` and an enabled guest agent are queried. The scheduler checks due work every three seconds, with eight concurrent queries and a three-second total deadline per VM; each round has a ten-second budget and rounds never overlap. Successful queries are eligible again after 60 seconds; failures back off for 1, 2, then 5 minutes. Healthy refreshes have priority, and retries occupy at most two slots. These intervals are minimum delays; saturation can defer a query. Boot or agent configuration changes reset the VM's cached IPs and cooldown. A process lock keeps one helper running; its IP collection loop waits for each round to finish before starting the next. Root-only state in `/run/ithiltir-node/pve-guest` survives helper restarts but is rebuilt after host reboot. Basic collection reads the cached results without waiting for QGA.
 
-Access logs and login/node-authentication rate limits trust forwarded client IP headers only from `http.trusted_proxies`. Header precedence follows EiluneKit defaults: `X-Forwarded-For`, `X-Real-IP`, `Forwarded`, `True-Client-IP`, then `CF-Connecting-IP`. This selection does not change the authenticated node IP observation rule, which uses the first `X-Forwarded-For` entry or the connection address.
+Each VM independently carries optional `collected_at` and `ttl_seconds` (the helper uses 90 seconds). These describe the VM observation, not the time the enclosing snapshot was assembled. Missing observation metadata means live metrics are unknown. The helper and Dash omit expired CPU, memory usage, disk/network counters and uptime and expose the VM state as `unknown`, while retaining its original observation timestamp and configuration. IP freshness remains independent.
 
-The frontend can run as a standalone dev server, but the runtime boundary stays same-origin. A dev proxy or production reverse proxy should forward `/api`, `/theme`, and `/deploy` to the backend while Dash serves the SPA at `/`. IP deployments may use HTTP; use HTTPS across untrusted networks because admin credentials and node secrets otherwise travel in plaintext. Do not point browser API requests directly at a cross-origin backend unless CORS, cookie, and CSRF policies are designed together.
+Optional `ips_collected_at` and `ips_ttl_seconds` describe the IP sample independently of hot metrics. The helper emits a 900-second IP TTL, preserves the original timestamp on reuse, and omits expired samples and samples known to predate the VM's current boot. An empty successful query may have freshness metadata without `ips`. On query failure, the previous IP sample remains usable only until its own expiry. Clients must check IP freshness separately from snapshot `stale`. Reports without these fields remain accepted, with unknown IP freshness; when provided, the timestamp must be nonzero and no later than the enclosing snapshot's `collected_at`, and TTL must be 1–3600. The IP timestamp may be later than the VM's own `collected_at`.
 
-## Repository Layout
+The helper exposes `GET /snapshot` on root-owned `/run/ithiltir-node/pve.sock`, readable by root or the configured runtime group. Completed observations stay in helper memory; Node fetches a copy at delivery time. No periodic snapshot file is written. Inventory failures retain the previous inventory and success time with an explicit error. Helper restart rebuilds VM observations. Root code never executes the node-writable release tree.
 
-`cmd/dash` constructs the HTTP server through `internal/http`. The HTTP root combines API, theme, and install-script Blueprints and supplies static-file fallback handlers. Route parents include their direct child modules. MTProto login state serialization and expiry belong to `store/mtlogin`, and channel revision checks and session persistence belong to `store/alert`.
+The installer enables `ITHILTIR_NODE_PVE_SOCKET` through a systemd drop-in. Without it, node starts no VM delivery tasks. Each configured report target has independent cache polling, HTTP timeout and failure backoff, reusing its URL/key for the sibling `/virt` endpoint. Only the latest sample is retained; unavailable caches produce error observations. Delivery failures, including an older Dash without the endpoint, do not block host monitoring.
 
-| Path                          | Contents                                                      |
-| ----------------------------- | ------------------------------------------------------------- |
-| `cmd/dash`                    | server, migration, update, Redis-check, and theme packaging entry points |
-| `internal/config`             | config loading, defaults, validation, and runtime directories |
-| `internal/http`               | HTTP server, static assets, theme assets, and API mounting    |
-| `internal/http/api`           | `/api` route tree                                             |
-| `internal/http/deploy`        | platform install-script route tree                            |
-| `internal/store`              | persistence and cache access layer                            |
-| `internal/model`              | database models organized by domain within one package        |
-| `internal/alert`              | alert compilation, runtime, and delivery orchestration        |
-| `internal/traffic`            | traffic statistics background service                         |
-| `web`                         | SPA frontend source                                           |
-| `configs`                     | sample config                                                 |
-| `db/migrations`               | schema changes                                                |
-| `scripts`                     | build and packaging entry points                              |
+The node Store keeps one latest encoded VM snapshot per host in Redis when Redis is enabled, or in process memory with `--no-redis`. Snapshots are independent of host metrics, uptime, frontend projection caches and billing, and are not written to PostgreSQL. Redis uses a separate `ithiltir:dash:virt:v1:node:<id>` hash containing the payload, collection time and receipt time, without a second in-process snapshot cache. A single script compares collection times, replaces the snapshot and sets its expiry. Both modes retain a snapshot for ten minutes from its original receipt time. Duplicate or older samples do not renew expiry; a report whose collection time is already ten minutes old is acknowledged but not cached. Snapshot freshness still follows its reported TTL. Expired entries return an empty snapshot; memory entries are removed lazily on reads and subsequent writes, without a background timer. Unexpired Redis snapshots can survive a Dash restart while Redis retains them; memory snapshots cannot. Redis failures remain explicit errors rather than falling back to memory. Redis persistence and eviction follow the operator’s Redis configuration. Authentication and replacement share the node lifecycle lock. Committed node deletion revokes access and removes the cache entry; a Redis cleanup failure is logged and the key expires naturally. Key rotation preserves the snapshot.
 
+Snapshot reads use `/api/virt/{id}`. Guests require both `system_settings.pve_guest_visible` and host guest visibility. Guest responses omit IPs, IP observation metadata and raw collector errors; names require `pve_guest_names_visible`. Both switches default to false. Redaction affects each decoded response without changing the cached snapshot. History reads under `/api/virt/{id}/vms` require administrator authentication. The administrator-only capabilities endpoint remains available for installation diagnostics. VM history is read on demand from PVE RRD through the node query session and is not persisted by Dash. Per-node chart thresholds remain PostgreSQL configuration and are mirrored into node metadata in memory: CPU defaults to 80%, memory to 90%, and memory annotations are disabled by default. These settings annotate historical samples; they do not create alert events or notifications.
 
-## Node transport and PVE query ownership
+The PVE icon opens `/pve/{id}`, where VM selection belongs to the URL and snapshot/history request state belongs to the page. Snapshot reads refresh every 15 seconds; administrators fetch history when selecting a VM or range and on manual refresh. Stale snapshots remain distinguishable from fresh data and empty inventories.
+
+Privileged installation owns helper upgrades; node self-update never replaces it. Optional helper assets use `deploy/linux/pve-cache.env`; release.env v1 stays unchanged and legacy packages may omit helpers. New Dash updaters and PVE installers verify helper version/checksums. Older Dash updaters verify only their original seven assets; the PVE installer still verifies the helper before execution.
+
+### Node transport and PVE query ownership
 
 The application root constructs one shared `nodeingest.Receiver` and `nodesession.Hub` and passes them to the HTTP server. The HTTP server owns the `noderpc` adapter and closes node sessions during shutdown. HTTP and gRPC share the same acceptance functions; existing host metrics, traffic, uptime, alert and cache behavior is retained. The same listener accepts HTTP/1 and HTTP/2, including unencrypted HTTP/2 behind a trusted TLS proxy. The reserved `grpc_port` is not a second listener. Shutdown stops RPC sessions and drains HTTP requests concurrently under one ten-second budget. At the deadline, the HTTP server forcibly closes remaining connections before waiting for RPC cleanup.
 
@@ -173,3 +161,28 @@ Each Node session loop owns admission, cancellation and completion of at most 32
 The PVE root helper runs as `root:root` in `ithiltir-node-pve-cache.service`, owning collection and `/run/ithiltir-node/pve.sock`. PVE IPC requires the root UID and primary GID; the `--group` argument grants socket access to Node without changing the helper primary group. The socket is root-owned, mode 0660, and validates root UID or the runtime primary GID. It exposes `GET /snapshot` for completed in-memory observations, `GET /capabilities`, and validated `POST /history` requests, not arbitrary commands or PVE paths. Installation with `--pve` disables legacy PVE timers before enabling the service and configures the Node socket and `ITHILTIR_NODE_TRANSPORT=grpc` in `pve.conf`. Omitting PVE flags preserves that drop-in; `--no-pve` removes it, including its transport setting.
 
 History requires a fresh successful local VM inventory. Identical in-flight queries share one execution; the last waiter leaving cancels it. History processes use four dedicated execution slots and inherited per-VM history locks, held until process exit. QGA uses its own concurrency budget. The helper admits at most 32 distinct in-flight history queries, limits results to 2 MiB and 4096 points, caches success for 30 seconds and failures for 10 seconds, and applies a ten-second per-VM history failure cooldown across windows. The cache retains at most 128 entries and 16 MiB of result bytes; active responses can independently hold their bounded results. The cache owns an independent eight-second execution budget. Each remote waiter has a ten-second maximum budget; one waiter expiring does not cancel execution while others remain. VM history continues to use PVE RRD data without a Dash VM history table.
+
+## Access and deployment
+
+### Auth Boundaries
+
+Redis and memory authentication stores use EiluneKit's default limit of 255 unexpired sessions per user. Capacity rejection affects new logins only; existing sessions and refresh rotation remain usable. Session formats and the `auth:jwt:*` Redis namespace are preserved.
+
+| Area                                                  | Auth                                                                                        |
+| ----------------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| `/api/auth/login`                                     | admin password                                                                              |
+| `/api/auth/refresh`, `/api/auth/logout`               | `SameSite=Strict` refresh cookie + `X-CSRF-Token`                                           |
+| `/api/front/*`, `/api/metrics/*`, `/api/statistics/*` | optional bearer; anonymous requests are filtered by visibility settings                     |
+| `/api/node/*`                                         | `X-Node-Secret`                                                                             |
+| `/api/admin/*`                                        | `Authorization: Bearer <access_token>`                                                      |
+| `/deploy/*` packaged assets                           | `X-Node-Secret` or a temporary legacy upgrade token; install script templates remain public |
+
+### Frontend And Reverse Proxies
+
+In a [standard production deployment](https://www.ithiltir.dev/en/docs/Install/AllInOne), Dash, PostgreSQL with TimescaleDB, and Redis share one host. A reverse proxy on that host provides the public HTTPS endpoint.
+
+The frontend language store owns language selection and persistence under the `lang` localStorage key. If browser storage is unavailable, language changes remain effective for the current page session.
+
+Access logs and login/node-authentication rate limits trust forwarded client IP headers only from `http.trusted_proxies`. Header precedence follows EiluneKit defaults: `X-Forwarded-For`, `X-Real-IP`, `Forwarded`, `True-Client-IP`, then `CF-Connecting-IP`. This selection does not change the authenticated node IP observation rule, which uses the first `X-Forwarded-For` entry or the connection address.
+
+The frontend can run as a standalone dev server, but the runtime boundary stays same-origin. A dev proxy or production reverse proxy should forward `/api`, `/theme`, and `/deploy` to the backend while Dash serves the SPA at `/`. IP deployments may use HTTP; use HTTPS across untrusted networks because admin credentials and node secrets otherwise travel in plaintext. Do not point browser API requests directly at a cross-origin backend unless CORS, cookie, and CSRF policies are designed together.
