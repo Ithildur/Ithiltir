@@ -1,22 +1,39 @@
-# Ithiltir Dash [![release](https://img.shields.io/github/v/release/Ithildur/Ithiltir?label=release)](https://github.com/Ithildur/Ithiltir/releases) [![downloads](https://img.shields.io/github/downloads/Ithildur/Ithiltir/total?label=downloads)](https://github.com/Ithildur/Ithiltir/releases) [![license](https://img.shields.io/github/license/Ithildur/Ithiltir)](LICENSE)
+<div align="center">
 
-Ithiltir 是一套自托管服务器监控系统。Dash 集中接收节点上报，并在一个进程内提供看板、历史指标、流量统计、告警和管理功能。
+<h1>
+  <img src="web/public/brandlogo.svg" width="48" height="48" align="center" alt="">
+  Ithiltir Dash
+</h1>
 
-[English](README.md) · [在线文档](https://www.ithiltir.dev/) · [快速开始](https://www.ithiltir.dev/docs/QuickStart) · [Demo](https://demo.ithiltir.dev/) · [Ithiltir-node](https://github.com/Ithildur/Ithiltir-node)
+自托管服务器监控看板
+
+**[在线演示](https://demo.ithiltir.dev/)** · [安装](#安装) · [功能](#功能) · [文档](#文档)
+
+[![release](https://img.shields.io/github/v/release/Ithildur/Ithiltir?label=release)](https://github.com/Ithildur/Ithiltir/releases) [![downloads](https://img.shields.io/github/downloads/Ithildur/Ithiltir/total?label=downloads)](https://github.com/Ithildur/Ithiltir/releases) [![license](https://img.shields.io/github/license/Ithildur/Ithiltir)](LICENSE)
+
+**简体中文** · [English](README.md)
+
+</div>
+
+Ithiltir Dash 接收 [Ithiltir-node](https://github.com/Ithildur/Ithiltir-node) 上报的服务器指标，在一个进程内提供实时看板、历史查询、流量统计、告警和管理功能。
 
 ## 界面预览
 
-![Ithiltir Dash 看板](screenshot/zh.jpg)
+<p align="center">
+  <a href="screenshot/zh.jpg">
+    <img src="screenshot/zh.jpg" width="720" alt="Ithiltir Dash 看板">
+  </a>
+</p>
 
 ## 功能
 
-- CPU、内存、磁盘、网络、温度、进程和连接数实时指标
-- 基于 PostgreSQL 和 TimescaleDB 的在线率数据与指标历史
-- RAID、SMART、NVMe critical warning 和 Proxmox VE 宿主机支持
-- 月度流量、可配置账期和 95 计费数据
-- 告警规则、事件记录，以及 Telegram、SMTP 或 Webhook 通知
-- 节点分组、搜索、游客可见范围、主题和系统管理
-- Linux、macOS 和 Windows Node 安装与更新
+- **实时监控**　CPU、内存、磁盘、网络、温度、进程和连接数。
+- **历史查询**　PostgreSQL 和 TimescaleDB 存储在线率和历史指标。
+- **硬件与虚拟化**　RAID、SMART、NVMe 严重警告和 Proxmox VE 宿主机监控。
+- **流量统计**　月度用量、自定义账期和 95 百分位计费数据。
+- **告警**　规则、事件记录，以及 Telegram、SMTP 和 Webhook 通知。
+- **看板管理**　节点分组、搜索、游客可见范围、主题和系统设置。
+- **节点部署**　Linux、macOS 和 Windows 节点的安装与更新。
 
 ## 安装
 
@@ -31,13 +48,77 @@ cd Ithiltir-dash
 sudo bash install_dash_linux.sh --lang zh --service-manager=systemd
 ```
 
-AArch64 机器使用 `ARCH=arm64`。在受支持的 Debian/Ubuntu 系统上，安装器可以准备 PostgreSQL、TimescaleDB、Redis、数据库迁移和 systemd 服务；其他部署方式见[安装文档](https://www.ithiltir.dev/docs/Install)。
+AArch64 机器使用 `ARCH=arm64`。受支持的 Debian/Ubuntu 系统可由安装器准备依赖、执行迁移并注册 systemd 服务。
+
+在[标准生产部署](https://www.ithiltir.dev/docs/Install/AllInOne)中，Dash、PostgreSQL（含 TimescaleDB）和 Redis 同机运行，由本机反向代理提供 HTTPS 入口。
 
 安装器自动将数据库名和角色名转为小写。若名称是 PostgreSQL 保留关键字，安装器会提示重新输入该名称。
 
+### 接入第一台节点
+
 安装完成后访问配置的 `app.public_url`，在地址后加 `/login` 进入管理台。创建节点后，按管理台生成的命令安装 Node。
 
-正式发布包包含可选 PVE VM 监控所需的采集工具；自行打包时需使用 `scripts/package.sh --with-pve`。在管理台复制 PVE 安装命令并在 PVE 宿主机执行，安装器会启用 helper 和 gRPC 传输；反向代理需转发 gRPC。点击宿主机卡片上的 PVE 系统图标可查看 VM 列表；展开对应 VM 行即可查看详情和历史指标，也可全部展开或折叠。游客访问默认关闭，可在系统设置中开启，且仅适用于游客可见的宿主机。游客只看 VM 列表和当前指标，不展示 IP；名称需明确开启展示。详情和历史曲线仅管理员可见。安装、更新和停用方式见 [Node 部署说明](deploy/node/README.md#optional-pve-monitoring)。
+<details>
+<summary>可选：监控 Proxmox VE 虚拟机</summary>
+
+正式发布包包含可选 PVE VM 监控所需的采集工具；自行打包时需使用 `scripts/package.sh --with-pve`。
+
+- **安装**　在管理台复制 PVE 安装命令并在 PVE 宿主机执行，安装器会启用 helper 和 gRPC 传输；反向代理需转发 gRPC。
+- **查看**　点击宿主机卡片上的 PVE 系统图标可查看 VM 列表；展开对应 VM 行即可查看详情和历史指标，也可全部展开或折叠。
+- **游客权限**　游客访问默认关闭，可在系统设置中开启，且仅适用于游客可见的宿主机。游客只看 VM 列表和当前指标，不展示 IP；名称需明确开启展示。详情和历史曲线仅管理员可见。
+
+安装、更新和停用方式见 [Node 部署说明](deploy/node/README.md#optional-pve-monitoring)。
+
+</details>
+
+## 文档
+
+[在线文档](https://www.ithiltir.dev/)
+
+| 文档 | 内容 |
+| --- | --- |
+| [快速开始](https://www.ithiltir.dev/docs/QuickStart) | 安装 Dash 并接入第一个节点 |
+| [安装部署](https://www.ithiltir.dev/docs/Install) | 生产部署、反向代理、平台和升级 |
+| [运维](https://www.ithiltir.dev/docs/Operations) | 备份、保留期、容量、安全和排错 |
+| [站点品牌](https://www.ithiltir.dev/docs/Config/Themes#站点品牌) | 站点 Logo、网页标题和顶部栏文字 |
+| [架构](docs/architecture_CN.md) | 运行边界、数据流、存储、告警和更新 |
+| [API](docs/api_CN.md) | HTTP 路径和上报契约 |
+| [破坏性变更](docs/breaking-changes_CN.md) | 迁移和兼容说明 |
+
+## 运行注意事项
+
+- Dash 是单实例应用，不能让多个 Dash 进程同时写同一套状态。
+- `app.public_url` 必须是根路径 URL，不支持 `/dash` 这类路径前缀。
+- 不可信网络使用 HTTPS；浏览器、API、主题和部署资产应保持同源。
+- Redis 默认保存管理员会话和可丢弃的前台状态；`--no-redis` 模式改用进程内存，重启后失效。
+- `$DASH_HOME/configs/notify-config.key` 必须与 PostgreSQL 分开备份；丢失匹配密钥后无法恢复通知渠道凭据。
+
+数据保留、容量规划、备份、反向代理和安全说明见[运维文档](https://www.ithiltir.dev/docs/Operations)。
+
+### Node gRPC 传输
+
+为兼容已有安装，默认仍使用 HTTP。在 Node 服务环境中设置 `ITHILTIR_NODE_TRANSPORT=grpc`（仅 RPC）或 `auto`（发送报告前协商），再重启 Node。Dash 在现有 HTTP/2 监听地址提供 gRPC；代理必须以 gRPC 转发 `/ithiltir.node.v1.Node/`。这两种模式不会因鉴权或 TLS 失败降级到明文。PVE 历史还要求 root helper 常驻服务（`pve-cache`）。浏览器 API 和资产下载继续使用 HTTP。
+
+### 更新
+
+```bash
+/opt/Ithiltir-dash/bin/dash update --check
+sudo /opt/Ithiltir-dash/bin/dash update
+```
+
+默认通道安装稳定版。选择预发布版时使用 `--test`：
+
+```bash
+sudo /opt/Ithiltir-dash/bin/dash update --test
+```
+
+如果迁移中断后需要恢复：
+
+```bash
+sudo /opt/Ithiltir-dash/bin/dash update recover
+```
+
+跨越带迁移说明的版本前，先阅读[破坏性变更](docs/breaking-changes_CN.md)。
 
 ## 源码运行
 
@@ -53,33 +134,9 @@ go run ./cmd/dash -debug
 
 管理员密码至少包含 8 个可见 ASCII 字符，且不能有空白。完整源码配置见[快速开始](https://www.ithiltir.dev/docs/QuickStart)。
 
-## 运行注意事项
-
-- Dash 是单实例应用，不能让多个 Dash 进程同时写同一套状态。
-- `app.public_url` 必须是根路径 URL，不支持 `/dash` 这类路径前缀。
-- 不可信网络使用 HTTPS；浏览器、API、主题和部署资产应保持同源。
-- Redis 默认保存管理员会话和可丢弃的前台状态；`--no-redis` 模式改用进程内存，重启后失效。
-- `$DASH_HOME/configs/notify-config.key` 必须与 PostgreSQL 分开备份；丢失匹配密钥后无法恢复通知渠道凭据。
-
-数据保留、容量规划、备份、反向代理和安全说明见[运维文档](https://www.ithiltir.dev/docs/Operations)。
-
-## 更新
-
-```bash
-/opt/Ithiltir-dash/bin/dash update --check
-sudo /opt/Ithiltir-dash/bin/dash update
-sudo /opt/Ithiltir-dash/bin/dash update --test
-```
-
-默认通道安装稳定版，`--test` 选择预发布版。如果迁移中断后需要恢复：
-
-```bash
-sudo /opt/Ithiltir-dash/bin/dash update recover
-```
-
-跨越带迁移说明的版本前，先阅读[破坏性变更](docs/breaking-changes_CN.md)。
-
 ## 开发
+
+### 测试与检查
 
 ```bash
 go test ./...
@@ -88,14 +145,18 @@ bun run lint
 bun run typecheck
 ```
 
-数据库集成测试需要设置 `TEST_DATABASE_URL`。前端开发可以代理一个正在运行的 Dash：
+数据库集成测试需要设置 `TEST_DATABASE_URL`。
+
+### 前端开发
+
+前端开发服务器可以代理正在运行的 Dash：
 
 ```bash
 cd web
 FRONT_TEST_API=http://127.0.0.1:8080 bun run dev
 ```
 
-构建前端和 Linux 安装包：
+### 构建前端和 Linux 安装包
 
 ```bash
 bash scripts/build_frontend.sh -o build/frontend/dist
@@ -107,22 +168,6 @@ bash scripts/package.sh --with-pve \
 
 本地 Node 资产布局见 [deploy/node/README.md](deploy/node/README.md)。
 
-## 文档
-
-| 文档                                                 | 内容                               |
-| ---------------------------------------------------- | ---------------------------------- |
-| [快速开始](https://www.ithiltir.dev/docs/QuickStart) | 安装 Dash 并接入第一个节点         |
-| [安装部署](https://www.ithiltir.dev/docs/Install)    | 生产部署、反向代理、平台和升级     |
-| [运维](https://www.ithiltir.dev/docs/Operations)     | 备份、保留期、容量、安全和排错     |
-| [架构](docs/architecture_CN.md)                      | 运行边界、数据流、存储、告警和更新 |
-| [API](docs/api_CN.md)                                | HTTP 路径和上报契约                |
-| [破坏性变更](docs/breaking-changes_CN.md)            | 迁移和兼容说明                     |
-
 ## 许可证
 
 AGPL-3.0-only。见 [LICENSE](LICENSE)。
-
-
-## Node gRPC 传输
-
-为兼容已有安装，默认仍使用 HTTP。在 Node 服务环境中设置 `ITHILTIR_NODE_TRANSPORT=grpc`（仅 RPC）或 `auto`（发送报告前协商），再重启 Node。Dash 在现有 HTTP/2 监听地址提供 gRPC；代理必须以 gRPC 转发 `/ithiltir.node.v1.Node/`。这两种模式不会因鉴权或 TLS 失败降级到明文。PVE 历史还要求 root helper 常驻服务（`pve-cache`）。浏览器 API 和资产下载继续使用 HTTP。
