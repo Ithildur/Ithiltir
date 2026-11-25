@@ -393,6 +393,7 @@ export const zh = {
   admin_alerts_tab_rules: '规则设置',
   admin_alerts_tab_config: '告警配置',
   admin_alerts_tab_channels: '通知渠道',
+  admin_alerts_events_filters: '筛选条件',
   admin_alerts_events_filter_server: '服务器',
   admin_alerts_events_filter_status: '状态',
   admin_alerts_events_filter_metric: '监控指标',

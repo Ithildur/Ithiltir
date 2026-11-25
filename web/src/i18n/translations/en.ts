@@ -410,6 +410,7 @@ export const en = {
   admin_alerts_tab_rules: 'Rules',
   admin_alerts_tab_config: 'Alert Config',
   admin_alerts_tab_channels: 'Notification Channels',
+  admin_alerts_events_filters: 'Filters',
   admin_alerts_events_filter_server: 'Server',
   admin_alerts_events_filter_status: 'Status',
   admin_alerts_events_filter_metric: 'Metric',

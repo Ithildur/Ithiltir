@@ -1,7 +1,12 @@
 import React from 'react';
+import Activity from 'lucide-react/dist/esm/icons/activity';
+import Bell from 'lucide-react/dist/esm/icons/bell';
 import ChevronDown from 'lucide-react/dist/esm/icons/chevron-down';
+import Clock from 'lucide-react/dist/esm/icons/clock';
+import Filter from 'lucide-react/dist/esm/icons/filter';
 import RotateCcw from 'lucide-react/dist/esm/icons/rotate-ccw';
 import Search from 'lucide-react/dist/esm/icons/search';
+import Server from 'lucide-react/dist/esm/icons/server';
 import Button from '@components/ui/Button';
 import Card from '@components/ui/Card';
 import ComboboxSelect, { type ComboboxOption } from '@components/ui/ComboboxSelect';
@@ -31,11 +36,15 @@ interface Props {
 }
 
 const eventPageLimit = 200;
+const filterFieldClass =
+  'grid gap-1 text-xs font-semibold text-(--theme-fg-muted) max-md:col-span-2 max-md:grid-cols-[minmax(0,1fr)_minmax(0,2fr)] max-md:items-center max-md:gap-x-2';
 type AlertEventBounds = ReturnType<typeof alertEventRequestBounds>;
 
 export const AlertEventsPanel: React.FC<Props> = ({ searchParams, setSearchParams }) => {
   const { lang, t } = useI18n();
   const apiError = useApiErrorHandler();
+  const filtersId = React.useId();
+  const [mobileFiltersOpen, setMobileFiltersOpen] = React.useState(false);
   const [draft, setDraft] = React.useState<AlertEventFilter>(() =>
     alertEventFilterFromParams(searchParams),
   );
@@ -228,12 +237,80 @@ export const AlertEventsPanel: React.FC<Props> = ({ searchParams, setSearchParam
     [t],
   );
 
+  const appliedFilters = [
+    {
+      label: t('admin_alerts_events_filter_status'),
+      value: statusOptions.find((option) => option.value === applied.status)?.label,
+      icon: Bell,
+    },
+    {
+      label: t('admin_alerts_events_filter_range'),
+      value: rangeOptions.find((option) => option.value === applied.range)?.label,
+      icon: Clock,
+    },
+    {
+      label: t('admin_alerts_events_filter_server'),
+      value:
+        applied.serverId > 0
+          ? servers.find((server) => server.id === applied.serverId)?.name || `#${applied.serverId}`
+          : '',
+      icon: Server,
+    },
+    {
+      label: t('admin_alerts_events_filter_metric'),
+      value: applied.metric && alertMetricName(applied.metric, t),
+      icon: Activity,
+    },
+  ];
+
   return (
-    <div className="space-y-4 md:space-y-6">
-      <Card className="p-3 md:p-4">
-        <div className="flex flex-col gap-3">
-          <div className="grid gap-2 md:grid-cols-[minmax(12rem,1.1fr)_9rem_minmax(11rem,1fr)_9rem_auto_auto] md:items-end">
-            <label className="grid gap-1 text-xs font-semibold text-(--theme-fg-muted)">
+    <div className="space-y-3 md:space-y-6">
+      <Card>
+        <div className="flex min-h-11 md:hidden">
+          <ul
+            aria-label={t('admin_alerts_events_filters')}
+            className="flex min-w-0 flex-1 flex-wrap content-center gap-1.5 px-2 py-1.5"
+          >
+            {appliedFilters.map(
+              ({ label, value, icon: Icon }) =>
+                value && (
+                  <li
+                    key={label}
+                    className="inline-flex max-w-full items-center gap-1 rounded-md border border-(--theme-border-subtle) bg-(--theme-bg-muted) px-1.5 py-1 text-xs text-(--theme-fg-default)"
+                  >
+                    <Icon
+                      className="size-3.5 shrink-0 text-(--theme-fg-muted)"
+                      aria-hidden="true"
+                    />
+                    <span className="sr-only">{label} </span>
+                    <span className="min-w-0 wrap-anywhere">{value}</span>
+                  </li>
+                ),
+            )}
+          </ul>
+          <Button
+            variant="plain"
+            size="none"
+            icon={Filter}
+            aria-label={t('admin_alerts_events_filters')}
+            aria-expanded={mobileFiltersOpen}
+            aria-controls={filtersId}
+            onClick={() => setMobileFiltersOpen((open) => !open)}
+            className="group w-14 shrink-0 rounded-l-none rounded-r-sm border-l border-(--theme-border-subtle) text-(--theme-fg-default) hover:bg-(--theme-bg-muted) focus-visible:ring-inset"
+          >
+            <ChevronDown
+              className="size-3.5 text-(--theme-fg-muted) group-aria-expanded:rotate-180"
+              aria-hidden="true"
+            />
+          </Button>
+        </div>
+
+        <div
+          id={filtersId}
+          className={`${mobileFiltersOpen ? 'block' : 'hidden'} p-3 max-md:border-t max-md:border-(--theme-border-subtle) md:block md:p-4`}
+        >
+          <div className="grid grid-cols-2 gap-2 md:grid-cols-[minmax(12rem,1.1fr)_9rem_minmax(11rem,1fr)_9rem_auto_auto] md:items-end">
+            <label className={filterFieldClass}>
               {t('admin_alerts_events_filter_server')}
               <ComboboxSelect
                 value={String(draft.serverId)}
@@ -249,7 +326,7 @@ export const AlertEventsPanel: React.FC<Props> = ({ searchParams, setSearchParam
                 }
               />
             </label>
-            <label className="grid gap-1 text-xs font-semibold text-(--theme-fg-muted)">
+            <label className={filterFieldClass}>
               {t('admin_alerts_events_filter_status')}
               <ComboboxSelect
                 value={draft.status}
@@ -266,7 +343,7 @@ export const AlertEventsPanel: React.FC<Props> = ({ searchParams, setSearchParam
                 }
               />
             </label>
-            <label className="grid gap-1 text-xs font-semibold text-(--theme-fg-muted)">
+            <label className={filterFieldClass}>
               {t('admin_alerts_events_filter_metric')}
               <ComboboxSelect
                 value={draft.metric}
@@ -277,7 +354,7 @@ export const AlertEventsPanel: React.FC<Props> = ({ searchParams, setSearchParam
                 onChange={(value) => setDraft((current) => ({ ...current, metric: value }))}
               />
             </label>
-            <label className="grid gap-1 text-xs font-semibold text-(--theme-fg-muted)">
+            <label className={filterFieldClass}>
               {t('admin_alerts_events_filter_range')}
               <ComboboxSelect
                 value={draft.range}
@@ -294,11 +371,35 @@ export const AlertEventsPanel: React.FC<Props> = ({ searchParams, setSearchParam
                 }
               />
             </label>
+            {draft.range === 'custom' && (
+              <div className="col-span-full grid gap-2 md:row-start-2 md:mt-1 md:grid-cols-2">
+                <label className="grid gap-1 text-xs font-semibold text-(--theme-fg-muted)">
+                  {t('admin_alerts_events_filter_from')}
+                  <Input
+                    type="datetime-local"
+                    value={draft.fromLocal}
+                    onChange={(event) =>
+                      setDraft((current) => ({ ...current, fromLocal: event.target.value }))
+                    }
+                  />
+                </label>
+                <label className="grid gap-1 text-xs font-semibold text-(--theme-fg-muted)">
+                  {t('admin_alerts_events_filter_to')}
+                  <Input
+                    type="datetime-local"
+                    value={draft.toLocal}
+                    onChange={(event) =>
+                      setDraft((current) => ({ ...current, toLocal: event.target.value }))
+                    }
+                  />
+                </label>
+              </div>
+            )}
             <Button
               icon={Search}
               onClick={apply}
               disabled={!canSearch}
-              className="w-full md:w-auto"
+              className="w-full max-md:min-h-10 md:w-auto"
             >
               {t('admin_alerts_events_search')}
             </Button>
@@ -306,36 +407,11 @@ export const AlertEventsPanel: React.FC<Props> = ({ searchParams, setSearchParam
               variant="secondary"
               icon={RotateCcw}
               onClick={reset}
-              className="w-full md:w-auto"
+              className="w-full max-md:min-h-10 md:w-auto"
             >
               {t('admin_alerts_events_reset')}
             </Button>
           </div>
-
-          {draft.range === 'custom' && (
-            <div className="grid gap-2 md:grid-cols-2">
-              <label className="grid gap-1 text-xs font-semibold text-(--theme-fg-muted)">
-                {t('admin_alerts_events_filter_from')}
-                <Input
-                  type="datetime-local"
-                  value={draft.fromLocal}
-                  onChange={(event) =>
-                    setDraft((current) => ({ ...current, fromLocal: event.target.value }))
-                  }
-                />
-              </label>
-              <label className="grid gap-1 text-xs font-semibold text-(--theme-fg-muted)">
-                {t('admin_alerts_events_filter_to')}
-                <Input
-                  type="datetime-local"
-                  value={draft.toLocal}
-                  onChange={(event) =>
-                    setDraft((current) => ({ ...current, toLocal: event.target.value }))
-                  }
-                />
-              </label>
-            </div>
-          )}
         </div>
       </Card>
 
